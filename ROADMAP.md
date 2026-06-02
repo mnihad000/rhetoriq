@@ -112,11 +112,11 @@ Each phase has a clear goal, task checklist, which files you are working in, and
 **Goal:** Repo exists, folder structure is correct, local infrastructure runs.
 **Estimated time:** 1 week
 
-- [ ] Create GitHub repo named `rhetoriq`
-- [ ] Create the full folder structure from README.md
-- [ ] Place all `.md` documentation files in their correct locations
-- [ ] Install local tools: Docker Desktop, Python 3.11+, Node.js 18+, kubectl
-- [ ] Create `.env.example` with all environment variable keys (no values yet)
+- [X] Create GitHub repo named `rhetoriq`
+- [X] Create the full folder structure from README.md
+- [X] Place all `.md` documentation files in their correct locations
+- [X] Install local tools: Docker Desktop, Python 3.11+, Node.js 18+, kubectl
+- [X] Create `.env.example` with all environment variable keys (no values yet)
 - [ ] Write `docker-compose.yml` that starts Kafka, Zookeeper, PostgreSQL, Elasticsearch, Neo4j, Redis
 - [ ] Verify all containers start cleanly with `docker-compose up -d`
 - [ ] Run the Kafka topic creation script from KAFKA.md
