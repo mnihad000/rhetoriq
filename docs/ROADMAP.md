@@ -1,397 +1,472 @@
-# RhetoriQ â€” Roadmap & Progress Tracker
+# RhetoriQ Roadmap
 
-> You are an intermediate developer with full-stack experience and database knowledge. You have never used Docker, Kafka, or Kubernetes before. You have 5-10 hours per week. This roadmap is built around that reality. Every phase is sequenced so you are never building on a foundation you do not understand yet. Do not skip phases.
+RhetoriQ already has a working, tested MVP. This roadmap separates that product baseline from the larger distributed-system architecture described elsewhere in the repository.
 
----
+The two tracks are intentionally developed together:
 
-## Part 1 â€” Things To Learn Before Writing Any Code
+- The **Product and Agent Track** turns the current MVP into a polished, deployable resume project.
+- The **Production Architecture Track** evolves the MVP toward Kafka, Flink, specialized databases, Kubernetes, and cloud infrastructure.
 
-You do not need to master these. You need to understand them well enough to not be confused when you encounter them in the codebase. At 5-10hrs/week expect **3-4 weeks** here. Do not rush this â€” every hour here saves 5 hours of confusion later.
+Status labels used throughout this document:
 
----
-
-### 1. Docker (1-2 days)
-Without Docker you cannot run this project locally at all. Everything â€” Kafka, all four databases, every service â€” runs in Docker.
-
-**What to learn:**
-- What a container is and why it exists
-- `docker build`, `docker run`, `docker ps`, `docker logs`
-- How to write a basic `Dockerfile`
-- What `docker-compose` is and how to run multiple containers together
-- Volumes and environment variables in Docker
-
-**Resource:** https://docs.docker.com/get-started/ â€” Parts 1 through 4 only.
-
-**You are ready when:** You can write a Dockerfile for a Python script, run it, and spin up Postgres + Redis together with a single `docker-compose up`.
+- **Completed** — implemented and verified in the current repository.
+- **In Progress** — partially implemented or actively being hardened.
+- **Next** — the next major implementation priority.
+- **Planned** — designed but not implemented in the current runtime.
+- **Optional** — valuable expansion that is not required for the core project.
 
 ---
 
-### 2. Kafka (2-3 days)
-Kafka is the nervous system of RhetoriQ. Every service talks to every other service through Kafka. Understand this before writing a single scraper.
+## Current Working Baseline
 
-**What to learn:**
-- What a message broker is and why you would use one instead of direct API calls
-- What topics, producers, and consumers are
-- What consumer groups are and why they matter
-- What partitions are and why they enable parallelism
-- How to produce and consume messages in Python with `kafka-python`
+**Status: Completed**
 
-**Resource:** https://developer.confluent.io/courses/apache-kafka/events/ â€” first 6 modules only, free.
+The current repository is a functional narrative-investigation MVP, not an empty scaffold.
 
-**You are ready when:** You can spin up Kafka with Docker Compose, write a Python producer that sends a message, and a Python consumer that reads it.
+### Frontend
 
----
+- React 19, TypeScript, Vite, and Tailwind CSS application.
+- Landing and dashboard experiences with a trending narrative feed, investigation entry points, and recent persisted investigations.
+- Client-side routing for dashboard and investigation workspaces.
+- Responsive investigation page with loading, running, unavailable, and completed states.
+- Narrative provenance flowchart, timeline-oriented source exploration, evidence gaps, claim ledger, agent debate, and final report presentation.
+- Live backend API integration with demo fallback behavior.
+- Production frontend build passes.
 
-### 3. Kubernetes Basics (2-3 days)
-You will not write complex K8s configs from scratch early on â€” the manifests are already documented. But you need to understand what Kubernetes is doing so you are not lost when pods crash.
+### Backend API and Persistence
 
-**What to learn:**
-- What Kubernetes is and why you would use it over plain Docker
-- What a Pod, Deployment, and Service are
-- Basic `kubectl` commands: `get pods`, `logs`, `describe`, `apply`
-- What namespaces are
-- How env vars and secrets work in a manifest
+- FastAPI application with health, embedding health, ingestion, GDELT search, trending, investigation, graph, timeline, mutation, receipts, debate, and report functionality.
+- SQLite-backed persistence for investigation plans, retrieved documents, intermediate artifacts, and final workspaces.
+- Recent-investigation listing and workspace reload support.
+- Background execution for supervised research runs with frontend polling.
+- Optional Redis-backed caching, agent memory, phrase storage, and vector retrieval.
+- Demo and live operating modes with graceful degradation when optional services are unavailable.
 
-**Resource:** https://kubernetes.io/docs/tutorials/kubernetes-basics/ â€” all 6 modules, about 3 hours.
+### Investigation and Agent Pipeline
 
-**You are ready when:** You can read a Kubernetes deployment manifest and understand every field without confusion.
+- Query planner that produces topics, subquestions, search queries, retrieval lanes, uncertainty requirements, and stop conditions.
+- Retriever with iterative query generation, source-lane planning, page fetching, normalization, deduplication, relevance scoring, and source profiling.
+- Supervised multi-pass research loop with evidence-gap-driven retries.
+- Deterministic and model-assisted artifacts for:
+  - source diversity;
+  - timeline construction;
+  - counter-narratives;
+  - narrative-family grouping;
+  - provenance tracing;
+  - gap analysis;
+  - skeptic review;
+  - analyst synthesis;
+  - claim counterpoints;
+  - receipts and claim grounding;
+  - claim and gap ledgers;
+  - agent debate;
+  - final report assembly.
+- Gemini, Groq, local Ollama, fixture, and deterministic mock model-client paths.
+- Local embedding and optional Redis vector-memory support.
 
----
+### Data and Trending Baseline
 
-### 4. Python Async (1 day)
-The storage worker writes to 4 databases in parallel using `asyncio`. If you have never written async Python, spend one day here.
+- Direct document ingestion and normalization.
+- GDELT search and ingestion support.
+- Hacker News ingestion through the public Algolia API.
+- Trending discovery orchestration, persistence, ranking, snapshots, cache support, and investigation creation.
+- Demo trending data when live discovery cannot produce a publishable snapshot.
 
-**What to learn:**
-- `async def`, `await`, `asyncio.gather()`
-- When to use async vs threads
+### Cleanup and Verification
 
-**Resource:** https://realpython.com/async-io-python/ â€” first half only.
+- Browserbase, Arize, Band, Tavily, and SerpAPI integrations have been removed from active code, configuration, routes, dependencies, UI types, and tests.
+- The removal is documented in [LEGACY_SAAS_REMOVAL.md](LEGACY_SAAS_REMOVAL.md).
+- Current verification baseline:
+  - 183 backend tests pass;
+  - 10 backend tests are skipped for unavailable optional runtime dependencies;
+  - Python source compilation passes;
+  - the frontend production build passes.
 
-**You are ready when:** You can write a function that makes 3 HTTP requests in parallel with `asyncio.gather()`.
+### Known MVP Boundary
 
----
+Live internet search is temporarily unconfigured. The planner and retriever still decide what to search, produce follow-up queries, and preserve retrieval lanes through the `SearchProvider` abstraction. The next implementation phase will add model-native web research behind that boundary.
 
-### 5. FastAPI (1 day)
-The backend API is FastAPI. If you have only used Flask or Express before, it will feel familiar but Pydantic and dependency injection are new concepts worth learning properly.
-
-**What to learn:**
-- Routes, path params, query params
-- Pydantic models for validation
-- `Depends()` for dependency injection
-- WebSocket endpoints
-- Running with `uvicorn`
-
-**Resource:** https://fastapi.tiangolo.com/tutorial/ â€” first 10 sections only.
-
-**You are ready when:** You can build a small API with Pydantic models and a working WebSocket endpoint.
-
----
-
-### 6. LangChain Basics (1-2 days)
-The agent is a LangChain ReAct agent. You do not need to be an LLM expert â€” you need to understand how tools and the reasoning loop work.
-
-**What to learn:**
-- What an LLM agent is vs a plain LLM call
-- The ReAct (Reason + Act) loop
-- How to define a tool with `@tool`
-- How to create and run an `AgentExecutor`
-
-**Resource:** https://python.langchain.com/docs/tutorials/agents/ â€” quickstart and tools sections only.
-
-**You are ready when:** You can build a LangChain agent with 2 custom tools and watch it reason step by step in your terminal.
+The current MVP does **not** claim that LangChain, React Query, Sigma.js, WebSockets, PostgreSQL, Kafka, Flink, Elasticsearch, Neo4j, Docker orchestration, Kubernetes, Terraform, ArgoCD, Prometheus, or Grafana are implemented.
 
 ---
 
-## Part 2 â€” The Build Phases
+## Track A — Product and Agent
 
-Each phase has a clear goal, task checklist, which files you are working in, and a "you are done when" condition. Do not move to the next phase until that condition is met.
+### A1. Documentation and Baseline Hardening
 
----
+**Status: In Progress**
 
-## âœ… Phase 0 â€” Project Setup
-**Goal:** Repo exists, folder structure is correct, local infrastructure runs.
-**Estimated time:** 1 week
+**Estimate: 1–2 weeks**
 
-- [X] Create GitHub repo named `rhetoriq`
-- [X] Create the full folder structure from README.md
-- [X] Place all `.md` documentation files in their correct locations
-- [X] Install local tools: Docker Desktop, Python 3.11+, Node.js 18+, kubectl
-- [X] Create `.env.example` with all environment variable keys (no values yet)
-- [ ] Write `docker-compose.yml` that starts Kafka, Zookeeper, PostgreSQL, Elasticsearch, Neo4j, Redis
-- [ ] Verify all containers start cleanly with `docker-compose up -d`
-- [ ] Run the Kafka topic creation script from KAFKA.md
-- [ ] Send a test message to `raw.reddit` and consume it to confirm Kafka works end to end
+#### Goals
 
-**Files:** `docker-compose.yml`, `.env.example`, `scripts/create_topics.sh`
+- Align the README and frontend, backend, agent, testing, and troubleshooting documentation with the code that actually exists.
+- Remove mojibake and other encoding corruption from project-authored Markdown.
+- Document accurate local startup commands, ports, environment variables, demo behavior, and optional dependencies.
+- Clearly label current implementation versus target architecture throughout the documentation.
+- Remove stale references to deleted sponsor integrations and unimplemented libraries.
 
-**You are done when:** `docker-compose up -d` starts cleanly and you can send and receive a Kafka test message.
+#### Dependencies
 
----
+- Current MVP baseline.
+- Completed legacy SaaS removal.
 
-## ðŸ”² Phase 1 â€” Reddit Scraper
-**Goal:** Real Reddit data is flowing into Kafka.
-**Estimated time:** 1-2 weeks
+#### Completion condition
 
-- [ ] Get Reddit API credentials at reddit.com/prefs/apps
-- [ ] Install: `pip install praw kafka-python redis`
-- [ ] Write `backend/scrapers/reddit_scraper.py` following SERVICES.md
-- [ ] Implement the exact message schema from KAFKA.md
-- [ ] Add Redis bloom filter for deduplication
-- [ ] Run the scraper and verify posts appear in Kafka UI at localhost:8080
-- [ ] Write `Dockerfile.reddit-scraper`
-- [ ] Verify the containerized version still produces messages
-
-**Files:** `backend/scrapers/reddit_scraper.py`, `backend/Dockerfile.reddit-scraper`, `backend/scrapers/requirements.txt`
-
-**You are done when:** Real Reddit posts appear on `raw.reddit` in Kafka UI in real time.
+All project-authored Markdown renders cleanly, contains no broken local links or conflict markers, and accurately describes both the current runtime and future architecture.
 
 ---
 
-## ðŸ”² Phase 2 â€” Remaining Scrapers
-**Goal:** All 4 remaining data sources flowing into Kafka.
-**Estimated time:** 2 weeks
+### A2. Model-Native Internet Research
 
-Build in this order â€” simplest to most complex:
+**Status: Next**
 
-- [ ] `rss_scraper.py` â€” feedparser, publishes to `raw.news`
-- [ ] `news_scraper.py` â€” NewsAPI, publishes to `raw.news`
-- [ ] `gdelt_scraper.py` â€” GDELT CSV polling every 15 minutes, publishes to `raw.gdelt`
-- [ ] `cspan_scraper.py` â€” C-SPAN API, publishes to `raw.speeches`
-- [ ] `run_all.py` â€” starts all scrapers in parallel using `multiprocessing`
-- [ ] Write a Dockerfile for each scraper
-- [ ] Test each scraper individually in Kafka UI before moving to the next
+**Estimate: 2–3 weeks**
 
-**Files:** `backend/scrapers/*.py`, `backend/scrapers/run_all.py`
+#### Goals
 
-**You are done when:** All 4 raw Kafka topics are receiving live messages simultaneously.
+- Implement model-native web search behind the existing `SearchProvider` interface.
+- Keep query choice under agent control: the planner and retriever continue generating initial queries, follow-up searches, contradiction searches, official-source searches, and provenance searches.
+- Normalize model-discovered sources into the existing `SearchResult`, page-fetching, document-normalization, receipt, and persistence pipeline.
+- Preserve source URL, title, snippet, search query, retrieval lane, and citation metadata.
+- Add bounded retries, timeouts, quota handling, duplicate suppression, partial-result behavior, and clear warnings when search is unavailable.
+- Support trending discovery without restoring Tavily or SerpAPI.
 
----
+#### Dependencies
 
-## ðŸ”² Phase 3 â€” Flink Processor
-**Goal:** Raw messages are cleaned, embedded, and anomalies are detected.
-**Estimated time:** 2-3 weeks
+- A1 documentation and configuration cleanup.
+- Existing planner, retriever, `SearchProvider`, page fetcher, and document normalizer.
 
-This is the most technically complex phase. Take your time and test each step individually before wiring them together.
+#### Completion condition
 
-- [ ] Install: `pip install apache-flink transformers torch sentence-transformers beautifulsoup4`
-- [ ] Download HuggingFace models locally (prevents re-downloading on every run):
-  - `sentence-transformers/all-MiniLM-L6-v2`
-  - `dslim/bert-base-NER`
-- [ ] Write and test the cleaning step in isolation â€” strip HTML, normalize timestamps, truncate
-- [ ] Write and test the NER entity extraction step â€” run it on a sample Reddit post and verify it returns persons/orgs/locations
-- [ ] Write and test the embedding step â€” verify it outputs a list of 384 floats
-- [ ] Write and test the anomaly detection step â€” tumbling window, baseline comparison, spike threshold
-- [ ] Wire all steps together in `flink_job.py`
-- [ ] Send a test message to `raw.reddit`, verify a processed document appears on `documents.processed` with an embedding
-- [ ] Manually publish a fake anomaly payload to `anomalies.detected` and verify the format is correct
-
-**Files:** `backend/processors/flink_job.py`, `backend/Dockerfile.flink-processor`
-
-**You are done when:** A message on `raw.reddit` results in a processed document with a 384-float embedding on `documents.processed`, and spike detection publishes to `anomalies.detected`.
+A live investigation can start from a user question, let the agents determine what to search, retrieve and persist real public-web sources, and produce a cited report without Tavily or SerpAPI.
 
 ---
 
-## ðŸ”² Phase 4 â€” Storage Layer
-**Goal:** Processed documents written to all 4 databases.
-**Estimated time:** 2 weeks
+### A3. Investigation Quality and Evaluation
 
-- [ ] Run the full PostgreSQL DDL from BACKEND.md
-- [ ] Run `CREATE EXTENSION vector;` to enable pgvector
-- [ ] Create the Elasticsearch index with the mapping from BACKEND.md
-- [ ] Run the Neo4j constraints and indexes from BACKEND.md
-- [ ] Write `storage_worker.py` that consumes `documents.processed`
-- [ ] Implement parallel writes to all 4 databases with `asyncio.gather()`
-- [ ] Implement Neo4j edge creation between documents sharing entities within a 24hr window
-- [ ] Write a test script `scripts/verify_storage.py` that queries all 4 databases and prints document counts
-- [ ] Run the full pipeline for 30 minutes and verify documents appear everywhere
+**Status: Planned**
 
-**Files:** `backend/processors/storage_worker.py`, `backend/Dockerfile.storage-worker`, `scripts/setup_databases.sql`, `scripts/verify_storage.py`
+**Estimate: 3–5 weeks**
 
-**You are done when:** After 30 minutes of running the full pipeline, `verify_storage.py` shows documents in all 4 databases with embeddings, full text, and graph edges present.
+#### Goals
 
----
+- Improve semantic evidence matching beyond lexical overlap while retaining deterministic auditability.
+- Strengthen source classification, primary-source detection, date confidence, provenance links, and duplicate-cluster handling.
+- Improve contradiction analysis, claim rejection, claim softening, uncertainty language, and unsupported-claim filtering.
+- Define evaluation fixtures for origin uncertainty, conflicting evidence, duplicated reporting, sparse evidence, unavailable pages, and misleading chronology.
+- Add measurable quality checks for citation completeness, evidence diversity, provenance confidence, and overclaim prevention.
 
-## ðŸ”² Phase 5 â€” The Agent
-**Goal:** The agent autonomously investigates anomalies end to end.
-**Estimated time:** 2-3 weeks
+#### Dependencies
 
-This is the most exciting phase. The project becomes alive here. Build and test each tool individually before combining them.
+- A2 model-native internet research.
+- Stable retrieved-document and receipt contracts.
 
-- [ ] Get model-provider API key at platform.openai.com
-- [ ] Install: `pip install langchain langchain-openai`
-- [ ] Build and test each tool in isolation with a simple test script:
-  - [ ] `semantic_search` â€” verify it returns semantically relevant docs from pgvector
-  - [ ] `graph_trace` â€” verify it returns a spread path from Neo4j
-  - [ ] `full_text_search` â€” verify it returns phrase matches with timestamps from Elasticsearch
-  - [ ] `get_source_profile` â€” verify it returns source metadata from Redis/Postgres
-  - [ ] `synthesize_report` â€” verify configured LLM returns a coherent markdown report given fake findings
-- [ ] Wire all 5 tools into a LangChain ReAct AgentExecutor using the prompts from AGENT.md
-- [ ] Publish a fake anomaly to `anomalies.detected` and watch the full reasoning trace in your terminal
-- [ ] Verify the completed report appears on `investigations.complete` in the correct schema from KAFKA.md
-- [ ] Read the reasoning trace â€” does the agent make sensible decisions? Tweak the system prompt if not
+#### Completion condition
 
-**Files:** `backend/agent/agent.py`, `backend/agent/tools.py`, `backend/Dockerfile.agent`
-
-**You are done when:** A fake anomaly on Kafka results in a complete configured LLM synthesized investigation report on `investigations.complete` within 2 minutes.
+The evaluation suite demonstrates that difficult and low-evidence investigations produce cautious, cited output and reject or soften conclusions that the retrieved record cannot support.
 
 ---
 
-## ðŸ”² Phase 6 â€” Backend API
-**Goal:** A fully working REST API and WebSocket server.
-**Estimated time:** 1-2 weeks
+### A4. Frontend Completion
 
-Build endpoints in this order â€” health first so you can always verify DB connectivity:
+**Status: Planned**
 
-- [ ] Set up FastAPI project structure from BACKEND.md
-- [ ] Set up database connection dependencies
-- [ ] Implement JWT authentication
-- [ ] `GET /health` â€” verifies all 4 database connections are live
-- [ ] `GET /investigations` and `GET /investigations/{id}`
-- [ ] `GET /narratives/active` and `GET /narratives/trending`
-- [ ] `GET /search/phrases` and `GET /search/semantic`
-- [ ] `GET /graph/{investigation_id}`
-- [ ] Kafka consumer for `investigations.complete` topic
-- [ ] WebSocket endpoint with ConnectionManager
-- [ ] Redis caching layer for all cacheable endpoints
-- [ ] Test every single endpoint in Swagger UI at localhost:8000/docs before moving on
+**Estimate: 2–4 weeks**
 
-**Files:** `backend/api/main.py`, `backend/api/routers/*.py`, `backend/api/services/*.py`
+#### Goals
 
-**You are done when:** Every endpoint in BACKEND.md returns correct data in Swagger UI and the WebSocket pushes a live event when you publish a test message to `investigations.complete`.
+- Improve final-report readability and navigation between claims, receipts, sources, timeline events, gaps, and provenance nodes.
+- Add source filtering, investigation search/history, and richer source-detail views.
+- Replace polling with live progress updates after backend event streaming is implemented.
+- Complete keyboard navigation, focus management, contrast checks, semantic labeling, and reduced-motion behavior.
+- Add frontend component tests and end-to-end coverage for the main investigation flow.
 
----
+#### Dependencies
 
-## ðŸ”² Phase 7 â€” Frontend
-**Goal:** A working dashboard you can demo to anyone.
-**Estimated time:** 2-3 weeks
+- Stable API contracts from A2 and A3.
+- Backend event-stream interface before replacing polling.
 
-Always build static/hardcoded first, then wire up real data. Never try to build the component and integrate the API at the same time.
+#### Completion condition
 
-- [ ] Set up React + TypeScript + Vite project
-- [ ] Install all dependencies from FRONTEND.md
-- [ ] Set up TailwindCSS
-- [ ] Layout component â€” sidebar + header with hardcoded nav
-- [ ] Dashboard page with hardcoded placeholder data
-- [ ] Wire Dashboard to real API with React Query
-- [ ] LiveFeed with hardcoded events, then wire WebSocket
-- [ ] TrendingCard and TimelineChart with Recharts
-- [ ] Investigation page â€” ReportViewer, SpreadTimeline, AmplifierList
-- [ ] SpreadGraph with Sigma.js â€” allocate the most time here, it is the hardest component
-- [ ] Search page
-- [ ] Loading states, error states, empty states for every component
-- [ ] Final polish â€” spacing, colors, responsiveness
-
-**Files:** `frontend/src/**`
-
-**You are done when:** You open the dashboard, see live narratives in the feed, click into a real investigation, and the Sigma.js spread graph renders with real nodes and edges.
+A user can create, monitor, reload, inspect, and navigate a real investigation end to end; accessibility checks pass; and automated tests cover the primary dashboard-to-report journey.
 
 ---
 
-## ðŸ”² Phase 8 â€” Kubernetes Local
-**Goal:** The entire system runs on Kubernetes locally with minikube.
-**Estimated time:** 1-2 weeks
+### A5. Deployable MVP
 
-- [ ] Install minikube: `brew install minikube`
-- [ ] Start cluster: `minikube start --memory=8192 --cpus=4`
-- [ ] Write K8s manifests for all 10 services following SERVICES.md and INFRASTRUCTURE.md
-- [ ] Write ConfigMap for shared non-secret env vars
-- [ ] Write Secrets manifest for API keys
-- [ ] Deploy: `kubectl apply -f k8s/manifests/ -n rhetoriq`
-- [ ] Verify all pods running: `kubectl get pods -n rhetoriq`
-- [ ] Test the full pipeline end to end on K8s â€” does data still flow?
-- [ ] Set up HPA for Flink processor
-- [ ] Verify liveness and readiness probes are passing on all pods
+**Status: Planned**
 
-**Files:** `k8s/manifests/**`
+**Estimate: 2–3 weeks**
 
-**You are done when:** The entire pipeline runs on minikube and you can reach the frontend at the minikube service URL.
+#### Goals
 
----
+- Containerize the current frontend and backend.
+- Add production-safe environment configuration, CORS restrictions, request limits, secret handling, structured logs, and health probes.
+- Add CI that runs backend tests, Python compilation, documentation checks, and the frontend production build.
+- Deploy a public MVP with persistent investigation storage and documented operational limits.
+- Publish a concise demo script and architecture summary suitable for a portfolio or interview.
 
-## ðŸ”² Phase 9 â€” CI/CD
-**Goal:** Every push to main automatically tests and deploys.
-**Estimated time:** 1 week
+#### Dependencies
 
-- [ ] Write GitHub Actions CI workflow â€” runs pytest on every PR
-- [ ] Write Docker build and push workflow for merges to main
-- [ ] Install ArgoCD on minikube following INFRASTRUCTURE.md
-- [ ] Create ArgoCD Application pointing at `k8s/manifests/`
-- [ ] Push a test commit and verify the full flow: GitHub Actions runs â†’ Docker image built â†’ ArgoCD deploys â†’ no manual commands needed
+- A1 documentation hardening.
+- A2 live research for a fully live demo; demo-mode deployment may happen earlier.
+- A4 frontend acceptance checks.
 
-**Files:** `.github/workflows/ci.yml`, `argocd-app.yaml`
+#### Completion condition
 
-**You are done when:** A git push triggers automatic testing, Docker build, and ArgoCD deployment without you running a single command manually.
+Every push is automatically validated, a reproducible containerized deployment is documented, and a public instance can complete or replay an investigation without manual database repair.
 
 ---
 
-## ðŸ”² Phase 10 â€” Observability
-**Goal:** You can see what every part of the system is doing in Grafana.
-**Estimated time:** 1 week
+## Track B — Production Architecture
 
-- [ ] Install Prometheus + Grafana via Helm following INFRASTRUCTURE.md
-- [ ] Add `prometheus_client` metrics to every Python service
-- [ ] Build Kafka Health dashboard: consumer lag, messages/sec, broker disk
-- [ ] Build Agent dashboard: investigations/hr, duration p95, model-provider cost/day, failed investigations
-- [ ] Build Infrastructure dashboard: pod CPU/memory per node group
-- [ ] Set up alert for Kafka consumer lag exceeding 1000 messages
+This track implements the larger distributed architecture described in [ARCHITECTURE.md](ARCHITECTURE.md), [KAFKA.md](KAFKA.md), [SERVICES.md](SERVICES.md), and [INFRASTRUCTURE.md](INFRASTRUCTURE.md). These phases remain unchecked because their runtime implementations do not yet exist in this repository.
 
-**Files:** `k8s/manifests/monitoring/`, metrics instrumentation in each service
+### B1. PostgreSQL and pgvector Migration
 
-**You are done when:** Grafana shows live metrics for every service, database, and Kafka topic.
+**Status: Planned**
 
----
+**Estimate: 2–3 weeks**
 
-## ðŸ”² Phase 11 â€” AWS Deployment (Optional)
-**Goal:** RhetoriQ runs in production on AWS with a live URL.
-**Estimated time:** 2-3 weeks
+#### Goals
 
-Only do this if you want to go the extra mile. A live URL on your resume is a significant signal.
+- Define migrations for investigations, documents, artifacts, claims, receipts, sources, and trending snapshots.
+- Move durable workspace persistence from SQLite to PostgreSQL.
+- Move production vector retrieval to pgvector while preserving the current repository and service boundaries.
+- Provide a repeatable development migration and seed workflow.
 
-- [ ] Create AWS account, configure CLI
-- [ ] Write Terraform modules from INFRASTRUCTURE.md
-- [ ] `terraform apply` â€” provisions EKS, MSK, RDS, ElastiCache
-- [ ] Push Docker images to AWS ECR
-- [ ] Deploy to EKS
-- [ ] Set up AWS Secrets Manager
-- [ ] Configure domain + SSL
-- [ ] ArgoCD on EKS for production GitOps
+#### Dependencies
 
-**Files:** `infra/terraform/**`
+- Stable MVP schemas.
+- Containerized local PostgreSQL.
+
+#### Completion condition
+
+The full backend test suite runs against PostgreSQL, persisted workspaces survive restarts, and retrieval queries return validated pgvector results.
 
 ---
 
-## Full Timeline Estimate
+### B2. Source Connector Expansion
 
-| Phase | Time at 5-10hrs/week |
-|---|---|
-| Pre-work | 3-4 weeks |
-| Phase 0 â€” Setup | 1 week |
-| Phase 1 â€” Reddit scraper | 1-2 weeks |
-| Phase 2 â€” All scrapers | 2 weeks |
-| Phase 3 â€” Flink processor | 2-3 weeks |
-| Phase 4 â€” Storage layer | 2 weeks |
-| Phase 5 â€” Agent | 2-3 weeks |
-| Phase 6 â€” Backend API | 1-2 weeks |
-| Phase 7 â€” Frontend | 2-3 weeks |
-| Phase 8 â€” Kubernetes | 1-2 weeks |
-| Phase 9 â€” CI/CD | 1 week |
-| Phase 10 â€” Observability | 1 week |
-| **Total** | **~5-6 months** |
+**Status: Planned**
 
-5-6 months is not a long time for a project of this caliber. Most developers never build something this architecturally complex at all.
+**Estimate: 3–5 weeks**
+
+#### Goals
+
+- Implement production connectors for Reddit, RSS/news, GDELT, speeches, and selected community sources.
+- Normalize every source into a shared document contract.
+- Add rate-limit handling, pagination, checkpoints, deduplication, and source-specific tests.
+- Preserve source timestamps, canonical URLs, collection timestamps, and provenance metadata.
+
+#### Dependencies
+
+- B1 durable document storage.
+- Reviewed data-source and legal/terms-of-use constraints.
+
+#### Completion condition
+
+Each connector can resume after interruption, emits schema-valid documents, and passes fixture-based tests for pagination, rate limits, duplicates, and malformed source data.
 
 ---
 
-## Rules
+### B3. Kafka Contracts and Replayable Ingestion
 
-**1. Never skip a phase.** Every phase is a foundation for the next. Kafka must work before Flink. Flink must work before the agent.
+**Status: Planned**
 
-**2. Meet the "you are done when" condition before moving on.** It is not optional.
+**Estimate: 2–3 weeks**
 
-**3. Commit after every completed task.** Format: `feat(phase-2): add GDELT scraper with 15min polling`
+#### Goals
 
-**4. Two hour rule.** If you are stuck on one thing for more than 2 hours, ask for help. Stack Overflow, Reddit, or Claude. Burning a full day on one bug is demoralizing and unnecessary.
+- Implement versioned Kafka schemas and topic creation for raw documents, processed documents, detected signals, investigation requests, stage events, and completed reports.
+- Define partition keys, consumer groups, retries, dead-letter topics, and idempotency rules.
+- Adapt source connectors and downstream consumers to event-driven operation.
 
-**5. Keep a devlog.** Create `DEVLOG.md` and write one paragraph after every session â€” what you built, what broke, what you learned. When an interviewer asks "walk me through building this," your devlog is your cheat sheet. It also proves you actually built it yourself.
+#### Dependencies
 
+- B2 normalized connector contract.
+- Local Docker-based Kafka environment.
 
+#### Completion condition
+
+A source event can be produced, consumed, replayed, and processed idempotently; incompatible schemas are rejected; and failed messages reach a dead-letter topic with diagnostic context.
+
+---
+
+### B4. Flink Processing and Anomaly Detection
+
+**Status: Planned**
+
+**Estimate: 3–5 weeks**
+
+#### Goals
+
+- Implement text normalization, entity and phrase extraction, embedding generation, and event-time handling.
+- Implement windowed narrative-frequency baselines and configurable spike detection.
+- Handle late events, checkpointing, replay, and deterministic output schemas.
+- Publish processed documents and detected narrative signals through Kafka.
+
+#### Dependencies
+
+- B3 Kafka contracts.
+- Stable embedding and normalization behavior.
+
+#### Completion condition
+
+Replaying a known event fixture produces reproducible processed documents and anomaly signals, including correct behavior for late, duplicate, and out-of-order events.
+
+---
+
+### B5. Elasticsearch and Neo4j
+
+**Status: Planned**
+
+**Estimate: 3–4 weeks**
+
+#### Goals
+
+- Index normalized documents and phrases in Elasticsearch for exact, filtered, and time-bounded search.
+- Persist source, document, phrase, citation, mutation, and amplification relationships in Neo4j.
+- Replace local graph approximations with graph-backed provenance queries where appropriate.
+- Add consistency checks between PostgreSQL, Elasticsearch, and Neo4j records.
+
+#### Dependencies
+
+- B1 canonical relational identifiers.
+- B4 processed-document events.
+
+#### Completion condition
+
+The same investigation can retrieve semantically related documents from pgvector, phrase matches from Elasticsearch, and an explainable provenance path from Neo4j using consistent document identifiers.
+
+---
+
+### B6. Kubernetes Local Deployment
+
+**Status: Planned**
+
+**Estimate: 2–4 weeks**
+
+#### Goals
+
+- Create manifests or Helm charts for connectors, Kafka consumers, Flink jobs, backend API, frontend, and required data services.
+- Add ConfigMaps, Secrets, resource requests, readiness probes, liveness probes, and horizontal-scaling rules.
+- Run the system locally with minikube or kind.
+
+#### Dependencies
+
+- Container images for deployable services.
+- B3–B5 service boundaries and runtime dependencies.
+
+#### Completion condition
+
+A clean local cluster deployment starts all required workloads, passes probes, processes a seeded event end to end, and exposes the frontend and API through documented endpoints.
+
+---
+
+### B7. Terraform, CI/CD, and GitOps
+
+**Status: Planned**
+
+**Estimate: 2–4 weeks**
+
+#### Goals
+
+- Add GitHub Actions for tests, builds, image publishing, vulnerability checks, and manifest validation.
+- Provision target infrastructure through Terraform modules.
+- Deploy through ArgoCD with environment-specific configuration and rollback support.
+- Prevent direct, undocumented production changes.
+
+#### Dependencies
+
+- B6 stable deployment manifests.
+- Selected cloud and container registry.
+
+#### Completion condition
+
+A merge to the deployment branch creates validated images and causes ArgoCD to deploy the declared version, with a tested rollback path and no required manual cluster edits.
+
+---
+
+### B8. Observability and Operations
+
+**Status: Planned**
+
+**Estimate: 2–3 weeks**
+
+#### Goals
+
+- Instrument services with Prometheus-compatible metrics and structured logs.
+- Add Grafana dashboards for connector health, Kafka lag, Flink throughput, retrieval latency, investigation duration, failures, and model usage.
+- Add distributed tracing using an open standard rather than a sponsor-specific service.
+- Define alerts, service-level objectives, backup procedures, replay procedures, and incident runbooks.
+
+#### Dependencies
+
+- B6 deployed services.
+- B7 stable environments and release process.
+
+#### Completion condition
+
+Operators can identify where a failed or delayed investigation stalled, receive actionable alerts, restore persisted state, and replay affected events using documented runbooks.
+
+---
+
+### B9. Managed-Cloud Deployment
+
+**Status: Optional**
+
+**Estimate: 3–6 weeks**
+
+#### Goals
+
+- Deploy the production architecture to a selected cloud provider.
+- Use managed services where they reduce operational risk without weakening portability.
+- Add domain, TLS, secrets management, backups, cost budgets, and autoscaling.
+- Run a documented load and failure-recovery exercise.
+
+#### Dependencies
+
+- B7 reproducible infrastructure and delivery.
+- B8 observability and operational readiness.
+
+#### Completion condition
+
+The production environment survives a documented load test and controlled service failure, restores from backup, stays within its cost budget, and serves the public application over TLS.
+
+---
+
+## Recommended Sprint Order
+
+Product and infrastructure work should alternate so the project remains demoable while architectural depth grows.
+
+| Order | Focus | Status |
+|---|---|---|
+| 1 | A1 Documentation and baseline hardening | In Progress |
+| 2 | A2 Model-native internet research | Next |
+| 3 | A3 Investigation quality and evaluation | Planned |
+| 4 | A5 Deployable MVP foundation | Planned |
+| 5 | B1 PostgreSQL and pgvector migration | Planned |
+| 6 | A4 Frontend completion | Planned |
+| 7 | B2 Source connector expansion | Planned |
+| 8 | B3 Kafka contracts and replayable ingestion | Planned |
+| 9 | B4 Flink processing and anomaly detection | Planned |
+| 10 | B5 Elasticsearch and Neo4j | Planned |
+| 11 | B6 Kubernetes local deployment | Planned |
+| 12 | B7 CI/CD and GitOps | Planned |
+| 13 | B8 Observability and operations | Planned |
+| 14 | B9 Managed-cloud deployment | Optional |
+
+Phase estimates are planning ranges, not a single five-to-six-month promise. Actual timing depends on whether a sprint prioritizes product quality, distributed-systems learning, or infrastructure depth.
+
+---
+
+## Roadmap Rules
+
+1. Keep the current MVP runnable while replacing individual subsystems.
+2. Mark a phase completed only when its measurable completion condition passes.
+3. Do not describe documented target architecture as implemented runtime behavior.
+4. Preserve evidence-first language: “first observed in the available dataset” is not proof of definitive origin.
+5. Require tests and migration or rollback notes for changes to persistence, event contracts, or public APIs.
+6. Update this roadmap whenever a phase changes status or its completion condition changes materially.
