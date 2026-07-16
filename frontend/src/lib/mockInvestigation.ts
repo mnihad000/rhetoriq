@@ -843,10 +843,6 @@ const agentDebate: LiveAgentDebateResult = {
   limitations: ["Debate output is static in frontend-only mode."],
   confidence_score: 0.8,
   confidence_label: "high",
-  band_chat_id: null,
-  band_sync_status: "not_configured",
-  band_message_count: 0,
-  band_sync_error: null,
   cached: true,
 };
 
@@ -1097,7 +1093,6 @@ export function getMockInvestigationWorkspace(
       investigation_id: investigationId || DEFAULT_INVESTIGATION_ID,
       plan_snapshot: nextPlan,
     },
-    source_verification: null,
     receipts: {
       ...receipts,
       investigation_id: investigationId || DEFAULT_INVESTIGATION_ID,

@@ -38,19 +38,7 @@ class Settings(BaseSettings):
     EMBEDDING_LOCAL_ONLY: bool = False
     EMBEDDING_CACHE_TTL_SECONDS: int = 86400
 
-    # Other sponsor integrations
-    BROWSERBASE_API_KEY: str = ""
-    BROWSERBASE_PROJECT_ID: str = ""
-    ARIZE_API_KEY: str = ""
-    ARIZE_SPACE_ID: str = ""   # was ARIZE_SPACE_KEY — matches .env and arize-otel env var
-    BAND_API_KEY: str = ""
-    BAND_AGENT_ID: str = ""
-    BAND_ROOM_ID: str = ""
-    BAND_REST_URL: str = "https://app.band.ai"
-    BAND_WS_URL: str = "wss://app.band.ai/api/v1/socket/websocket"
-    TAVILY_API_KEY: str = ""
-    SERPAPI_API_KEY: str = ""
-    SEARCH_PROVIDER: str = "tavily"
+    # Investigation runtime
     INVESTIGATION_DB_PATH: str = "investigations.sqlite3"
     RETRIEVER_MAX_ROUNDS: int = 3
     RETRIEVER_MAX_RESULTS_PER_QUERY: int = 5

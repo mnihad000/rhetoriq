@@ -63,7 +63,7 @@ from .investigation import (
     TimelineResult,
 )
 from .narrative import NarrativeCluster, MutationEntry
-from .report import InvestigationReport, EvidenceItem, ArizeEval
+from .report import InvestigationReport, EvidenceItem
 from .graph import NarrativeGraph, GraphNode, GraphEdge
 
 __all__ = [
@@ -116,7 +116,6 @@ __all__ = [
     "MutationEntry",
     "InvestigationReport",
     "EvidenceItem",
-    "ArizeEval",
     "NarrativeGraph",
     "GraphNode",
     "GraphEdge",

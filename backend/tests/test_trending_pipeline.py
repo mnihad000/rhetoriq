@@ -22,7 +22,7 @@ from models.trending import (
     TrendingTopic,
 )
 from services.investigation_repository import InvestigationRepository
-from services.search_provider import MultiSearchProvider, SerpApiSearchProvider
+from services.search_provider import MultiSearchProvider
 from services.trending_ranker import TrendingRanker
 from services.trending_repository import TrendingRepository
 from services.trending_service import TrendingService
@@ -71,7 +71,7 @@ def _topic(topic_id: str = "topic_1", *, generated_at: datetime | None = None) -
         timeline=[TopicTimelinePoint(timestamp=generated_at, count=5)],
         velocity_score=2.4,
         persistence_runs=2,
-        provider_mix={"serpapi": 3, "tavily": 2},
+        provider_mix={"test_search": 5},
         supporting_document_ids=["doc1"],
     )
 
@@ -146,51 +146,9 @@ class _RuntimeStub:
         return self.last_error
 
 
-def test_serpapi_provider_normalizes_results(monkeypatch):
-    fake_payload = {
-        "news_results": [
-            {
-                "title": "Energy tax story",
-                "link": "https://example.com/story",
-                "snippet": "A story about an energy tax phrase.",
-                "source": {"name": "Example News"},
-            }
-        ]
-    }
-
-    class _Response:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return fake_payload
-
-    class _Client:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def get(self, url, params):
-            return _Response()
-
-    monkeypatch.setattr("httpx.Client", lambda timeout=30: _Client())
-    monkeypatch.setattr(
-        "services.search_provider.get_settings",
-        lambda: type("Settings", (), {"SERPAPI_API_KEY": "test-key"})(),
-    )
-
-    provider = SerpApiSearchProvider()
-    results = provider.search("energy tax", type("TW", (), {"label": "recent"})(), ["national_news"], 5)
-    assert len(results) == 1
-    assert results[0].provider == "serpapi"
-    assert results[0].metadata["source_name_hint"] == "Example News"
-
-
 def test_multi_provider_orchestrates_discovery_and_enrichment():
     class _DiscoveryProvider:
-        name = "serpapi"
+        name = "discovery_stub"
 
         def __init__(self):
             self.calls = []
@@ -200,7 +158,7 @@ def test_multi_provider_orchestrates_discovery_and_enrichment():
             return []
 
     class _EnrichmentProvider:
-        name = "tavily"
+        name = "enrichment_stub"
 
         def __init__(self):
             self.calls = []
@@ -218,7 +176,10 @@ def test_multi_provider_orchestrates_discovery_and_enrichment():
 
     assert discovery.calls == [("discovery", "energy tax", 4)]
     assert enrichment.calls == [("enrichment", "energy tax counter narrative", 3)]
-    assert provider.provider_mix == {"discovery": "serpapi", "enrichment": "tavily"}
+    assert provider.provider_mix == {
+        "discovery": "discovery_stub",
+        "enrichment": "enrichment_stub",
+    }
 
 
 def test_discovery_agent_builds_broad_queries_and_reuses_prior_topics():
@@ -242,7 +203,7 @@ def test_discovery_agent_uses_specific_title_window_for_generic_seed():
         url="https://example.com/housing",
         snippet="Housing affordability crisis grows in major cities.",
         rank=1,
-        provider="serpapi",
+        provider="test_search",
     )
 
     phrase = agent._canonical_phrase("housing", result)
@@ -266,9 +227,9 @@ def test_trending_repository_and_ranker_build_publishable_topic(tmp_path):
     ]
 
     for doc in docs[:2]:
-        repo.save_discovery_document("disc_1", doc, canonical_url=doc.url, domain=doc.source_name, provider="serpapi", search_query="energy tax")
+        repo.save_discovery_document("disc_1", doc, canonical_url=doc.url, domain=doc.source_name, provider="test_search", search_query="energy tax")
     for doc in docs:
-        repo.save_discovery_document("disc_2", doc, canonical_url=doc.url, domain=doc.source_name, provider="tavily", search_query="energy tax narrative")
+        repo.save_discovery_document("disc_2", doc, canonical_url=doc.url, domain=doc.source_name, provider="test_search", search_query="energy tax narrative")
 
     ranker = TrendingRanker()
     topics = ranker.rank(repo.list_discovery_documents(), now=now, max_topics=5)
@@ -295,9 +256,9 @@ def test_trending_ranker_avoids_boundary_duplicate_phrase_artifacts(tmp_path):
     ]
 
     for doc in docs[:2]:
-        repo.save_discovery_document("disc_1", doc, canonical_url=doc.url, domain=doc.source_name, provider="serpapi", search_query="housing")
+        repo.save_discovery_document("disc_1", doc, canonical_url=doc.url, domain=doc.source_name, provider="test_search", search_query="housing")
     for doc in docs:
-        repo.save_discovery_document("disc_2", doc, canonical_url=doc.url, domain=doc.source_name, provider="tavily", search_query="housing crisis")
+        repo.save_discovery_document("disc_2", doc, canonical_url=doc.url, domain=doc.source_name, provider="test_search", search_query="housing crisis")
 
     ranker = TrendingRanker()
     topics = ranker.rank(repo.list_discovery_documents(), now=now, max_topics=5)
@@ -439,7 +400,7 @@ def test_trending_service_uses_retriever_to_expand_open_ended_candidates(tmp_pat
                                 url=f"https://candidate-{index}.com/story",
                                 snippet="candidate",
                                 rank=index,
-                                provider="serpapi",
+                                provider="test_search",
                                 metadata={"source_name_hint": None},
                             )
                         },
@@ -502,7 +463,7 @@ def test_trending_service_uses_retriever_to_expand_open_ended_candidates(tmp_pat
             )
 
     for document in initial_docs:
-        document.metadata = {"provider": "serpapi", "search_query": "breaking news today"}
+        document.metadata = {"provider": "test_search", "search_query": "breaking news today"}
         document.phrases = ["spacex ipo", "spacex ipo chatter"]
 
     retriever = _RetrieverStub()
@@ -577,7 +538,7 @@ def test_trending_service_only_reseeds_publishable_prior_topics(tmp_path):
 def test_trending_service_ranks_current_run_documents_only(tmp_path):
     repo = TrendingRepository(str(tmp_path / "trending.sqlite3"))
     runtime = _RuntimeStub()
-    now = datetime(2026, 6, 21, 9, 0, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     queries = [DiscoveryQuery(query="around world", provider_role="discovery", topic_seed="around world")]
     repo.create_run("disc_old", is_reseed=True, queries=queries)
     stale_docs = [
@@ -587,7 +548,7 @@ def test_trending_service_ranks_current_run_documents_only(tmp_path):
         _document("old4", "Public Opinion review", "https://d.com/old-4", now - timedelta(hours=1), "national_news"),
     ]
     for doc in stale_docs:
-        repo.save_discovery_document("disc_old", doc, canonical_url=doc.url, domain=doc.source_name, provider="serpapi", search_query="public opinion")
+        repo.save_discovery_document("disc_old", doc, canonical_url=doc.url, domain=doc.source_name, provider="test_search", search_query="public opinion")
 
     fresh_docs = [
         _document("doc1", "SpaceX IPO chatter spreads", "https://e.com/story-1", now - timedelta(hours=4), "national_news"),
@@ -618,7 +579,7 @@ def test_trending_service_ranks_current_run_documents_only(tmp_path):
                                 url=f"https://candidate-{index}.com/story",
                                 snippet="candidate",
                                 rank=index,
-                                provider="serpapi",
+                                provider="test_search",
                                 metadata={"source_name_hint": None},
                             )
                         },
@@ -649,7 +610,7 @@ def test_trending_service_ranks_current_run_documents_only(tmp_path):
             )
 
     for document in fresh_docs:
-        document.metadata = {"provider": "serpapi", "search_query": "breaking news today"}
+        document.metadata = {"provider": "test_search", "search_query": "breaking news today"}
         document.phrases = ["spacex ipo", "spacex ipo chatter"]
 
     snapshot = TrendingService(
@@ -681,7 +642,7 @@ def test_trending_ranker_filters_generic_reference_artifacts(tmp_path):
     docs[3].phrases = ["housing market"]
 
     for doc in docs:
-        repo.save_discovery_document("disc_1", doc, canonical_url=doc.url, domain=doc.source_name, provider="serpapi", search_query="public reaction today")
+        repo.save_discovery_document("disc_1", doc, canonical_url=doc.url, domain=doc.source_name, provider="test_search", search_query="public reaction today")
 
     topics = TrendingRanker().rank(repo.list_discovery_documents(), now=now, max_topics=5)
 

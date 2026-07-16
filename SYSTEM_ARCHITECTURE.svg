@@ -166,7 +166,7 @@
   <text x="1534" y="260" class="body">GDELT</text>
   <text x="1534" y="282" class="body">Hacker News Algolia</text>
   <text x="1534" y="304" class="body">Search-provider path</text>
-  <text x="1534" y="326" class="body">Tavily / SerpAPI</text>
+  <text x="1534" y="326" class="body">Model-native search (planned)</text>
 
   <rect x="1514" y="402" width="202" height="154" class="box"/>
   <text x="1534" y="428" class="label">Model providers</text>
@@ -176,10 +176,10 @@
   <text x="1534" y="518" class="body">wrapped behind model_client</text>
 
   <rect x="1514" y="594" width="202" height="154" class="box"/>
-  <text x="1534" y="620" class="label">Verification</text>
-  <text x="1534" y="644" class="body">Browser verification service</text>
-  <text x="1534" y="666" class="body">Confirms receipt pages and marks</text>
-  <text x="1534" y="688" class="body">verification state on evidence.</text>
+  <text x="1534" y="620" class="label">Receipt grounding</text>
+  <text x="1534" y="644" class="body">Retrieved-corpus evidence checks</text>
+  <text x="1534" y="666" class="body">Deeper external verification is</text>
+  <text x="1534" y="688" class="body">reserved for a future implementation.</text>
 
   <rect x="1514" y="786" width="202" height="134" class="lane"/>
   <text x="1534" y="814" class="pill">Integration posture</text>

@@ -1,12 +1,12 @@
 """
 Hardcoded demo corpus and pre-computed artifacts.
-All real integrations (Redis, Anthropic, Browserbase, Arize) replace these at swap-in time.
+Real services replace these fixtures outside demo mode.
 """
 
 from datetime import datetime, timezone
 from models.document import Document
 from models.narrative import NarrativeCluster, MutationEntry
-from models.report import InvestigationReport, EvidenceItem, ArizeEval
+from models.report import InvestigationReport, EvidenceItem
 from models.graph import NarrativeGraph, GraphNode, GraphEdge
 
 
@@ -705,14 +705,6 @@ DEMO_REPORTS: dict[str, InvestigationReport] = {
             "Confirm Senate Energy Committee hearing date and Senator Okafor's full statement via official congressional record.",
             "Contact Marcus Bell (Riverside County energy attorney) for expert comment on regulatory disclosure obligations.",
         ],
-        arize_eval=ArizeEval(
-            grounding_score_before=0.68,
-            grounding_score_after=0.91,
-            overclaim_risk_before="high",
-            overclaim_risk_after="low",
-            uncertainty_present=True,
-            revised_by_skeptic=True,
-        ),
         cached=False,
     ),
     "narrative_002": InvestigationReport(
@@ -790,18 +782,9 @@ DEMO_REPORTS: dict[str, InvestigationReport] = {
             "Request updated CBO immigration cost analysis to establish current evidentiary baseline.",
             "Identify and audit the three PAC-affiliated accounts mentioned in National Policy Tribune.",
         ],
-        arize_eval=ArizeEval(
-            grounding_score_before=0.74,
-            grounding_score_after=0.88,
-            overclaim_risk_before="medium",
-            overclaim_risk_after="low",
-            uncertainty_present=True,
-            revised_by_skeptic=True,
-        ),
         cached=False,
     ),
 }
-
 # ---------------------------------------------------------------------------
 # DEMO GRAPHS — pre-built narrative graphs
 # ---------------------------------------------------------------------------
@@ -848,108 +831,3 @@ DEMO_GRAPHS: dict[str, NarrativeGraph] = {
     ),
 }
 
-# ---------------------------------------------------------------------------
-# DEMO VERIFICATIONS — pre-built Browserbase receipt verification results
-# ---------------------------------------------------------------------------
-
-DEMO_VERIFICATIONS: dict[str, dict] = {
-    "doc_001": {
-        "doc_id": "doc_001",
-        "url": "https://reddit.com/r/energyconsumers/comments/abc001",
-        "verification_status": "verified",
-        "live_title": "Anyone else notice the hidden energy tax buried in your bill?",
-        "stored_title": "Anyone else notice the hidden energy tax buried in your bill?",
-        "live_date": "2026-06-01",
-        "stored_date": "2026-06-01",
-        "snippet_match": True,
-        "page_available": True,
-        "checked_at": "2026-06-06T18:00:00Z",
-    },
-    "doc_002": {
-        "doc_id": "doc_002",
-        "url": "https://energywatchdog.net/forum/t/hidden-energy-tax-2026",
-        "verification_status": "verified",
-        "live_title": "The hidden energy tax nobody is talking about",
-        "stored_title": "The hidden energy tax nobody is talking about",
-        "live_date": "2026-06-01",
-        "stored_date": "2026-06-01",
-        "snippet_match": True,
-        "page_available": True,
-        "checked_at": "2026-06-06T18:00:05Z",
-    },
-    "doc_003": {
-        "doc_id": "doc_003",
-        "url": "https://climateskepticboard.com/posts/hidden-energy-tax-rollout",
-        "verification_status": "verified",
-        "live_title": "Government-coordinated hidden energy tax already hitting ratepayers",
-        "stored_title": "Government-coordinated hidden energy tax already hitting ratepayers",
-        "live_date": "2026-06-01",
-        "stored_date": "2026-06-01",
-        "snippet_match": True,
-        "page_available": True,
-        "checked_at": "2026-06-06T18:00:10Z",
-    },
-    "doc_007": {
-        "doc_id": "doc_007",
-        "url": "https://springfieldgazette.com/news/2026/06/03/secret-energy-surcharge-investigation",
-        "verification_status": "verified",
-        "live_title": "Residents report secret energy surcharge on monthly bills",
-        "stored_title": "Residents report secret energy surcharge on monthly bills",
-        "live_date": "2026-06-03",
-        "stored_date": "2026-06-03",
-        "snippet_match": True,
-        "page_available": True,
-        "checked_at": "2026-06-06T18:00:15Z",
-    },
-    "doc_013": {
-        "doc_id": "doc_013",
-        "url": "https://energypolicyjournal.com/analysis/backdoor-tax-power-bills-2026",
-        "verification_status": "metadata_mismatch",
-        "live_title": "The backdoor energy charge: regulatory perspectives",
-        "stored_title": "The backdoor tax on power bills: what regulators are not saying",
-        "live_date": "2026-06-04",
-        "stored_date": "2026-06-04",
-        "snippet_match": False,
-        "page_available": True,
-        "mismatch_detail": "Title updated after publication. Original headline included 'tax' framing; current version uses 'charge.'",
-        "checked_at": "2026-06-06T18:00:20Z",
-    },
-    "doc_019": {
-        "doc_id": "doc_019",
-        "url": "https://congress.gov/hearings/energy/2026-06-06/sen-okafor-statement",
-        "verification_status": "unavailable",
-        "live_title": None,
-        "stored_title": "Senator Okafor opening statement — Energy Committee hearing on ratepayer burden",
-        "live_date": None,
-        "stored_date": "2026-06-06",
-        "snippet_match": False,
-        "page_available": False,
-        "unavailable_reason": "Page returned 404. Congressional record may not yet be published.",
-        "checked_at": "2026-06-06T18:00:25Z",
-        "ingestion_timestamp": "2026-06-06T10:00:00Z",
-    },
-    "imm_001": {
-        "doc_id": "imm_001",
-        "url": "https://reddit.com/r/borderdebate/comments/imm001",
-        "verification_status": "verified",
-        "live_title": "The same talking point about immigration costs keeps getting recycled",
-        "stored_title": "The same talking point about immigration costs keeps getting recycled",
-        "live_date": "2026-06-02",
-        "stored_date": "2026-06-02",
-        "snippet_match": True,
-        "page_available": True,
-        "checked_at": "2026-06-06T18:00:30Z",
-    },
-    "imm_004": {
-        "doc_id": "imm_004",
-        "url": "https://nationalpolicytribune.com/2026/06/04/immigration-talking-point-spread",
-        "verification_status": "verified",
-        "live_title": "How an outdated immigration cost figure became a 2026 talking point",
-        "stored_title": "How an outdated immigration cost figure became a 2026 talking point",
-        "live_date": "2026-06-04",
-        "stored_date": "2026-06-04",
-        "snippet_match": True,
-        "page_available": True,
-        "checked_at": "2026-06-06T18:00:35Z",
-    },
-}

@@ -27,7 +27,6 @@ from models.investigation import (
     EvidenceBudget,
 )
 from services.agent_debate_builder import build_agent_debate
-from services.band_room import get_band_room_sync
 from services.analyst_builder import build_analyst_result
 from services.claim_ledger_builder import build_claim_ledger
 from services.counter_narrative_builder import build_counter_narratives
@@ -38,9 +37,7 @@ from services.narrative_family_builder import build_narrative_family
 from services.provenance_trace_builder import build_provenance_trace
 from services.skeptic_builder import build_skeptic_review
 from services.source_diversity_builder import build_source_diversity
-from services.source_verification_builder import build_source_verification, verification_map_from_result
 from services.timeline_builder import build_timeline
-from services.verification import VerificationService
 
 
 class InvestigationRunner:
@@ -48,35 +45,10 @@ class InvestigationRunner:
         self,
         repository: InvestigationRepository,
         retriever: RetrieverAgent,
-        verifier: VerificationService,
     ) -> None:
         self._repository = repository
         self._retriever = retriever
-        self._verifier = verifier
         self._settings = get_settings()
-
-    def _publish_band_stage(
-        self,
-        investigation_id: str,
-        *,
-        stage: str,
-        role: str,
-        content: str,
-        confidence_label: str = "",
-    ) -> None:
-        try:
-            result = get_band_room_sync().sync_stage_event(
-                investigation_id=investigation_id,
-                stage=stage,
-                role=role,
-                content=content,
-                metadata={"confidence_label": confidence_label},
-            )
-            if result.status == "failed":
-                # Band is an observability/collaboration layer; never fail the investigation for it.
-                pass
-        except Exception:
-            pass
 
     def run(self, investigation_id: str, plan: InvestigationPlan, *, force_refresh: bool = False) -> InvestigationWorkspace:
         if not self._live_models_available():
@@ -122,77 +94,17 @@ class InvestigationRunner:
                 prior_result=prior_result,
                 prior_documents=prior_documents,
             )
-            self._publish_band_stage(
-                investigation_id,
-                stage="retrieval",
-                role="Retriever Agent",
-                content=(
-                    f"Pass {pass_number}: retrieved {retrieval.coverage_summary.total_documents} document(s) "
-                    f"across {retrieval.coverage_summary.unique_sources} source(s)."
-                ),
-                confidence_label=retrieval.evidence_coverage_confidence,
-            )
             documents = self._repository.get_retrieved_documents(investigation_id)
             source_diversity = build_source_diversity(investigation_id, run_plan, retrieval, documents)
             self._repository.save_source_diversity_result(source_diversity)
-            self._publish_band_stage(
-                investigation_id,
-                stage="source_diversity",
-                role="Source Diversity Agent",
-                content=(
-                    f"Pass {pass_number}: classified {source_diversity.classified_documents} document(s) "
-                    f"across {len(source_diversity.source_type_distribution)} source type(s)."
-                ),
-                confidence_label=source_diversity.confidence_label,
-            )
             timeline = build_timeline(investigation_id, run_plan, retrieval, documents)
             self._repository.save_timeline_result(timeline)
-            self._publish_band_stage(
-                investigation_id,
-                stage="timeline",
-                role="Timeline Agent",
-                content=(
-                    f"Pass {pass_number}: built {len(timeline.timeline_events)} timeline event(s); "
-                    f"first observed document is {timeline.first_observed_doc_id or 'unknown'}."
-                ),
-                confidence_label=timeline.confidence_label,
-            )
             counter_narratives = build_counter_narratives(investigation_id, run_plan, retrieval, documents)
             self._repository.save_counter_narrative_result(counter_narratives)
-            self._publish_band_stage(
-                investigation_id,
-                stage="counter_narratives",
-                role="Counter-Narrative Agent",
-                content=(
-                    f"Pass {pass_number}: identified {len(counter_narratives.counter_narratives)} "
-                    "counter-frame candidate(s)."
-                ),
-                confidence_label=counter_narratives.confidence_label,
-            )
             family = build_narrative_family(investigation_id, run_plan, retrieval, documents, timeline, counter_narratives)
             self._repository.save_narrative_family_result(family)
-            self._publish_band_stage(
-                investigation_id,
-                stage="narrative_family",
-                role="Narrative Family Agent",
-                content=(
-                    f"Pass {pass_number}: grouped narrative family '{family.family_title}' "
-                    f"with {len(family.child_narratives)} branch(es)."
-                ),
-                confidence_label=family.confidence_label,
-            )
             analyst = build_analyst_result(investigation_id, run_plan, retrieval, documents, timeline, counter_narratives)
             self._repository.save_analyst_result(analyst)
-            self._publish_band_stage(
-                investigation_id,
-                stage="analyst",
-                role="Analyst Agent",
-                content=(
-                    f"Pass {pass_number}: drafted synthesis with {len(analyst.candidate_claims)} "
-                    "candidate claim(s)."
-                ),
-                confidence_label=analyst.confidence_label,
-            )
             provenance = build_provenance_trace(investigation_id, run_plan, retrieval, documents)
             self._repository.save_provenance_trace_result(provenance)
             gap_analysis = build_gap_analysis(
@@ -218,13 +130,6 @@ class InvestigationRunner:
                 max_passes=max_passes,
             )
             self._repository.save_skeptic_review_result(skeptic_review)
-            self._publish_band_stage(
-                investigation_id,
-                stage="skeptic_review",
-                role="Skeptic Agent",
-                content=f"Pass {pass_number}: {skeptic_review.overall_decision}. {skeptic_review.reason}",
-                confidence_label=skeptic_review.overall_decision,
-            )
 
             pass_history.append(
                 ResearchPassSummary(
@@ -271,16 +176,6 @@ class InvestigationRunner:
             analyst,
         )
         self._repository.save_claim_counterpoint_result(claim_counterpoints)
-        self._publish_band_stage(
-            investigation_id,
-            stage="claim_counterpoints",
-            role="Claim Counterpoint Agent",
-            content=(
-                f"Matched {len(claim_counterpoints.pairs)} counterpoint pair(s); "
-                f"{len(claim_counterpoints.unmatched_claim_ids)} claim(s) remain unmatched."
-            ),
-            confidence_label=claim_counterpoints.confidence_label,
-        )
         report = build_final_report(
             investigation_id,
             run_plan,
@@ -292,49 +187,15 @@ class InvestigationRunner:
             analyst,
             claim_counterpoints,
         )
-        source_verification = build_source_verification(
-            investigation_id,
-            prior_documents,
-            cited_document_ids=self._cited_document_ids(report, claim_counterpoints),
-        )
-        self._repository.save_source_verification_result(source_verification, update_stage=False)
-        self._publish_band_stage(
-            investigation_id,
-            stage="source_verification",
-            role="Browserbase Verification Agent",
-            content=(
-                f"Checked {len(source_verification.receipts)} cited source(s): "
-                f"{source_verification.verified_count} verified, "
-                f"{source_verification.metadata_mismatch_count} metadata mismatch, "
-                f"{source_verification.unavailable_count} unavailable, "
-                f"{source_verification.pending_count} pending."
-            ),
-            confidence_label="source_verification",
-        )
         receipts = build_receipts_agent(
             investigation_id,
             run_plan,
             prior_documents,
             report,
             claim_counterpoints,
-            self._verification_map(prior_documents, report, claim_counterpoints, source_verification),
+            self._verification_map(report, claim_counterpoints),
         )
         self._repository.save_receipts_result(receipts)
-        try:
-            from services.arize_tracer import record_claim_grounding_eval
-            record_claim_grounding_eval(investigation_id, receipts.claim_receipts)
-        except Exception:
-            pass
-        self._publish_band_stage(
-            investigation_id,
-            stage="receipts",
-            role="Receipts Agent",
-            content=(
-                f"Reviewed {len(receipts.claim_receipts)} report claim receipt set(s) "
-                f"and {len(receipts.counter_claim_receipts)} counter-claim receipt set(s)."
-            ),
-            confidence_label=receipts.confidence_label,
-        )
         claim_ledger = build_claim_ledger(investigation_id, analyst, receipts, last_skeptic_review)
         self._repository.save_claim_ledger_result(claim_ledger)
         gap_ledger = GapLedgerResult(investigation_id=investigation_id, entries=last_gap_analysis.missing_evidence)
@@ -363,16 +224,6 @@ class InvestigationRunner:
         )
         report = self._filter_report_claims(report, claim_ledger)
         self._repository.save_final_report_result(report)
-        self._publish_band_stage(
-            investigation_id,
-            stage="final_report",
-            role="Final Report Agent",
-            content=(
-                f"Finalized report '{report.report_title}' with {len(report.key_claims)} key claim(s) "
-                f"and {report.confidence_label} confidence."
-            ),
-            confidence_label=report.confidence_label,
-        )
         debate = build_agent_debate(
             investigation_id,
             run_plan,
@@ -383,13 +234,6 @@ class InvestigationRunner:
             receipts,
             report,
         )
-        try:
-            sync = get_band_room_sync()
-            sync_result = sync.sync_debate(debate)
-            if sync_result.status != "not_configured":
-                debate = sync.apply_sync_result(debate, sync_result)
-        except Exception:
-            pass
         self._repository.save_agent_debate_result(debate)
 
         research_loop = ResearchLoopRunResult(
@@ -432,16 +276,11 @@ class InvestigationRunner:
 
     def _verification_map(
         self,
-        documents: list[Document],
         report: FinalReportResult,
         claim_counterpoints,
-        source_verification=None,
     ) -> dict[str, str]:
         doc_ids = self._cited_document_ids(report, claim_counterpoints)
-        verification_map = verification_map_from_result(source_verification)
-        for doc_id in doc_ids:
-            verification_map.setdefault(doc_id, "pending")
-        return verification_map
+        return {doc_id: "pending" for doc_id in doc_ids}
 
     def _cited_document_ids(self, report: FinalReportResult, claim_counterpoints) -> list[str]:
         doc_ids: list[str] = []

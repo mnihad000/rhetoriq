@@ -2,6 +2,8 @@ import os
 import sys
 from datetime import datetime, timezone
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from agents.retriever_agent import RetrieverAgent
@@ -16,8 +18,7 @@ from models.investigation import (
 from services.document_normalizer import DocumentNormalizer
 from services.investigation_repository import InvestigationRepository
 from services.page_fetcher import HttpPageFetcher
-from services.search_provider import CachedSearchProvider, TavilySearchProvider
-from services.verification import VerificationService
+from services.search_provider import CachedSearchProvider, UnconfiguredSearchProvider
 
 
 def _plan() -> InvestigationPlan:
@@ -38,45 +39,16 @@ def _plan() -> InvestigationPlan:
     )
 
 
-def test_tavily_provider_normalizes_results(monkeypatch):
-    fake_payload = {
-        "results": [
-            {
-                "title": "Hidden energy tax story",
-                "url": "https://example.com/story",
-                "content": "A story about the hidden energy tax.",
-                "score": 0.91,
-            }
-        ]
-    }
+def test_unconfigured_search_provider_explains_model_search_is_pending():
+    provider = UnconfiguredSearchProvider()
 
-    class _Response:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return fake_payload
-
-    class _Client:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def post(self, url, json):
-            return _Response()
-
-    monkeypatch.setattr("httpx.Client", lambda timeout=30: _Client())
-    monkeypatch.setattr(
-        "services.search_provider.get_settings",
-        lambda: type("Settings", (), {"TAVILY_API_KEY": "test-key", "SEARCH_PROVIDER": "tavily"})(),
-    )
-    provider = TavilySearchProvider()
-    results = provider.search("hidden energy tax", InvestigationPlanTimeWindow(label="all_time"), ["blog"], 5)
-    assert len(results) == 1
-    assert results[0].provider == "tavily"
-    assert results[0].url == "https://example.com/story"
+    with pytest.raises(RuntimeError, match="model-native search provider"):
+        provider.search(
+            "hidden energy tax",
+            InvestigationPlanTimeWindow(label="all_time"),
+            ["blog"],
+            5,
+        )
 
 
 def test_cached_search_provider_uses_cache_before_inner_provider():
@@ -166,7 +138,7 @@ def test_document_normalizer_builds_document():
         url="https://example.com/story",
         snippet="The hidden energy tax debate spread quickly.",
         rank=1,
-        provider="tavily",
+        provider="stub",
     )
     doc = normalizer.normalize(page, _plan(), result)
     assert isinstance(doc, Document)
@@ -200,7 +172,7 @@ def test_document_normalizer_normalizes_naive_published_at_to_utc():
         url="https://example.com/story",
         snippet="The hidden energy tax debate spread quickly.",
         rank=1,
-        provider="tavily",
+        provider="stub",
     )
     doc = normalizer.normalize(page, _plan(), result)
     assert doc.published_at is not None
@@ -395,34 +367,3 @@ def test_retriever_agent_scores_requested_source_types_and_receipt_ready_docs(tm
     top_doc, _ = scored[0]
     assert top_doc.id == "doc_official"
     assert "receipt_snippet" in (top_doc.metadata or {}).get("retrieval_reason_tags", [])
-
-
-def test_verification_service_returns_pending_in_live_mode(monkeypatch):
-    from config import get_settings
-
-    settings = get_settings()
-    monkeypatch.setattr(settings, "DEMO_MODE", False)
-
-    service = VerificationService()
-    doc = Document(
-        id="doc_live",
-        source_id="src_live",
-        source_name="example.com",
-        source_type="national_news",
-        url="https://example.com/story",
-        title="Example story",
-        published_at=datetime(2026, 6, 3, 10, 0, tzinfo=timezone.utc),
-        collected_at=datetime(2026, 6, 19, tzinfo=timezone.utc),
-        text="Example story body.",
-        snippet="Example story body.",
-        language="en",
-        content_type="article",
-        geographic_scope="national",
-        entities=[],
-        phrases=[],
-        metadata={},
-    )
-
-    result = service.verify_source(doc)
-    assert result["verification_status"] == "pending"
-    assert result["stored_title"] == "Example story"

@@ -1,9 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.arize_status import router as arize_status_router
-from api.band_status import router as band_status_router
-from api.browserbase_status import router as browserbase_status_router
 from api.health import router as health_router
 from api.ingest import router as ingest_router
 from api.narratives import router as narratives_router
@@ -28,9 +25,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(arize_status_router)
-app.include_router(band_status_router)
-app.include_router(browserbase_status_router)
 app.include_router(health_router)
 app.include_router(ingest_router)
 app.include_router(narratives_router)
@@ -43,9 +37,6 @@ def startup() -> None:
     import logging
     import threading
     import time
-
-    from services.arize_tracer import init_arize_tracing
-    init_arize_tracing()
 
     if settings.DEMO_MODE:
         return
@@ -96,7 +87,6 @@ def root() -> dict:
             "POST   /api/investigations/{id}/run  (execute supervised research loop)",
             "POST   /api/investigations/{id}/retrieve  (run retriever agent)",
             "POST   /api/investigations/{id}/source-diversity  (build deterministic source diversity artifact)",
-            "POST   /api/investigations/{id}/source-verification  (verify cited sources with Browserbase)",
             "POST   /api/investigations/{id}/timeline  (build deterministic timeline artifact)",
             "POST   /api/investigations/{id}/counter-narratives  (build counter-frame artifact)",
             "POST   /api/investigations/{id}/family  (build narrative family artifact)",
@@ -105,14 +95,10 @@ def root() -> dict:
             "POST   /api/investigations/{id}/receipts  (build claim grounding artifact)",
             "POST   /api/investigations/{id}/agent-debate  (build readable multi-agent debate summary)",
             "POST   /api/investigations/{id}/report  (assemble final investigation report)",
-            "GET    /api/arize/status  (Arize tracing config and span coverage)",
-            "GET    /api/band/status  (Band shared-agent-room sync configuration)",
-            "GET    /api/browserbase/status  (Browserbase config and verification cache)",
             "GET    /api/health/redis  (Redis connection and memory health)",
             "GET    /health/embeddings  (embedding model readiness and cache status)",
             "GET    /api/redis/status  (Redis health: cache, vector store, phrase store)",
             "GET    /api/graph/{narrative_id}",
-            "GET    /api/receipts/{narrative_id}",
             "GET    /api/mutations/{narrative_id}",
             "GET    /api/trending",
             "GET    /api/trending/status",

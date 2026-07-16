@@ -24,7 +24,6 @@ from models.investigation import (
     ReceiptsResult,
     RetrievalResult,
     SkepticReviewResult,
-    SourceVerificationResult,
     SourceDiversityResult,
     TimelineResult,
 )
@@ -121,7 +120,6 @@ class InvestigationRepository:
             analyst=self.get_analyst_result(investigation_id),
             claim_counterpoints=self.get_claim_counterpoint_result(investigation_id),
             receipts=self.get_receipts_result(investigation_id),
-            source_verification=self.get_source_verification_result(investigation_id),
             agent_debate=self.get_agent_debate_result(investigation_id),
             report=self.get_final_report_result(investigation_id),
         )
@@ -694,34 +692,6 @@ class InvestigationRepository:
             return None
         return ReceiptsResult.model_validate_json(row["result_json"])
 
-    def save_source_verification_result(self, result: SourceVerificationResult, *, update_stage: bool = True) -> None:
-        if update_stage:
-            now = datetime.now(timezone.utc).isoformat()
-            with self._connect() as conn:
-                conn.execute(
-                    """
-                    UPDATE investigations
-                    SET status = ?, current_stage = ?, updated_at = ?
-                    WHERE investigation_id = ?
-                    """,
-                    ("source_verification_completed", "source_verification", now, result.investigation_id),
-                )
-        self._save_json_artifact(
-            "source_verification_results",
-            result.investigation_id,
-            result.model_dump_json(),
-        )
-
-    def get_source_verification_result(self, investigation_id: str) -> SourceVerificationResult | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT result_json FROM source_verification_results WHERE investigation_id = ?",
-                (investigation_id,),
-            ).fetchone()
-        if not row:
-            return None
-        return SourceVerificationResult.model_validate_json(row["result_json"])
-
     def save_agent_debate_result(self, result: AgentDebateResult) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
@@ -970,13 +940,6 @@ class InvestigationRepository:
                 );
 
                 CREATE TABLE IF NOT EXISTS receipts_results (
-                    investigation_id TEXT PRIMARY KEY,
-                    result_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS source_verification_results (
                     investigation_id TEXT PRIMARY KEY,
                     result_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,

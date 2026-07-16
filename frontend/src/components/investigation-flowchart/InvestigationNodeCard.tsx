@@ -117,7 +117,7 @@ export default function InvestigationNodeCard({
               <circle cx="6" cy="6" r="5" stroke="currentColor" strokeWidth="1.4" />
               <path d="M3.5 6l1.8 1.8L8.5 4.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            Browserbase verified
+            Receipt verified
           </span>
         ) : null}
       </div>

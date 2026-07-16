@@ -15,13 +15,8 @@ export default function RecentInvestigations({
   return (
     <Section
       eyebrow="Recent Investigations"
-<<<<<<< HEAD
       title="Open a prepared investigation."
       description="Source-grounded investigations ready to explore — each with a full narrative tree, timeline, and receipts."
-=======
-      title="Return to live investigations."
-      description="Every card below is sourced from persisted backend investigations rather than seeded demo routes."
->>>>>>> origin/main
       className="pt-16"
     >
       {errorMessage ? (

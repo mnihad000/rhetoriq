@@ -14,7 +14,6 @@ Priority order when building a client for production:
 import json
 import logging
 import os
-import time
 from typing import Any
 
 from config import get_settings
@@ -269,92 +268,36 @@ class CachedModelClient(BaseModelClient):
 
 
 # ---------------------------------------------------------------------------
-# Traced wrapper — adds Arize/OTEL span around every generate_json() call
-# ---------------------------------------------------------------------------
-
-class TracedModelClient(BaseModelClient):
-    """
-    Transparent wrapper that emits one Arize span per generate_json() call.
-
-    Captures: model name, agent schema, prompt character count, response
-    character count, wall-clock latency, and success/error status.
-    Falls through silently when Arize tracing is not configured.
-    """
-
-    def __init__(self, inner: BaseModelClient, model_name: str = "") -> None:
-        self._inner = inner
-        self._model_name = model_name or type(inner).__name__.replace("ModelClient", "").lower()
-
-    def generate_json(self, system_prompt: str, user_prompt: str, schema_name: str) -> dict:
-        from services.arize_tracer import tracer_span, is_ready
-
-        if not is_ready():
-            return self._inner.generate_json(system_prompt, user_prompt, schema_name)
-
-        try:
-            from openinference.semconv.trace import SpanAttributes
-        except ImportError:
-            return self._inner.generate_json(system_prompt, user_prompt, schema_name)
-
-        span_name = f"{schema_name}/{self._model_name}"
-        extra = {
-            SpanAttributes.INPUT_VALUE: (system_prompt + "\n\n" + user_prompt)[:2000],
-            "rhetoriq.prompt_chars": len(system_prompt) + len(user_prompt),
-        }
-
-        t0 = time.monotonic()
-        with tracer_span(span_name, schema=schema_name, model=self._model_name, extra_attrs=extra) as span:
-            result = self._inner.generate_json(system_prompt, user_prompt, schema_name)
-            elapsed = round(time.monotonic() - t0, 3)
-            result_str = json.dumps(result)
-            span.set_attribute(SpanAttributes.OUTPUT_VALUE, result_str[:2000])
-            span.set_attribute("rhetoriq.response_chars", len(result_str))
-            span.set_attribute("rhetoriq.latency_seconds", elapsed)
-            logger.debug("Arize span: %s latency=%.3fs", span_name, elapsed)
-            return result
-
-
-# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
-def build_model_client(prefer: str = "gemini", trace: bool = True) -> BaseModelClient:
+def build_model_client(prefer: str = "gemini") -> BaseModelClient:
     """
     Build the best available model client in priority order.
 
     prefer = "gemini" | "groq" | "ollama" | "mock"
-    trace  = True wraps the result in TracedModelClient (Arize spans).
-
     Falls through to the next client if the preferred one is unavailable.
     Always returns a working client (MockModelClient at minimum).
     """
     chain: list[str] = _build_chain(prefer)
 
     inner: BaseModelClient = MockModelClient()
-    model_name = "mock"
-
     for name in chain:
         try:
             if name == "gemini":
                 inner = GeminiModelClient()
-                model_name = "gemini"
                 break
             elif name == "groq":
                 inner = GroqModelClient()
-                model_name = "groq"
                 break
             elif name == "ollama":
                 client = OllamaModelClient()
                 import httpx
                 httpx.get(f"{client._base_url}/api/tags", timeout=3).raise_for_status()
                 inner = client
-                model_name = "ollama"
                 break
         except Exception:
             continue
-
-    if trace:
-        return TracedModelClient(inner, model_name=model_name)
 
     return inner
 

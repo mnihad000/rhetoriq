@@ -198,7 +198,6 @@ export type InvestigationStage =
   | "analyst"
   | "skeptic"
   | "claim_counterpoint"
-  | "source_verification"
   | "receipts"
   | "agent_debate"
   | "report"
@@ -216,7 +215,6 @@ export type InvestigationPipelineStatus =
   | "analyst_completed"
   | "skeptic_completed"
   | "claim_counterpoint_completed"
-  | "source_verification_completed"
   | "receipts_completed"
   | "agent_debate_completed"
   | "report_completed"
@@ -792,37 +790,6 @@ export type LiveReceiptsResult = {
   cached: boolean;
 };
 
-export type LiveSourceVerificationReceipt = {
-  document_id: string;
-  url: string;
-  source_name: string;
-  title: string;
-  raw_status: string;
-  verification_status: "verified" | "unavailable" | "metadata_mismatch" | "pending";
-  backend: "browserbase" | "httpx_fallback" | "cache" | "demo_fixture" | "not_verified";
-  live_title: string | null;
-  stored_title: string | null;
-  evidence_snippet: string | null;
-  support_reason: string | null;
-  checked_at: string | null;
-  error: string | null;
-};
-
-export type LiveSourceVerificationResult = {
-  investigation_id: string;
-  receipts: LiveSourceVerificationReceipt[];
-  status_counts: Record<string, number>;
-  backend_counts: Record<string, number>;
-  verified_count: number;
-  browserbase_verified_count: number;
-  fallback_checked_count: number;
-  pending_count: number;
-  unavailable_count: number;
-  metadata_mismatch_count: number;
-  limitations: string[];
-  cached: boolean;
-};
-
 export type LiveSoftenedClaim = {
   claim_id: string;
   original: string;
@@ -844,10 +811,6 @@ export type LiveAgentDebateResult = {
   limitations: string[];
   confidence_score: number;
   confidence_label: InvestigationConfidence;
-  band_chat_id: string | null;
-  band_sync_status: "not_configured" | "synced" | "failed" | "skipped";
-  band_message_count: number;
-  band_sync_error: string | null;
   cached: boolean;
 };
 
@@ -929,7 +892,6 @@ export type LiveInvestigationWorkspace = {
   research_loop: LiveResearchLoopRunResult | null;
   analyst: LiveAnalystResult | null;
   claim_counterpoints: LiveClaimCounterpointResult | null;
-  source_verification: LiveSourceVerificationResult | null;
   receipts: LiveReceiptsResult | null;
   agent_debate: LiveAgentDebateResult | null;
   report: LiveFinalReportResult | null;

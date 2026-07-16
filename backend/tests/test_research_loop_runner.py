@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -15,7 +16,6 @@ from models.investigation import InvestigationPlan, InvestigationPlanTimeWindow
 from services.document_normalizer import DocumentNormalizer
 from services.investigation_repository import InvestigationRepository
 from services.research_loop_runner import InvestigationRunner
-from services.verification import VerificationService
 
 client = TestClient(app)
 
@@ -153,7 +153,7 @@ def test_investigation_runner_persists_research_loop_artifacts(tmp_path, monkeyp
         page_fetcher=_StubFetcher(),
         normalizer=DocumentNormalizer(),
     )
-    runner = InvestigationRunner(repository=repo, retriever=retriever, verifier=VerificationService())
+    runner = InvestigationRunner(repository=repo, retriever=retriever)
 
     workspace = runner.run("inv_loop", plan, force_refresh=True)
 
@@ -183,7 +183,7 @@ def test_runner_returns_configuration_missing_without_live_model(tmp_path, monke
         page_fetcher=_StubFetcher(),
         normalizer=DocumentNormalizer(),
     )
-    runner = InvestigationRunner(repository=repo, retriever=retriever, verifier=VerificationService())
+    runner = InvestigationRunner(repository=repo, retriever=retriever)
 
     workspace = runner.run("inv_missing_cfg", plan, force_refresh=True)
     assert workspace.research_loop is not None
@@ -209,7 +209,7 @@ def test_run_endpoint_returns_workspace_with_research_loop(tmp_path, monkeypatch
     monkeypatch.setattr(
         narratives_api,
         "_build_investigation_runner",
-        lambda: InvestigationRunner(repository=repo, retriever=_stub_retriever_agent(), verifier=VerificationService()),
+        lambda: InvestigationRunner(repository=repo, retriever=_stub_retriever_agent()),
     )
 
     plan_response = client.post("/api/investigate", json={"query_text": _plan().query_text})
@@ -219,6 +219,11 @@ def test_run_endpoint_returns_workspace_with_research_loop(tmp_path, monkeypatch
     response = client.post(f"/api/investigations/{investigation_id}/run", json={})
     assert response.status_code == 200
     payload = response.json()
+    deadline = time.monotonic() + 5
+    while payload["research_loop"] is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+        payload = client.get(f"/api/investigations/{investigation_id}").json()
+
     assert payload["research_loop"] is not None
     assert payload["gap_analysis"] is not None
     assert payload["provenance_trace"] is not None

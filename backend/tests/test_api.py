@@ -24,8 +24,6 @@ from models.investigation import (
     ReceiptsResult,
     RetrievalResult,
     SourceDiversityResult,
-    SourceVerificationReceipt,
-    SourceVerificationResult,
     TimelineResult,
 )
 from services.document_store import live_store
@@ -157,7 +155,6 @@ def test_root():
     assert any("/api/investigate" in endpoint for endpoint in data["endpoints"])
     assert any("/api/investigations/{id}" in endpoint for endpoint in data["endpoints"])
     assert any("/api/investigations/{id}/source-diversity" in endpoint for endpoint in data["endpoints"])
-    assert any("/api/investigations/{id}/source-verification" in endpoint for endpoint in data["endpoints"])
     assert any("/api/investigations/{id}/timeline" in endpoint for endpoint in data["endpoints"])
     assert any("/api/investigations/{id}/counter-narratives" in endpoint for endpoint in data["endpoints"])
     assert any("/api/investigations/{id}/family" in endpoint for endpoint in data["endpoints"])
@@ -555,55 +552,6 @@ def test_source_diversity_endpoint_force_refresh_recomputes(tmp_path, monkeypatc
     assert response.status_code == 200
     assert response.json()["total_documents"] == 2
     assert calls["count"] == 1
-
-
-def test_source_verification_endpoint_persists_browserbase_artifact(tmp_path, monkeypatch):
-    repo = InvestigationRepository(str(tmp_path / "investigations.sqlite3"))
-    monkeypatch.setattr(narratives_api, "_investigation_repo", repo)
-
-    plan_response = client.post(
-        "/api/investigate",
-        json={"query_text": "Where did the 'hidden energy tax' narrative come from?"},
-    )
-    investigation_id = plan_response.json()["investigation_id"]
-    plan = repo.get_plan(investigation_id)
-    assert plan is not None
-    repo.save_retrieval_result(_timeline_retrieval(investigation_id, plan), _timeline_docs())
-
-    def _stub_build_source_verification(inv_id, docs, **kwargs):
-        assert inv_id == investigation_id
-        assert kwargs["cited_document_ids"] == ["doc_1", "doc_2"]
-        return SourceVerificationResult(
-            investigation_id=inv_id,
-            receipts=[
-                SourceVerificationReceipt(
-                    document_id=docs[0].id,
-                    url=docs[0].url,
-                    source_name=docs[0].source_name,
-                    title=docs[0].title,
-                    raw_status="verified",
-                    verification_status="verified",
-                    backend="browserbase",
-                )
-            ],
-            status_counts={"verified": 1},
-            backend_counts={"browserbase": 1},
-            verified_count=1,
-            browserbase_verified_count=1,
-        )
-
-    monkeypatch.setattr(narratives_api, "build_source_verification", _stub_build_source_verification)
-
-    response = client.post(f"/api/investigations/{investigation_id}/source-verification", json={})
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["verified_count"] == 1
-    assert payload["receipts"][0]["backend"] == "browserbase"
-    assert repo.get_source_verification_result(investigation_id) is not None
-    workspace = repo.get_investigation_workspace(investigation_id)
-    assert workspace is not None
-    assert workspace.source_verification is not None
 
 
 def test_get_investigation_workspace_404s_when_missing(tmp_path, monkeypatch):
@@ -1148,16 +1096,6 @@ def test_get_graph_energy():
     assert graph["narrative_id"] == "narrative_001"
     assert len(graph["nodes"]) > 0
     assert len(graph["edges"]) > 0
-
-
-def test_get_receipts():
-    r = client.get("/api/receipts/narrative_001")
-    assert r.status_code == 200
-    receipts = r.json()
-    assert isinstance(receipts, list)
-    statuses = {rec["verification_status"] for rec in receipts}
-    # Should have at least one verified receipt
-    assert "verified" in statuses
 
 
 def test_get_mutations():

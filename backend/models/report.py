@@ -18,15 +18,6 @@ class EvidenceItem(BaseModel):
     ] = "pending"
 
 
-class ArizeEval(BaseModel):
-    grounding_score_before: float
-    grounding_score_after: float
-    overclaim_risk_before: Literal["low", "medium", "high"]
-    overclaim_risk_after: Literal["low", "medium", "high"]
-    uncertainty_present: bool
-    revised_by_skeptic: bool
-
-
 class InvestigationReport(BaseModel):
     id: str
     cluster_id: str
@@ -48,5 +39,4 @@ class InvestigationReport(BaseModel):
     confidence: float
     limitations: list[str]
     recommended_human_checks: list[str]
-    arize_eval: ArizeEval
     cached: bool = False

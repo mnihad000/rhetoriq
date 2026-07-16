@@ -13,8 +13,6 @@ from models.investigation import (
     ReceiptsResult,
     RetrievalResult,
     SourceDiversityResult,
-    SourceVerificationReceipt,
-    SourceVerificationResult,
     TimelineResult,
 )
 from services.investigation_repository import InvestigationRepository
@@ -258,51 +256,6 @@ def test_get_recent_investigations_filters_sorts_and_falls_back(tmp_path):
     assert fallback.report_summary == "Analyst fallback summary."
     assert fallback.receipt_count == 0
     assert fallback.source_count == 2
-
-
-def test_source_verification_result_persists_and_loads_in_workspace(tmp_path):
-    repo = InvestigationRepository(str(tmp_path / "investigations.sqlite3"))
-    plan = _plan()
-    investigation_id = "inv_source_verification"
-    repo.save_plan(investigation_id, plan.query_text, plan)
-    repo.save_retrieval_result(_retrieval(investigation_id, plan), _documents())
-
-    result = SourceVerificationResult(
-        investigation_id=investigation_id,
-        receipts=[
-            SourceVerificationReceipt(
-                document_id="doc_1",
-                url="https://springfieldgazette.com/doc_1",
-                source_name="springfieldgazette.com",
-                title="Hidden energy tax appears locally",
-                raw_status="verified",
-                verification_status="verified",
-                backend="browserbase",
-                live_title="Hidden energy tax appears locally",
-                stored_title="Hidden energy tax appears locally",
-                evidence_snippet="Hidden energy tax appears locally",
-                support_reason="Live source matched stored evidence.",
-                checked_at="2026-06-21T10:00:00+00:00",
-            )
-        ],
-        status_counts={"verified": 1},
-        backend_counts={"browserbase": 1},
-        verified_count=1,
-        browserbase_verified_count=1,
-    )
-
-    repo.save_source_verification_result(result)
-
-    loaded = repo.get_source_verification_result(investigation_id)
-    workspace = repo.get_investigation_workspace(investigation_id)
-
-    assert loaded is not None
-    assert loaded.receipts[0].backend == "browserbase"
-    assert workspace is not None
-    assert workspace.status == "source_verification_completed"
-    assert workspace.current_stage == "source_verification"
-    assert workspace.source_verification is not None
-    assert workspace.source_verification.verified_count == 1
 
 
 def test_get_recent_investigations_respects_limit(tmp_path):

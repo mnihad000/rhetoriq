@@ -41,8 +41,6 @@ from models.investigation import (
     RunInvestigationRequest,
     RetrieveRequest,
     RetrievalResult,
-    SourceVerificationRequest,
-    SourceVerificationResult,
     SourceDiversityRequest,
     SourceDiversityResult,
     TimelineRequest,
@@ -58,7 +56,6 @@ from services.final_report_builder import (
     apply_receipts_annotations,
     build_final_report as build_final_report_artifact,
 )
-from services.band_room import get_band_room_sync
 from services.embedding_service import get_embedding_service
 from services.graph_builder import GraphBuilder
 from services.ingestion import get_merged_documents
@@ -72,13 +69,8 @@ from services.mutation_detection import MutationDetector
 from services.redis_memory import get_redis_memory_service
 from services.retrieval import Retriever
 from services.source_diversity_builder import build_source_diversity as build_source_diversity_artifact
-from services.source_verification_builder import (
-    build_source_verification,
-    verification_map_from_result,
-)
 from services.spike_detection import SpikeDetector
 from services.timeline_builder import build_timeline as build_timeline_artifact
-from services.verification import VerificationService
 
 
 def _active_documents():
@@ -92,7 +84,6 @@ _retriever = Retriever()
 _spike_detector = SpikeDetector()
 _mutation_detector = MutationDetector()
 _graph_builder = GraphBuilder()
-_verifier = VerificationService()
 _investigation_repo = InvestigationRepository(get_settings().INVESTIGATION_DB_PATH)
 _investigation_cache = get_investigation_cache()
 _TITLE_TAG_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
@@ -181,67 +172,6 @@ def _resolve_investigation_query(
     return resolved_title, merged_context, warnings
 
 
-def _sync_agent_debate_to_band(result: AgentDebateResult) -> AgentDebateResult:
-    """Best-effort Band room sync. Never blocks or fails the local investigation."""
-    try:
-        sync = get_band_room_sync()
-        sync_result = sync.sync_debate(result)
-        if sync_result.status == "not_configured":
-            return result
-        return sync.apply_sync_result(result, sync_result)
-    except Exception as exc:
-        return result.model_copy(
-            update={
-                "band_sync_status": "failed",
-                "band_sync_error": str(exc),
-            }
-        )
-
-
-def _publish_band_stage_event(
-    investigation_id: str,
-    *,
-    stage: str,
-    role: str,
-    content: str,
-    metadata: dict | None = None,
-) -> None:
-    """Best-effort Band event publishing for live investigation stages."""
-    try:
-        result = get_band_room_sync().sync_stage_event(
-            investigation_id=investigation_id,
-            stage=stage,
-            role=role,
-            content=content,
-            metadata=metadata,
-        )
-        if result.status == "failed":
-            logger.warning("Band stage event failed for %s/%s: %s", investigation_id, stage, result.error)
-    except Exception as exc:
-        logger.warning("Band stage event error for %s/%s: %s", investigation_id, stage, exc)
-
-
-def _auto_verify_documents(documents, max_docs: int = 6) -> None:
-    """Run Browserbase verification on retrieved docs not already in Redis cache.
-
-    Populates the Redis verification cache so that the subsequent _collect_verification_map()
-    call returns real browser-verified statuses instead of demo fixtures.
-    No-op when BROWSERBASE_API_KEY is not set or documents list is empty.
-    """
-    settings = get_settings()
-    if not settings.BROWSERBASE_API_KEY or not documents:
-        return
-    try:
-        from agents.browserbase_agent import get_browserbase_agent
-        from services.verification_cache import get_verification_cache
-        vcache = get_verification_cache()
-        uncached = [doc for doc in documents[:max_docs] if not vcache.get(doc.url)]
-        if uncached:
-            get_browserbase_agent().verify_documents(uncached)
-    except Exception:
-        pass  # never block report generation on verification errors
-
-
 def _collect_cited_document_ids(report, claim_counterpoint_result) -> list[str]:
     doc_ids: list[str] = []
     for claim in report.key_claims:
@@ -252,48 +182,6 @@ def _collect_cited_document_ids(report, claim_counterpoint_result) -> list[str]:
             for citation in [*pair.main_receipts, *pair.counter_receipts]:
                 doc_ids.append(citation.document_id)
     return list(dict.fromkeys(doc_ids))
-
-
-def _ensure_source_verification_result(
-    investigation_id: str,
-    documents,
-    *,
-    cited_document_ids: list[str] | None = None,
-    force_refresh: bool = False,
-    max_documents: int | None = None,
-    update_stage: bool = True,
-) -> SourceVerificationResult:
-    cached = None if force_refresh else _investigation_repo.get_source_verification_result(investigation_id)
-    if cached is not None:
-        if cited_document_ids:
-            verified_ids = {receipt.document_id for receipt in cached.receipts}
-            if set(cited_document_ids).issubset(verified_ids):
-                return cached.model_copy(update={"cached": True})
-        else:
-            return cached.model_copy(update={"cached": True})
-
-    result = build_source_verification(
-        investigation_id,
-        documents,
-        cited_document_ids=cited_document_ids,
-        max_documents=max_documents,
-    )
-    _investigation_repo.save_source_verification_result(result, update_stage=update_stage)
-    _publish_band_stage_event(
-        investigation_id,
-        stage="source_verification",
-        role="Browserbase Verification Agent",
-        content=(
-            f"Checked {len(result.receipts)} cited source(s): {result.verified_count} verified, "
-            f"{result.metadata_mismatch_count} metadata mismatch, {result.unavailable_count} unavailable, "
-            f"{result.pending_count} pending."
-        ),
-        metadata={
-            "browserbase_verified_count": result.browserbase_verified_count,
-            "fallback_checked_count": result.fallback_checked_count,
-        },
-    )
-    return result
 
 
 def _build_memory_prior_context(query_text: str) -> dict:
@@ -551,7 +439,6 @@ def _build_investigation_runner() -> InvestigationRunner:
     return InvestigationRunner(
         repository=_investigation_repo,
         retriever=_build_retriever_agent(),
-        verifier=_verifier,
     )
 
 
@@ -565,16 +452,6 @@ def _ensure_counter_narrative_result(
     if counter_result is None:
         counter_result = build_counter_narratives_artifact(investigation_id, plan, retrieval, documents)
         _investigation_repo.save_counter_narrative_result(counter_result)
-        _publish_band_stage_event(
-            investigation_id,
-            stage="counter_narratives",
-            role="Counter-Narrative Agent",
-            content=(
-                f"Identified {len(counter_result.counter_narratives)} counter-frame candidate(s) "
-                f"for {plan.topic}."
-            ),
-            metadata={"confidence_label": counter_result.confidence_label},
-        )
     return counter_result
 
 
@@ -588,16 +465,6 @@ def _ensure_timeline_result(
     if timeline_result is None:
         timeline_result = build_timeline_artifact(investigation_id, plan, retrieval, documents)
         _investigation_repo.save_timeline_result(timeline_result)
-        _publish_band_stage_event(
-            investigation_id,
-            stage="timeline",
-            role="Timeline Agent",
-            content=(
-                f"Built a {len(timeline_result.timeline_events)} event timeline. "
-                f"First observed document: {timeline_result.first_observed_doc_id or 'unknown'}."
-            ),
-            metadata={"confidence_label": timeline_result.confidence_label},
-        )
     return timeline_result
 
 
@@ -622,16 +489,6 @@ def _ensure_analyst_result(
         counter_result,
     )
     _investigation_repo.save_analyst_result(analyst_result)
-    _publish_band_stage_event(
-        investigation_id,
-        stage="analyst",
-        role="Analyst Agent",
-        content=(
-            f"Drafted analyst synthesis with {len(analyst_result.candidate_claims)} candidate claim(s). "
-            f"Confidence: {analyst_result.confidence_label}."
-        ),
-        metadata={"confidence_label": analyst_result.confidence_label},
-    )
     return analyst_result
 
 
@@ -656,16 +513,6 @@ def _ensure_narrative_family_result(
         counter_result,
     )
     _investigation_repo.save_narrative_family_result(narrative_family_result)
-    _publish_band_stage_event(
-        investigation_id,
-        stage="narrative_family",
-        role="Narrative Family Agent",
-        content=(
-            f"Grouped narrative family '{narrative_family_result.family_title}' with "
-            f"{len(narrative_family_result.child_narratives)} branch(es)."
-        ),
-        metadata={"confidence_label": narrative_family_result.confidence_label},
-    )
     return narrative_family_result
 
 
@@ -690,16 +537,6 @@ def _ensure_claim_counterpoint_result(
         analyst_result,
     )
     _investigation_repo.save_claim_counterpoint_result(claim_counterpoint_result)
-    _publish_band_stage_event(
-        investigation_id,
-        stage="claim_counterpoints",
-        role="Claim Counterpoint Agent",
-        content=(
-            f"Matched {len(claim_counterpoint_result.pairs)} claim-level counterpoint pair(s); "
-            f"{len(claim_counterpoint_result.unmatched_claim_ids)} claim(s) remain unmatched."
-        ),
-        metadata={"confidence_label": claim_counterpoint_result.confidence_label},
-    )
     return claim_counterpoint_result
 
 
@@ -732,17 +569,9 @@ def _build_base_report_result(
     )
 
 
-def _collect_verification_map(documents, report, claim_counterpoint_result) -> dict[str, str]:
+def _collect_verification_map(report, claim_counterpoint_result) -> dict[str, str]:
     unique_doc_ids = _collect_cited_document_ids(report, claim_counterpoint_result)
-    results = _verifier.verify_batch(unique_doc_ids, documents)
-    verification_map = {
-        item["doc_id"]: item.get("verification_status", "pending")
-        for item in results
-        if item.get("doc_id")
-    }
-    for doc_id in unique_doc_ids:
-        verification_map.setdefault(doc_id, "pending")
-    return verification_map
+    return {doc_id: "pending" for doc_id in unique_doc_ids}
 
 
 def _ensure_receipts_and_report(
@@ -772,49 +601,18 @@ def _ensure_receipts_and_report(
 
     receipts_result = cached_receipts
     if force_refresh or receipts_result is None:
-        cited_document_ids = _collect_cited_document_ids(base_report, claim_counterpoint_result)
-        source_verification = _ensure_source_verification_result(
-            investigation_id,
-            documents,
-            cited_document_ids=cited_document_ids,
-            force_refresh=force_refresh,
-            update_stage=False,
-        )
-        verification_map = verification_map_from_result(source_verification)
-        for doc_id in cited_document_ids:
-            verification_map.setdefault(doc_id, "pending")
         receipts_result = build_receipts_agent(
             investigation_id,
             plan,
             documents,
             base_report,
             claim_counterpoint_result,
-            verification_map,
+            _collect_verification_map(base_report, claim_counterpoint_result),
         )
         _investigation_repo.save_receipts_result(receipts_result)
-        _publish_band_stage_event(
-            investigation_id,
-            stage="receipts",
-            role="Receipts Agent",
-            content=(
-                f"Reviewed {len(receipts_result.claim_receipts)} report claim receipt set(s) "
-                f"and {len(receipts_result.counter_claim_receipts)} counter-claim receipt set(s)."
-            ),
-            metadata={"confidence_label": receipts_result.confidence_label},
-        )
 
     annotated_report = apply_receipts_annotations(base_report, receipts_result)
     _investigation_repo.save_final_report_result(annotated_report, update_stage=False)
-    _publish_band_stage_event(
-        investigation_id,
-        stage="report_draft",
-        role="Final Report Agent",
-        content=(
-            f"Prepared report draft '{annotated_report.report_title}' with "
-            f"{len(annotated_report.key_claims)} key claim(s)."
-        ),
-        metadata={"confidence_label": annotated_report.confidence_label},
-    )
     return annotated_report, receipts_result, claim_counterpoint_result
 
 
@@ -965,16 +763,6 @@ def investigate(request: PlannerRequest) -> PlannerResponse:
         )
 
     _investigation_repo.save_plan(investigation_id, resolved_query_text, plan)
-    _publish_band_stage_event(
-        investigation_id,
-        stage="planner",
-        role="Query Planner Agent",
-        content=(
-            f"Planned investigation for '{plan.topic}' with "
-            f"{len(plan.retrieval_lanes)} retrieval lane(s) and {len(plan.search_queries)} search query seed(s)."
-        ),
-        metadata={"confidence_label": "planning", "order": 1},
-    )
     try:
         get_redis_memory_service().store_agent_finding(
             f"{investigation_id}:planner:plan",
@@ -1021,17 +809,6 @@ def retrieve(investigation_id: str, request: RetrieveRequest) -> RetrievalResult
         _store_retrieved_documents_in_memory(
             investigation_id,
             _investigation_repo.get_retrieved_documents(investigation_id),
-        )
-        _publish_band_stage_event(
-            investigation_id,
-            stage="retrieval",
-            role="Retriever Agent",
-            content=(
-                f"Retrieved {result.coverage_summary.total_documents} document(s) across "
-                f"{result.coverage_summary.unique_sources} source(s). "
-                f"Coverage confidence: {result.evidence_coverage_confidence}."
-            ),
-            metadata={"confidence_label": result.evidence_coverage_confidence, "order": 2},
         )
         _update_workspace_cache(investigation_id)
         return result
@@ -1132,75 +909,11 @@ def source_diversity(
     try:
         result = build_source_diversity_artifact(investigation_id, plan, retrieval, documents)
         _investigation_repo.save_source_diversity_result(result)
-        _publish_band_stage_event(
-            investigation_id,
-            stage="source_diversity",
-            role="Source Diversity Agent",
-            content=(
-                f"Classified {result.classified_documents} document(s) across "
-                f"{len(result.source_type_distribution)} source type(s)."
-            ),
-            metadata={"confidence_label": result.confidence_label},
-        )
         return result
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Source diversity build failed: {exc}") from exc
-
-
-# ---------------------------------------------------------------------------
-# POST /api/investigations/{id}/source-verification - verify cited sources with Browserbase
-# ---------------------------------------------------------------------------
-
-@router.post(
-    "/investigations/{investigation_id}/source-verification",
-    response_model=SourceVerificationResult,
-)
-def source_verification(
-    investigation_id: str,
-    request: SourceVerificationRequest,
-) -> SourceVerificationResult:
-    if not _investigation_repo.investigation_exists(investigation_id):
-        raise HTTPException(status_code=404, detail=f"Investigation '{investigation_id}' not found.")
-
-    plan = _investigation_repo.get_plan(investigation_id)
-    if plan is None:
-        raise HTTPException(status_code=404, detail=f"Investigation plan for '{investigation_id}' not found.")
-
-    retrieval = _investigation_repo.get_retrieval_result(investigation_id)
-    if retrieval is None:
-        raise HTTPException(status_code=404, detail=f"Retrieval result for '{investigation_id}' not found.")
-
-    documents = _investigation_repo.get_retrieved_documents(investigation_id)
-    if not documents:
-        raise HTTPException(status_code=404, detail="No retrieved documents for this investigation.")
-
-    cited_document_ids = None
-    if request.cited_only:
-        report = _investigation_repo.get_final_report_result(investigation_id)
-        claim_counterpoints = _investigation_repo.get_claim_counterpoint_result(investigation_id)
-        cited_document_ids = (
-            _collect_cited_document_ids(report, claim_counterpoints)
-            if report is not None
-            else list(dict.fromkeys(retrieval.high_relevance_document_ids or retrieval.retrieved_document_ids))
-        )
-
-    try:
-        result = _ensure_source_verification_result(
-            investigation_id,
-            documents,
-            cited_document_ids=cited_document_ids,
-            force_refresh=request.force_refresh,
-            max_documents=request.max_documents,
-            update_stage=True,
-        )
-        _update_workspace_cache(investigation_id)
-        return result
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Source verification failed: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1230,16 +943,6 @@ def timeline(investigation_id: str, request: TimelineRequest) -> TimelineResult:
     try:
         result = build_timeline_artifact(investigation_id, plan, retrieval, documents)
         _investigation_repo.save_timeline_result(result)
-        _publish_band_stage_event(
-            investigation_id,
-            stage="timeline",
-            role="Timeline Agent",
-            content=(
-                f"Built a {len(result.timeline_events)} event timeline. "
-                f"First observed document: {result.first_observed_doc_id or 'unknown'}."
-            ),
-            metadata={"confidence_label": result.confidence_label},
-        )
         _store_timeline_in_memory(result)
         _update_workspace_cache(investigation_id)
         return result
@@ -1282,16 +985,6 @@ def counter_narratives(
     try:
         result = build_counter_narratives_artifact(investigation_id, plan, retrieval, documents)
         _investigation_repo.save_counter_narrative_result(result)
-        _publish_band_stage_event(
-            investigation_id,
-            stage="counter_narratives",
-            role="Counter-Narrative Agent",
-            content=(
-                f"Identified {len(result.counter_narratives)} counter-frame candidate(s) "
-                f"for {plan.topic}."
-            ),
-            metadata={"confidence_label": result.confidence_label},
-        )
         _update_workspace_cache(investigation_id)
         return result
     except HTTPException:
@@ -1342,16 +1035,6 @@ def narrative_family(
             counter_result,
         )
         _investigation_repo.save_narrative_family_result(result)
-        _publish_band_stage_event(
-            investigation_id,
-            stage="narrative_family",
-            role="Narrative Family Agent",
-            content=(
-                f"Grouped narrative family '{result.family_title}' with "
-                f"{len(result.child_narratives)} branch(es)."
-            ),
-            metadata={"confidence_label": result.confidence_label},
-        )
         _store_narrative_family_in_memory(result)
         return result
     except HTTPException:
@@ -1394,31 +1077,11 @@ def analyst(
     if source_diversity_result is None:
         source_diversity_result = build_source_diversity_artifact(investigation_id, plan, retrieval, documents)
         _investigation_repo.save_source_diversity_result(source_diversity_result)
-        _publish_band_stage_event(
-            investigation_id,
-            stage="source_diversity",
-            role="Source Diversity Agent",
-            content=(
-                f"Classified {source_diversity_result.classified_documents} document(s) across "
-                f"{len(source_diversity_result.source_type_distribution)} source type(s)."
-            ),
-            metadata={"confidence_label": source_diversity_result.confidence_label},
-        )
 
     timeline_result = _investigation_repo.get_timeline_result(investigation_id)
     if timeline_result is None:
         timeline_result = build_timeline_artifact(investigation_id, plan, retrieval, documents)
         _investigation_repo.save_timeline_result(timeline_result)
-        _publish_band_stage_event(
-            investigation_id,
-            stage="timeline",
-            role="Timeline Agent",
-            content=(
-                f"Built a {len(timeline_result.timeline_events)} event timeline. "
-                f"First observed document: {timeline_result.first_observed_doc_id or 'unknown'}."
-            ),
-            metadata={"confidence_label": timeline_result.confidence_label},
-        )
 
     counter_result = _investigation_repo.get_counter_narrative_result(investigation_id)
     if counter_result is None:
@@ -1434,16 +1097,6 @@ def analyst(
             counter_result,
         )
         _investigation_repo.save_analyst_result(result)
-        _publish_band_stage_event(
-            investigation_id,
-            stage="analyst",
-            role="Analyst Agent",
-            content=(
-                f"Drafted analyst synthesis with {len(result.candidate_claims)} candidate claim(s). "
-                f"Confidence: {result.confidence_label}."
-            ),
-            metadata={"confidence_label": result.confidence_label},
-        )
         _store_timeline_in_memory(timeline_result)
         _store_analyst_in_memory(result)
         _update_workspace_cache(investigation_id)
@@ -1503,16 +1156,6 @@ def claim_counterpoints(
                 analyst_result,
             )
             _investigation_repo.save_claim_counterpoint_result(result)
-            _publish_band_stage_event(
-                investigation_id,
-                stage="claim_counterpoints",
-                role="Claim Counterpoint Agent",
-                content=(
-                    f"Matched {len(result.pairs)} claim-level counterpoint pair(s); "
-                    f"{len(result.unmatched_claim_ids)} claim(s) remain unmatched."
-                ),
-                metadata={"confidence_label": result.confidence_label},
-            )
         _store_claim_counterpoints_in_memory(result)
         return result
     except HTTPException:
@@ -1617,7 +1260,6 @@ def agent_debate(
             receipts_result,
             report_result,
         )
-        result = _sync_agent_debate_to_band(result)
         _investigation_repo.save_agent_debate_result(result)
         _store_agent_debate_in_memory(result)
         return result
@@ -1685,7 +1327,6 @@ def final_report(
                 receipts_result,
                 result,
             )
-            debate_result = _sync_agent_debate_to_band(debate_result)
             _investigation_repo.save_agent_debate_result(debate_result)
             _store_agent_debate_in_memory(debate_result)
         _investigation_repo.save_final_report_result(result)
@@ -1695,30 +1336,6 @@ def final_report(
         _store_narrative_family_in_memory(family_result)
         _store_report_in_memory(result)
         _update_workspace_cache(investigation_id)
-        _publish_band_stage_event(
-            investigation_id,
-            stage="final_report",
-            role="Final Report Agent",
-            content=(
-                f"Finalized report '{result.report_title}' with {len(result.key_claims)} key claim(s), "
-                f"{len(result.evidence_packet)} evidence packet item(s), and {result.confidence_label} confidence."
-            ),
-            metadata={"confidence_label": result.confidence_label},
-        )
-
-        # Grounding eval — emit an Arize span scoring how well claims are receipted
-        try:
-            from services.arize_tracer import record_grounding_eval
-            statuses = [c.verification_status for c in (result.key_claims or [])]
-            record_grounding_eval(
-                investigation_id=investigation_id,
-                verified_count=statuses.count("verified"),
-                pending_count=statuses.count("pending"),
-                unavailable_count=statuses.count("unavailable") + statuses.count("metadata_mismatch"),
-                total_claims=len(statuses),
-            )
-        except Exception:
-            pass  # never block the report response on tracing errors
 
         return result
     except HTTPException:
@@ -1759,45 +1376,6 @@ def get_graph(narrative_id: str) -> NarrativeGraph:
     docs = _retriever.get_related_documents(cluster, _active_documents())
     mutations = _mutation_detector.detect_mutations(docs)
     return _graph_builder.build_graph(docs, mutations, cluster)
-
-
-# ---------------------------------------------------------------------------
-# GET /api/receipts/{narrative_id} - verification receipts for evidence
-# ---------------------------------------------------------------------------
-
-@router.get("/receipts/{narrative_id}")
-def get_receipts(narrative_id: str) -> list[dict]:
-    cluster = next((n for n in DEMO_NARRATIVES if n.id == narrative_id), None)
-    if not cluster:
-        raise HTTPException(status_code=404, detail=f"Narrative '{narrative_id}' not found.")
-
-    top_doc_ids = cluster.document_ids[:6]
-    return _verifier.verify_batch(top_doc_ids, _active_documents())
-
-
-# ---------------------------------------------------------------------------
-# POST /api/investigations/{id}/verify - run Browserbase verification on top docs
-# ---------------------------------------------------------------------------
-
-@router.post("/investigations/{investigation_id}/verify")
-def verify_investigation_sources(investigation_id: str, max_docs: int = 6) -> list[dict]:
-    if not _investigation_repo.investigation_exists(investigation_id):
-        raise HTTPException(status_code=404, detail=f"Investigation '{investigation_id}' not found.")
-
-    documents = _investigation_repo.get_retrieved_documents(investigation_id)
-    if not documents:
-        raise HTTPException(status_code=404, detail="No retrieved documents for this investigation.")
-
-    result = _ensure_source_verification_result(
-        investigation_id,
-        documents,
-        cited_document_ids=None,
-        force_refresh=True,
-        max_documents=max_docs,
-        update_stage=True,
-    )
-    _update_workspace_cache(investigation_id)
-    return [receipt.model_dump(mode="json") for receipt in result.receipts]
 
 
 # ---------------------------------------------------------------------------

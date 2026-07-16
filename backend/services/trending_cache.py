@@ -1,7 +1,7 @@
 """Redis-backed cache for the trending discovery pipeline.
 
 Two cache tiers:
-  - Search results  → 1-hour TTL  (SerpAPI / Tavily responses)
+  - Search results  → 1-hour TTL
   - Page fetches    → 6-hour TTL  (raw HTML from URLs)
 
 Both fall back gracefully if Redis is unavailable.

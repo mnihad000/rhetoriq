@@ -224,9 +224,6 @@ export default function InvestigationPage() {
                 ) : null}
               </div>
               <div className="space-y-6">
-                {workspace.source_verification ? (
-                  <SourceVerificationCard sourceVerification={workspace.source_verification} />
-                ) : null}
                 {workspace.agent_debate ? (
                   <AgentDebateCard debate={workspace.agent_debate} />
                 ) : null}
@@ -511,63 +508,6 @@ function ClaimLedgerCard({
   );
 }
 
-function SourceVerificationCard({
-  sourceVerification,
-}: {
-  sourceVerification: NonNullable<LiveInvestigationWorkspace["source_verification"]>;
-}) {
-  const backendSummary = Object.entries(sourceVerification.backend_counts)
-    .filter(([, count]) => count > 0)
-    .map(([backend, count]) => `${count} ${backend.replaceAll("_", " ")}`)
-    .join(", ");
-
-  return (
-    <div className="rounded-[1.7rem] border border-[rgba(19,35,58,0.08)] bg-[rgba(255,255,255,0.88)] p-5 shadow-[0_24px_44px_-34px_rgba(19,35,58,0.34)]">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
-          Source verification
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <span className="data-pill">{sourceVerification.verified_count} verified</span>
-          <span className="data-pill">{sourceVerification.browserbase_verified_count} Browserbase</span>
-          {sourceVerification.fallback_checked_count > 0 ? (
-            <span className="data-pill">{sourceVerification.fallback_checked_count} fallback</span>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <InfoPill value={`${sourceVerification.metadata_mismatch_count} metadata mismatch`} />
-        <InfoPill value={`${sourceVerification.unavailable_count} unavailable`} />
-        <InfoPill value={`${sourceVerification.pending_count} pending`} />
-        <InfoPill value={backendSummary || "Backend not recorded"} />
-      </div>
-
-      <div className="mt-4 space-y-3">
-        {sourceVerification.receipts.slice(0, 5).map((receipt) => (
-          <a
-            key={receipt.document_id}
-            href={receipt.url}
-            target="_blank"
-            rel="noreferrer"
-            className="block rounded-[1rem] border border-[rgba(19,35,58,0.08)] bg-white/90 px-4 py-3 text-sm leading-7 text-[var(--ink)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
-          >
-            <span className="font-semibold">{formatSourceVerificationStatus(receipt.verification_status)}</span>
-            {" | "}
-            <span>{receipt.source_name || receipt.url}</span>
-            <span className="block text-xs uppercase tracking-[0.12em] text-[var(--muted)]">
-              {receipt.backend.replaceAll("_", " ")}
-            </span>
-          </a>
-        ))}
-        {sourceVerification.limitations.slice(0, 2).map((limitation) => (
-          <InfoListItem key={limitation} value={limitation} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function AgentDebateCard({
   debate,
 }: {
@@ -581,23 +521,8 @@ function AgentDebateCard({
         </p>
         <div className="flex flex-wrap gap-2">
           <span className="data-pill">{debate.confidence_label} confidence</span>
-          {debate.band_sync_status === "synced" ? (
-            <span className="data-pill">Band room synced</span>
-          ) : debate.band_sync_status === "failed" ? (
-            <span className="data-pill">Band sync failed</span>
-          ) : null}
         </div>
       </div>
-      {debate.band_sync_status === "synced" && debate.band_message_count > 0 ? (
-        <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
-          {debate.band_message_count} agent update(s) were posted to the shared Band investigation room.
-        </p>
-      ) : null}
-      {debate.band_sync_status === "failed" && debate.band_sync_error ? (
-        <p className="mt-3 text-sm leading-6 text-[rgb(130,50,50)]">
-          Band sync did not complete: {debate.band_sync_error}
-        </p>
-      ) : null}
 
       <div className="mt-4 space-y-4">
         <DebateBlock title="Analyst Agent" value={debate.analyst_position} />
@@ -643,10 +568,6 @@ function AgentDebateCard({
       </div>
     </div>
   );
-}
-
-function formatSourceVerificationStatus(status: string) {
-  return status.replaceAll("_", " ");
 }
 
 function DebateBlock({ title, value }: { title: string; value: string }) {
