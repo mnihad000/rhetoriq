@@ -1,3 +1,4 @@
+ctrl-shift-v
 # RhetoriQ â€” Architecture
 
 > This document covers the full system design of RhetoriQ. Every layer, every technology choice, and the reasoning behind each decision. Read this before touching any code.
@@ -16,60 +17,39 @@ RhetoriQ is built around three core principles:
 
 ## High Level Data Flow
 
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚                        DATA SOURCES                             â”‚
-â”‚   Reddit API â”‚ GDELT â”‚ NewsAPI â”‚ C-SPAN â”‚ RSS Feeds             â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                           â”‚
-                           â–¼
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚                    SCRAPER MICROSERVICES                         â”‚
-â”‚   One Python service per data source, running on Kubernetes     â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                           â”‚ publishes raw documents
-                           â–¼
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚                         KAFKA                                    â”‚
-â”‚   raw.reddit â”‚ raw.news â”‚ raw.speeches â”‚ raw.gdelt              â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                           â”‚ consumes raw topics
-                           â–¼
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚                      APACHE FLINK                                â”‚
-â”‚   Clean â†’ Extract Entities â†’ Detect Anomalies â†’ Embed           â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-             â”‚ publishes                    â”‚ publishes
-             â–¼                              â–¼
-    documents.processed            anomalies.detected
-             â”‚                              â”‚
-             â–¼                              â–¼
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”    â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚      STORAGE LAYER     â”‚    â”‚       LANGCHAIN AGENT            â”‚
-â”‚                        â”‚    â”‚                                  â”‚
-â”‚  PostgreSQL + pgvector â”‚    â”‚  Autonomous investigation loop   â”‚
-â”‚  Elasticsearch         â”‚â—„â”€â”€â”€â”‚  Queries all 4 databases         â”‚
-â”‚  Neo4j                 â”‚    â”‚  Calls configured LLM for synthesis      â”‚
-â”‚  Redis                 â”‚    â”‚                                  â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜    â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                                             â”‚ publishes
-                                             â–¼
-                                  investigations.complete
-                                             â”‚
-                                             â–¼
-                              â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-                              â”‚        REST API           â”‚
-                              â”‚   FastAPI serving         â”‚
-                              â”‚   the frontend            â”‚
-                              â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                                             â”‚
-                                             â–¼
-                              â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-                              â”‚        FRONTEND           â”‚
-                              â”‚   React + TypeScript      â”‚
-                              â”‚   Neo4j graph viz         â”‚
-                              â”‚   WebSocket live updates  â”‚
-                              â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+```mermaid
+flowchart TD
+    subgraph Sources["Data Sources"]
+        Reddit["Reddit API"]
+        GDELT["GDELT"]
+        NewsAPI["NewsAPI"]
+        CSPAN["C-SPAN"]
+        RSS["RSS Feeds"]
+    end
+
+    subgraph Scrapers["Scraper Microservices"]
+        Scraper["One Python service per data source<br/>running on Kubernetes"]
+    end
+
+    Kafka["Kafka"]
+    Flink["Apache Flink"]
+    Storage["Storage Layer<br/>PostgreSQL + pgvector<br/>Elasticsearch<br/>Neo4j<br/>Redis"]
+    Agent["LangChain Agent<br/>Autonomous investigation loop"]
+    API["REST API<br/>FastAPI serving the frontend"]
+    Frontend["Frontend<br/>React + TypeScript<br/>Neo4j graph visualization<br/>WebSocket live updates"]
+
+    Reddit --> Scraper
+    GDELT --> Scraper
+    NewsAPI --> Scraper
+    CSPAN --> Scraper
+    RSS --> Scraper
+    Scraper -->|"publishes raw documents"| Kafka
+    Kafka --> Flink
+    Flink -->|"documents.processed"| Storage
+    Flink -->|"anomalies.detected"| Agent
+    Storage --> Agent
+    Agent -->|"investigations.complete"| API
+    API --> Frontend
 ```
 
 ---
@@ -240,26 +220,14 @@ The agent is the core of RhetoriQ. It runs as a Kubernetes deployment, continuou
 
 ### Investigation Loop
 
-```
-anomalies.detected
-        â”‚
-        â–¼
-1. Parse anomaly â€” extract phrase, spike data, top sources
-        â”‚
-        â–¼
-2. Search backwards â€” pgvector semantic search for earliest occurrences
-        â”‚
-        â–¼
-3. Trace graph â€” Neo4j traversal to map spread network
-        â”‚
-        â–¼
-4. Full text search â€” Elasticsearch for every exact/near-exact usage with timestamps
-        â”‚
-        â–¼
-5. Synthesize â€” configured LLM receives all findings, generates human-readable report
-        â”‚
-        â–¼
-6. Publish â€” report pushed to investigations.complete Kafka topic
+```mermaid
+flowchart TD
+    Start["anomalies.detected"] --> Parse["1. Parse anomaly<br/>Extract phrase, spike data, and top sources"]
+    Parse --> Search["2. Search backwards<br/>pgvector semantic search for earliest occurrences"]
+    Search --> Trace["3. Trace graph<br/>Neo4j traversal to map the spread network"]
+    Trace --> FullText["4. Full-text search<br/>Elasticsearch for exact and near-exact usage with timestamps"]
+    FullText --> Synthesize["5. Synthesize<br/>Configured LLM generates a human-readable report"]
+    Synthesize --> Publish["6. Publish<br/>Report pushed to investigations.complete Kafka topic"]
 ```
 
 ### Tools Available to the Agent
