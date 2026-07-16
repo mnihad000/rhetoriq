@@ -1,440 +1,227 @@
-# RhetoriQ â€” Kafka
+# RhetoriQ Kafka Contracts
 
-> This document covers every Kafka topic, message schema, partition strategy, consumer group configuration, and local setup. If you are working on anything that produces or consumes Kafka messages, start here.
+Kafka is the target production event backbone for RhetoriQ. It is retained because durable replay, back-pressure, failure isolation, and independently scalable processing are central to the production design.
 
----
+Kafka is not wired into the current local FastAPI runtime yet. This document defines the contracts to implement in roadmap phase B3.
 
-## Overview
+## Design principles
 
-Kafka is the central nervous system of RhetoriQ. Every service communicates exclusively through Kafka â€” no service ever calls another service directly. This means:
+1. **Replayable ingestion.** A connector can republish from a checkpoint and downstream state can be rebuilt.
+2. **Transport-neutral events.** Schemas identify provider and transport without creating a topic for every vendor.
+3. **Versioned contracts.** Breaking schema changes use a new event version and, when necessary, a new topic.
+4. **Idempotent consumers.** Every event has stable IDs; consumers tolerate redelivery.
+5. **Evidence continuity.** Provider metadata, canonical URLs, timestamps, and retrieval limitations survive every stage.
+6. **Partial failure.** One connector or consumer failure does not stop unrelated sources.
+7. **No hidden state.** Connector checkpoints, retry state, and dead-letter outcomes are observable.
 
-- Any single service can die without cascading failures
-- Every message is persisted and replayable
-- New consumers can be added without touching producers
-- The entire ingestion history can be replayed from scratch
+## Event flow
 
----
-
-## Local Setup
-
-### Running Kafka Locally with Docker Compose
-
-```yaml
-# docker-compose.yml
-services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
-
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    depends_on:
-      - zookeeper
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
-
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    depends_on:
-      - kafka
-    ports:
-      - "8080:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+```mermaid
+flowchart LR
+    C[Source connectors] --> R[raw.documents.v1]
+    R --> N[Normalizer and enricher]
+    N --> D[documents.processed.v1]
+    D --> S[Persistence and indexes]
+    D --> V[Signal detector]
+    V --> G[signals.detected.v1]
+    G --> I[Investigation worker]
+    Q[investigations.requested.v1] --> I
+    I --> E[investigations.stage-events.v1]
+    I --> O[investigations.completed.v1]
+    R --> X[raw.documents.dlq.v1]
+    D --> Y[documents.processed.dlq.v1]
 ```
 
-```bash
-docker-compose up -d
-# Kafka UI available at http://localhost:8080
-```
+## Topic summary
 
-### Creating Topics Locally
-
-```bash
-# Create all RhetoriQ topics
-docker exec -it rhetoriq-kafka-1 kafka-topics --create \
-  --bootstrap-server localhost:9092 \
-  --topic raw.reddit \
-  --partitions 6 \
-  --replication-factor 1
-
-docker exec -it rhetoriq-kafka-1 kafka-topics --create \
-  --bootstrap-server localhost:9092 \
-  --topic raw.news \
-  --partitions 6 \
-  --replication-factor 1
-
-docker exec -it rhetoriq-kafka-1 kafka-topics --create \
-  --bootstrap-server localhost:9092 \
-  --topic raw.speeches \
-  --partitions 3 \
-  --replication-factor 1
-
-docker exec -it rhetoriq-kafka-1 kafka-topics --create \
-  --bootstrap-server localhost:9092 \
-  --topic raw.gdelt \
-  --partitions 6 \
-  --replication-factor 1
-
-docker exec -it rhetoriq-kafka-1 kafka-topics --create \
-  --bootstrap-server localhost:9092 \
-  --topic documents.processed \
-  --partitions 12 \
-  --replication-factor 1
-
-docker exec -it rhetoriq-kafka-1 kafka-topics --create \
-  --bootstrap-server localhost:9092 \
-  --topic anomalies.detected \
-  --partitions 3 \
-  --replication-factor 1
-
-docker exec -it rhetoriq-kafka-1 kafka-topics --create \
-  --bootstrap-server localhost:9092 \
-  --topic investigations.complete \
-  --partitions 3 \
-  --replication-factor 1
-```
-
----
-
-## Topics
-
-### Topic Summary
-
-| Topic | Producer | Consumer | Partitions | Retention | Description |
-|---|---|---|---|---|---|
-| `raw.reddit` | reddit-scraper | Flink | 6 | 7 days | Raw Reddit posts |
-| `raw.news` | news-scraper, rss-scraper | Flink | 6 | 7 days | Raw news articles |
-| `raw.speeches` | cspan-scraper | Flink | 3 | 30 days | Raw C-SPAN transcripts |
-| `raw.gdelt` | gdelt-scraper | Flink | 6 | 7 days | Raw GDELT events |
-| `documents.processed` | Flink | Storage workers | 12 | 14 days | Cleaned, embedded documents |
-| `anomalies.detected` | Flink | LangChain agent | 3 | 3 days | Detected narrative spikes |
-| `investigations.complete` | LangChain agent | REST API | 3 | 30 days | Finished investigation reports |
-
----
-
-## Message Schemas
-
-### raw.reddit
-
-```json
-{
-  "id": "string (uuid-v4)",
-  "source": "reddit",
-  "source_id": "string (reddit submission id)",
-  "url": "string",
-  "title": "string",
-  "body": "string (selftext, empty string if link post)",
-  "author": "string or null",
-  "published_at": "string (ISO 8601 UTC)",
-  "ingested_at": "string (ISO 8601 UTC)",
-  "metadata": {
-    "subreddit": "string",
-    "upvotes": "integer",
-    "num_comments": "integer",
-    "upvote_ratio": "float"
-  }
-}
-```
-
-### raw.news
-
-```json
-{
-  "id": "string (uuid-v4)",
-  "source": "newsapi | rss",
-  "source_id": "string (url md5 hash)",
-  "url": "string",
-  "title": "string",
-  "body": "string (may be truncated on free tier)",
-  "author": "string or null",
-  "published_at": "string (ISO 8601 UTC)",
-  "ingested_at": "string (ISO 8601 UTC)",
-  "metadata": {
-    "outlet": "string (e.g. Fox News, Reuters)",
-    "outlet_id": "string or null",
-    "description": "string or null",
-    "tags": ["array of strings"]
-  }
-}
-```
-
-### raw.speeches
-
-```json
-{
-  "id": "string (uuid-v4)",
-  "source": "cspan",
-  "source_id": "string (cspan program id)",
-  "url": "string",
-  "title": "string",
-  "body": "string (full transcript)",
-  "author": "string (primary speaker)",
-  "published_at": "string (ISO 8601 UTC)",
-  "ingested_at": "string (ISO 8601 UTC)",
-  "metadata": {
-    "program_type": "speech | hearing | pressconference",
-    "speakers": ["array of speaker names"],
-    "committee": "string or null",
-    "duration_seconds": "integer"
-  }
-}
-```
-
-### raw.gdelt
-
-```json
-{
-  "id": "string (uuid-v4)",
-  "source": "gdelt",
-  "source_id": "string (GKGRECORDID)",
-  "url": "string (DOCUMENTIDENTIFIER)",
-  "title": "null",
-  "body": "string or null (fetched from URL)",
-  "author": "null",
-  "published_at": "string (ISO 8601 UTC, parsed from YYYYMMDDHHMMSS)",
-  "ingested_at": "string (ISO 8601 UTC)",
-  "metadata": {
-    "themes": ["array of GDELT theme strings"],
-    "persons": ["array of person names"],
-    "organizations": ["array of org names"],
-    "locations": ["array of location names"],
-    "tone": "float (overall tone score -100 to +100)"
-  }
-}
-```
-
-### documents.processed
-
-```json
-{
-  "id": "string (same uuid from raw message)",
-  "source": "string (reddit | newsapi | rss | gdelt | cspan)",
-  "source_id": "string",
-  "url": "string",
-  "title": "string or null",
-  "body_clean": "string (cleaned, stripped body)",
-  "author": "string or null",
-  "published_at": "string (ISO 8601 UTC)",
-  "ingested_at": "string (ISO 8601 UTC)",
-  "processed_at": "string (ISO 8601 UTC)",
-  "embedding": "[array of 384 floats (sentence-transformers/all-MiniLM-L6-v2)]",
-  "entities": {
-    "persons": ["array of extracted person names"],
-    "organizations": ["array of extracted org names"],
-    "locations": ["array of extracted locations"],
-    "key_phrases": ["array of noun chunks > 3 words"]
-  },
-  "metadata": "object (passthrough from raw message metadata)"
-}
-```
-
-### anomalies.detected
-
-```json
-{
-  "anomaly_id": "string (uuid-v4)",
-  "detected_at": "string (ISO 8601 UTC)",
-  "phrase": "string (the anomalous phrase or topic)",
-  "spike_magnitude": "float (e.g. 4.2 = 420% of baseline)",
-  "window_start": "string (ISO 8601 UTC)",
-  "window_end": "string (ISO 8601 UTC)",
-  "baseline_frequency": "integer (avg occurrences per 10min window over 7 days)",
-  "window_frequency": "integer (occurrences in current window)",
-  "top_sources": [
-    {
-      "source": "string",
-      "outlet": "string or null",
-      "subreddit": "string or null",
-      "count": "integer"
-    }
-  ],
-  "sample_document_ids": ["array of up to 5 document ids from this window"]
-}
-```
-
-### investigations.complete
-
-```json
-{
-  "investigation_id": "string (uuid-v4)",
-  "anomaly_id": "string (reference to triggering anomaly)",
-  "phrase": "string",
-  "started_at": "string (ISO 8601 UTC)",
-  "completed_at": "string (ISO 8601 UTC)",
-  "duration_seconds": "integer",
-  "origin": {
-    "document_id": "string",
-    "source": "string",
-    "outlet_or_subreddit": "string",
-    "published_at": "string (ISO 8601 UTC)",
-    "url": "string",
-    "confidence": "float (0-1)"
-  },
-  "spread_path": [
-    {
-      "stage": "integer (1 = origin, 2 = first amplification, etc.)",
-      "source": "string",
-      "outlet_or_subreddit": "string",
-      "published_at": "string (ISO 8601 UTC)",
-      "document_count": "integer"
-    }
-  ],
-  "key_amplifiers": [
-    {
-      "source_id": "string",
-      "name": "string",
-      "type": "subreddit | outlet | politician",
-      "amplification_count": "integer"
-    }
-  ],
-  "report": "string (full configured LLM synthesized narrative report in markdown)",
-  "similar_document_count": "integer (total documents semantically related to this narrative)",
-  "graph_node_count": "integer (nodes in Neo4j spread graph)"
-}
-```
-
----
-
-## Partition Strategy
-
-### Why These Partition Counts?
-
-**`raw.*` topics â€” 6 partitions**
-Six scrapers can run in parallel, one per partition, giving full parallelism across data sources. Flink consumes with a consumer group of 6 workers.
-
-**`documents.processed` â€” 12 partitions**
-Highest volume topic in the system. 12 partitions allows 12 parallel storage workers writing to PostgreSQL, Elasticsearch, and Neo4j simultaneously without bottlenecking.
-
-**`anomalies.detected` â€” 3 partitions**
-Low volume but high priority. 3 partitions is sufficient. The agent consumer group has 3 workers so each partition has a dedicated agent instance.
-
-**`investigations.complete` â€” 3 partitions**
-Low volume. The REST API consumes this with a single consumer â€” 3 partitions gives redundancy without over-engineering.
-
-### Partition Key Strategy
-
-| Topic | Partition Key | Reason |
-|---|---|---|
-| `raw.reddit` | `subreddit` | Groups posts by subreddit for ordered processing |
-| `raw.news` | `outlet` | Groups articles by outlet |
-| `raw.speeches` | `null (round-robin)` | Low volume, ordering not critical |
-| `raw.gdelt` | `null (round-robin)` | High volume, even distribution preferred |
-| `documents.processed` | `source` | Consistent routing to storage workers |
-| `anomalies.detected` | `phrase` | Same phrase always hits same agent partition |
-| `investigations.complete` | `investigation_id` | Even distribution to API consumers |
-
----
-
-## Consumer Groups
-
-| Consumer Group | Topic(s) | Members | Description |
+| Topic | Producer | Primary consumers | Purpose |
 |---|---|---|---|
-| `flink-raw-consumer` | `raw.*` | 6 | Flink ingests all raw topics |
-| `storage-worker` | `documents.processed` | 12 | Writes to all 4 databases |
-| `agent-consumer` | `anomalies.detected` | 3 | Triggers investigation per anomaly |
-| `api-consumer` | `investigations.complete` | 1 | REST API reads completed reports |
+| `raw.documents.v1` | Source connector workers | Normalization/enrichment | Provider records and canonical retrieval results before shared enrichment. |
+| `documents.processed.v1` | Normalization/enrichment | Persistence, indexing, signal detection | Validated normalized documents with provenance metadata. |
+| `signals.detected.v1` | Signal detector | Investigation scheduler, API updates | Candidate narrative spikes with supporting document IDs and coverage context. |
+| `investigations.requested.v1` | API or scheduler | Investigation workers | User-requested and signal-triggered investigation jobs. |
+| `investigations.stage-events.v1` | Investigation workers | API, observability, persistence | Progress and inspectable intermediate-stage events. |
+| `investigations.completed.v1` | Investigation workers | Persistence and API | Completed evidence-limited reports and artifact references. |
+| `*.dlq.v1` | Failing consumers | Operations/replay tooling | Records requiring inspection or controlled replay. |
 
----
+Use additional source-specific topics only when security, retention, ordering, or extreme volume requires isolation. `raw.reddit`, `raw.gdelt`, and `raw.cspan` are not default contracts because they couple downstream consumers to provider deployment names.
 
-## Producer Configuration
+## Common event envelope
 
-All scrapers use these producer settings:
+All events use a shared envelope:
 
-```python
-from kafka import KafkaProducer
-import json
-
-producer = KafkaProducer(
-    bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
-    value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-    key_serializer=lambda k: k.encode("utf-8") if k else None,
-    acks="all",                    # Wait for all replicas to acknowledge
-    retries=5,                     # Retry up to 5 times on failure
-    retry_backoff_ms=500,          # Wait 500ms between retries
-    compression_type="gzip",       # Compress messages
-    batch_size=16384,              # Batch up to 16KB before sending
-    linger_ms=10                   # Wait up to 10ms to fill a batch
-)
+```json
+{
+  "event_id": "01J...",
+  "event_type": "raw.document.collected",
+  "schema_version": 1,
+  "occurred_at": "2026-07-16T20:10:00Z",
+  "produced_at": "2026-07-16T20:10:02Z",
+  "producer": "connector.gdelt",
+  "correlation_id": "collection_01J...",
+  "causation_id": null,
+  "partition_key": "domain:example.com",
+  "payload": {}
+}
 ```
 
----
+Requirements:
 
-## Consumer Configuration
+- `event_id` is globally unique and stable across producer retries.
+- `occurred_at` is source/event time; `produced_at` is Kafka publication time.
+- `correlation_id` connects a collection or investigation across stages.
+- `causation_id` references the event that caused this event when applicable.
+- `schema_version` is validated at producer and consumer boundaries.
 
-All consumers use these base settings:
+## `raw.documents.v1`
 
-```python
-from kafka import KafkaConsumer
-import json
+This topic carries source-native records and canonical fetch results with enough metadata to normalize and audit them.
 
-consumer = KafkaConsumer(
-    "topic.name",
-    bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
-    group_id="your-consumer-group",
-    value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-    key_deserializer=lambda k: k.decode("utf-8") if k else None,
-    auto_offset_reset="earliest",  # Start from beginning if no committed offset
-    enable_auto_commit=False,      # Manual commit for exactly-once processing
-    max_poll_records=100,          # Process up to 100 messages per poll
-    session_timeout_ms=30000,      # 30 second session timeout
-    heartbeat_interval_ms=10000    # Heartbeat every 10 seconds
-)
-
-# Always commit manually after successful processing
-for message in consumer:
-    try:
-        process(message.value)
-        consumer.commit()
-    except Exception as e:
-        logger.error(f"Failed to process message: {e}")
-        # Do not commit â€” message will be reprocessed
+```json
+{
+  "event_id": "01J...",
+  "event_type": "raw.document.collected",
+  "schema_version": 1,
+  "occurred_at": "2026-07-16T20:00:00Z",
+  "produced_at": "2026-07-16T20:00:03Z",
+  "producer": "connector.gdelt",
+  "correlation_id": "collection_01J...",
+  "causation_id": null,
+  "partition_key": "https://example.com/article",
+  "payload": {
+    "provider": "gdelt",
+    "transport": "api",
+    "provider_record_id": "provider-native-id",
+    "provider_query": "energy policy",
+    "provider_cursor": null,
+    "source_url": "https://example.com/article",
+    "canonical_url": "https://example.com/article",
+    "title": "Example title",
+    "body": null,
+    "snippet": "Example title",
+    "author": null,
+    "published_at": "2026-07-16T20:00:00Z",
+    "collected_at": "2026-07-16T20:00:02Z",
+    "language": "english",
+    "content_type": "article",
+    "retrieval": {
+      "status": "provider_metadata_only",
+      "http_status": null,
+      "parser_version": null,
+      "content_hash": null
+    },
+    "provider_metadata": {}
+  }
+}
 ```
 
----
+`provider_metadata_only` explicitly marks records that are useful for discovery but do not contain canonical full text.
 
-## Monitoring Kafka Health
+## `documents.processed.v1`
 
-### Key Metrics to Watch in Grafana
+The processed event embeds the shared `Document` contract plus processing receipts:
 
-| Metric | Warning Threshold | Critical Threshold | Description |
-|---|---|---|---|
-| Consumer lag | > 1000 messages | > 10000 messages | How far behind a consumer is |
-| Messages per second | < 10 msg/s | < 1 msg/s | Ingestion rate dropping |
-| Producer error rate | > 0.1% | > 1% | Failed message deliveries |
-| Broker disk usage | > 70% | > 90% | Retention filling disk |
-
-### Checking Consumer Lag Manually
-
-```bash
-# Check lag for all consumer groups
-docker exec -it rhetoriq-kafka-1 kafka-consumer-groups \
-  --bootstrap-server localhost:9092 \
-  --describe \
-  --all-groups
+```json
+{
+  "event_id": "01J...",
+  "event_type": "document.processed",
+  "schema_version": 1,
+  "occurred_at": "2026-07-16T20:00:00Z",
+  "produced_at": "2026-07-16T20:00:05Z",
+  "producer": "document-normalizer",
+  "correlation_id": "collection_01J...",
+  "causation_id": "01J_RAW...",
+  "partition_key": "doc_01J...",
+  "payload": {
+    "document": {
+      "id": "doc_01J...",
+      "source_id": "domain:example.com",
+      "source_name": "example.com",
+      "source_type": "national_news",
+      "url": "https://example.com/article",
+      "title": "Example title",
+      "published_at": "2026-07-16T20:00:00Z",
+      "collected_at": "2026-07-16T20:00:02Z",
+      "text": "...",
+      "snippet": "...",
+      "entities": [],
+      "phrases": [],
+      "metadata": {
+        "provider": "gdelt",
+        "transport": "api"
+      }
+    },
+    "processing": {
+      "normalizer_version": "1",
+      "duplicate_of_document_id": null,
+      "quality_flags": []
+    }
+  }
+}
 ```
 
----
+Provider is metadata; `source_type` describes the evidence, not how it was transported.
 
-## Retention Policy
+## Signal and investigation events
 
-| Topic | Retention | Reason |
-|---|---|---|
-| `raw.*` | 7 days | Raw data is large â€” 7 days is enough to replay recent ingestion |
-| `raw.speeches` | 30 days | Speeches are low volume and high value â€” keep longer |
-| `documents.processed` | 14 days | Processed docs are in databases â€” Kafka copy kept for replay |
-| `anomalies.detected` | 3 days | Anomalies are acted on immediately â€” short retention fine |
-| `investigations.complete` | 30 days | Reports are valuable â€” keep for a month |
+`signals.detected.v1` must include:
 
+- canonical phrase and related phrase IDs;
+- observed time window and baseline window;
+- spike and confidence components;
+- supporting document IDs;
+- source and publisher diversity;
+- provider coverage and failed-source limitations;
+- language stating that origin is not proven.
+
+`investigations.requested.v1` must include the user query or signal ID, requested outputs, time window, source classes, and authorization context.
+
+Stage and completion events should reference persisted artifacts rather than duplicating large bodies of evidence in every event.
+
+## Partitioning
+
+Recommended initial keys:
+
+| Topic | Partition key |
+|---|---|
+| `raw.documents.v1` | Canonical URL hash or provider plus native record ID. |
+| `documents.processed.v1` | Document ID. |
+| `signals.detected.v1` | Canonical phrase/narrative ID. |
+| Investigation topics | Investigation ID. |
+
+Begin with conservative partition counts based on measured throughput. Do not preserve the old claim that “six scrapers require six partitions”; connector count and partition count are unrelated.
+
+## Delivery and idempotency
+
+- Producers enable idempotence and use acknowledgements appropriate for production durability.
+- Consumers commit offsets only after their durable side effect succeeds.
+- Persistence uses `event_id` or stable domain IDs as uniqueness keys.
+- Transient failures use bounded retries with jitter.
+- Permanent schema, policy, or parsing failures go to a dead-letter topic with a redacted error receipt.
+- Replays must not send duplicate user notifications or launch duplicate investigations.
+
+Exactly-once business behavior comes from idempotent application writes, not from assuming transport-level exactly-once semantics solve every side effect.
+
+## Retention
+
+Retention is set by data class and provider policy:
+
+- raw events: enough for operational replay, bounded by provider storage terms;
+- processed evidence: according to the evidence retention policy;
+- signals and investigation events: longer-lived audit trail;
+- dead letters: short, access-controlled retention with operational review.
+
+User-generated platform content may require deletion synchronization. A Kafka retention policy must never preserve content longer than the applicable provider agreement allows.
+
+## Security
+
+- Kafka events never contain provider credentials or authorization headers.
+- Sensitive topics use least-privilege ACLs and encryption in transit.
+- Logs and dead-letter events redact personal or secret values.
+- Connector policy metadata remains available to deletion and retention workers.
+- Schema registry access and topic creation are controlled in production.
+
+## Observability
+
+Track producer error rate, publish latency, consumer lag, event age, retries, dead-letter volume, checkpoint age, duplicate rate, and end-to-end collection-to-investigation latency. Metrics should be labeled by connector/provider without putting high-cardinality URLs or document IDs in metric labels.
 

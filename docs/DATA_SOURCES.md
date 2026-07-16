@@ -1,408 +1,205 @@
-# RhetoriQ â€” Data Sources
+# RhetoriQ Data Sources
 
-> This document covers every data source RhetoriQ ingests. For each source: what it provides, how to get credentials, rate limits, data quirks, and exactly what fields we extract.
+This document defines how RhetoriQ selects and retrieves source material. It separates an **evidence source** from the **transport** used to acquire it and records which connectors are implemented versus planned.
 
----
+## Source policy
 
-## Overview
+A publisher, government record, public speech, forum post, or social post is an evidence source. GDELT, a search API, RSS, or an HTML client is an acquisition transport.
 
-RhetoriQ ingests from 5 data sources. Each source covers a different slice of the political information ecosystem:
+Use transports in this order:
 
-| Source | What It Covers | Volume | Cost |
+1. first-party APIs and official bulk datasets;
+2. RSS, Atom, JSON Feed, webhooks, and public event streams;
+3. terms-compatible search APIs for discovery;
+4. direct canonical-page retrieval for evidence enrichment;
+5. browser automation only for important sources that have no usable structured or HTTP interface.
+
+The system must never imply that its earliest retrieved record is the true origin. The approved phrase is **first observed in the available dataset**.
+
+## Status summary
+
+| Provider or source class | Status | Transport | Role |
 |---|---|---|---|
-| Reddit API (PRAW) | Fringe to mainstream political discussion | ~50k posts/day | Free |
-| GDELT Project | Global news events and narratives | ~100k events/day | Free |
-| NewsAPI | English-language news articles | ~10k articles/day | Free tier available |
-| C-SPAN API | Official political speech transcripts | ~20 transcripts/day | Free |
-| RSS Feeds | Direct feeds from specific outlets | ~5k articles/day | Free |
-
-The combination of these five sources is intentional. GDELT and NewsAPI cover mainstream narrative. Reddit covers fringe-to-mainstream pipeline. C-SPAN covers official political adoption. RSS feeds give us raw outlet-level data without API abstraction.
-
----
-
-## 1. Reddit API (PRAW)
-
-### What It Provides
-Reddit is the most important source for detecting narratives early. Fringe political narratives almost always appear on Reddit before they reach mainstream media or politicians. PRAW (Python Reddit API Wrapper) gives us clean programmatic access.
-
-### Subreddits We Monitor
-
-#### High Volume Political
-- r/politics
-- r/worldnews
-- r/news
-- r/PoliticalDiscussion
-
-#### Fringe / Early Signal
-- r/conspiracy
-- r/conservatives
-- r/progressive
-- r/Libertarian
-- r/WayOfTheBern
-- r/TheDonald (banned, use Pushshift historical data)
-
-#### Meta / Media Criticism
-- r/media_criticism
-- r/propaganda
-
-### How To Get Credentials
-1. Go to https://www.reddit.com/prefs/apps
-2. Click "create another app"
-3. Select "script"
-4. Fill in name and redirect URI (use `http://localhost:8080`)
-5. Copy your `client_id` (under the app name) and `client_secret`
-
-```env
-REDDIT_CLIENT_ID=your_client_id
-REDDIT_CLIENT_SECRET=your_client_secret
-REDDIT_USER_AGENT=rhetoriq:v1.0 (by /u/yourusername)
-```
-
-### Rate Limits
-- 60 requests per minute on the free tier
-- PRAW handles rate limiting automatically â€” do not implement your own
-- Use `prawcore.exceptions.RateLimitExceeded` handler as a safety net
-
-### PRAW Setup
-```python
-import praw
-
-reddit = praw.Reddit(
-    client_id=os.getenv("REDDIT_CLIENT_ID"),
-    client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-    user_agent=os.getenv("REDDIT_USER_AGENT")
-)
-
-# Stream new posts from a subreddit
-for submission in reddit.subreddit("politics").stream.submissions():
-    # publish to Kafka raw.reddit topic
-```
-
-### Fields We Extract
-```json
-{
-  "id": "submission.id",
-  "source": "reddit",
-  "source_id": "submission.id",
-  "url": "submission.url",
-  "title": "submission.title",
-  "body": "submission.selftext",
-  "author": "submission.author.name",
-  "published_at": "datetime.fromtimestamp(submission.created_utc)",
-  "metadata": {
-    "subreddit": "submission.subreddit.display_name",
-    "upvotes": "submission.score",
-    "num_comments": "submission.num_comments",
-    "upvote_ratio": "submission.upvote_ratio"
-  }
-}
-```
-
-### Data Quirks
-- `selftext` is empty for link posts â€” use `title` only in that case
-- Deleted posts return `[deleted]` or `[removed]` â€” filter these out
-- Bot accounts are common â€” consider filtering authors with karma < 100
-- Submissions stream may occasionally duplicate â€” use Redis bloom filter for deduplication
-
----
-
-## 2. GDELT Project
-
-### What It Provides
-GDELT (Global Database of Events, Language, and Tone) is a free, real-time dataset that monitors the world's news media across 100+ languages. It is updated every 15 minutes and is specifically designed for tracking narrative and event propagation globally. This is RhetoriQ's most powerful data source for detecting cross-outlet narrative spread.
-
-GDELT provides two datasets we use:
-- **GDELT Event Database** â€” structured events extracted from news (who did what to whom)
-- **GDELT Global Knowledge Graph (GKG)** â€” themes, emotions, and narrative threads extracted from articles
-
-### How To Get Access
-GDELT is completely free and requires no API key. Data is served as CSV files updated every 15 minutes on Google Cloud Storage.
-
-```
-# Latest 15-minute update
-http://data.gdeltproject.org/gdeltv2/lastupdate.txt
-
-# This file contains URLs to the latest GKG, Events, and Mentions CSV files
-```
-
-### Fetching GDELT Data
-```python
-import requests
-import pandas as pd
-from io import StringIO
-
-def fetch_latest_gdelt():
-    # Get the latest update manifest
-    manifest = requests.get("http://data.gdeltproject.org/gdeltv2/lastupdate.txt").text
-    
-    # Parse the GKG file URL from the manifest
-    gkg_url = [line.split()[-1] for line in manifest.strip().split('\n') 
-               if 'gkg' in line][0]
-    
-    # Download and parse
-    response = requests.get(gkg_url)
-    # GDELT GKG is tab-separated
-    df = pd.read_csv(StringIO(response.text), sep='\t', 
-                     on_bad_lines='skip', header=None)
-    return df
-```
-
-### Rate Limits
-- No API key required, no rate limits
-- Poll every 15 minutes maximum â€” files only update every 15 minutes anyway
-- Be respectful â€” cache the manifest URL response
-
-### Fields We Extract from GKG
-```json
-{
-  "id": "generated uuid",
-  "source": "gdelt",
-  "source_id": "GKGRECORDID column",
-  "url": "DOCUMENTIDENTIFIER column",
-  "title": null,
-  "body": "extracted from DOCUMENTIDENTIFIER fetch",
-  "author": null,
-  "published_at": "DATE column (parse YYYYMMDDHHMMSS format)",
-  "metadata": {
-    "themes": "THEMES column (semicolon separated)",
-    "persons": "PERSONS column",
-    "organizations": "ORGANIZATIONS column",
-    "tone": "TONE column (comma separated scores)",
-    "locations": "LOCATIONS column"
-  }
-}
-```
-
-### Data Quirks
-- GDELT timestamps are in `YYYYMMDDHHMMSS` format â€” always parse explicitly
-- The `THEMES` column uses GDELT's own taxonomy (e.g. `TAX_FNCACT_POLITICIAN`) â€” map these to plain English
-- Tone score is a comma-separated string of 7 values â€” first value is overall tone (-100 to +100)
-- Some URLs in GDELT are dead links â€” implement a timeout of 5 seconds on any URL fetch
-- GDELT covers global news â€” filter by `SOURCECOUNTRY` or language if you want US-focused data only
-
----
-
-## 3. NewsAPI
-
-### What It Provides
-NewsAPI aggregates articles from 150,000+ news sources worldwide. It gives us clean, structured article metadata without needing to scrape individual outlets. We use it primarily for mainstream US political news.
-
-### How To Get Credentials
-1. Go to https://newsapi.org/register
-2. Create a free account
-3. Copy your API key from the dashboard
-
-```env
-NEWS_API_KEY=your_api_key
-```
-
-### Free Tier Limits
-- 100 requests per day on free tier
-- 1 month historical data on free tier
-- Developer plan ($449/month) for production volume â€” consider using GDELT as primary and NewsAPI as supplement
-
-### Endpoints We Use
-
-#### Everything endpoint â€” search all articles
-```python
-import requests
-
-response = requests.get(
-    "https://newsapi.org/v2/everything",
-    params={
-        "q": "politics OR congress OR senate OR president",
-        "language": "en",
-        "sortBy": "publishedAt",
-        "pageSize": 100,
-        "apiKey": os.getenv("NEWS_API_KEY")
-    }
-)
-```
-
-#### Top headlines â€” breaking political news
-```python
-response = requests.get(
-    "https://newsapi.org/v2/top-headlines",
-    params={
-        "category": "politics",
-        "country": "us",
-        "pageSize": 100,
-        "apiKey": os.getenv("NEWS_API_KEY")
-    }
-)
-```
-
-### Fields We Extract
-```json
-{
-  "id": "generated uuid",
-  "source": "newsapi",
-  "source_id": "article.url hashed",
-  "url": "article.url",
-  "title": "article.title",
-  "body": "article.content",
-  "author": "article.author",
-  "published_at": "article.publishedAt",
-  "metadata": {
-    "outlet": "article.source.name",
-    "outlet_id": "article.source.id",
-    "description": "article.description"
-  }
-}
-```
-
-### Data Quirks
-- `content` field is truncated to 200 characters on the free tier â€” use `description` as fallback
-- `author` is frequently null â€” treat as optional
-- Duplicate articles appear across sources â€” deduplicate by URL in Redis
-- Some articles return `[Removed]` content â€” filter these
-
----
-
-## 4. C-SPAN API
-
-### What It Provides
-C-SPAN provides transcripts and metadata for congressional hearings, floor speeches, press conferences, and campaign events. This is our ground truth for when a narrative officially enters formal political speech. A talking point appearing in a C-SPAN transcript is the final stage of the fringe-to-mainstream pipeline.
-
-### How To Get Access
-C-SPAN has a public API available at https://www.c-span.org/about/api/
-
-```
-Base URL: https://api.c-span.org/v1/
-```
-
-No API key is required for basic access. Register at https://www.c-span.org/about/api/ for higher rate limits.
-
-```env
-CSPAN_API_KEY=your_api_key  # optional but recommended
-```
-
-### Endpoints We Use
-
-#### Recent programs
-```python
-response = requests.get(
-    "https://api.c-span.org/v1/programs",
-    params={
-        "type": "speech,hearing,pressconference",
-        "limit": 20,
-        "apikey": os.getenv("CSPAN_API_KEY", "")
-    }
-)
-```
-
-#### Program transcript
-```python
-response = requests.get(
-    f"https://api.c-span.org/v1/programs/{program_id}/transcript",
-    params={"apikey": os.getenv("CSPAN_API_KEY", "")}
-)
-```
-
-### Fields We Extract
-```json
-{
-  "id": "generated uuid",
-  "source": "cspan",
-  "source_id": "program.id",
-  "url": "program.url",
-  "title": "program.title",
-  "body": "full transcript text",
-  "author": "primary speaker name",
-  "published_at": "program.date",
-  "metadata": {
-    "program_type": "speech | hearing | pressconference",
-    "speakers": ["list of all speakers"],
-    "committee": "committee name if hearing",
-    "duration_seconds": "program.duration"
-  }
-}
-```
-
-### Data Quirks
-- Transcripts are not always available immediately â€” poll with a 1 hour delay after program air time
-- Speaker attribution in transcripts uses `>>` prefix â€” parse accordingly
-- Some transcripts are auto-generated captions and contain errors â€” treat NER results with lower confidence
-- Long hearings can produce transcripts over 100,000 words â€” chunk these before embedding
-
----
-
-## 5. RSS Feeds
-
-### What It Provides
-Direct RSS feeds from specific outlets give us raw article data without any API abstraction or aggregator filtering. We monitor a politically diverse set of outlets intentionally â€” cross-spectrum coverage is essential for detecting when a narrative jumps from partisan to mainstream.
-
-### Outlets We Monitor
-
-| Outlet | RSS URL | Lean |
-|---|---|---|
-| New York Times | https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml | Center-Left |
-| Washington Post | https://feeds.washingtonpost.com/rss/politics | Center-Left |
-| Fox News | https://moxie.foxnews.com/google-publisher/politics.xml | Right |
-| Reuters | https://feeds.reuters.com/reuters/politicsNews | Center |
-| BBC News | http://feeds.bbci.co.uk/news/politics/rss.xml | Center |
-| Breitbart | https://feeds.feedburner.com/breitbart | Far-Right |
-| The Hill | https://thehill.com/rss/syndicator/19110 | Center |
-| Politico | https://www.politico.com/rss/politicopicks.xml | Center |
-
-### Parsing RSS Feeds
-```python
-import feedparser
-import hashlib
-
-def parse_feed(url: str, outlet_name: str):
-    feed = feedparser.parse(url)
-    
-    for entry in feed.entries:
-        yield {
-            "id": str(uuid.uuid4()),
-            "source": "rss",
-            "source_id": hashlib.md5(entry.link.encode()).hexdigest(),
-            "url": entry.link,
-            "title": entry.title,
-            "body": entry.get("summary", ""),
-            "author": entry.get("author", None),
-            "published_at": entry.get("published", datetime.utcnow().isoformat()),
-            "metadata": {
-                "outlet": outlet_name,
-                "tags": [tag.term for tag in entry.get("tags", [])]
-            }
-        }
-```
-
-### Data Quirks
-- RSS `summary` fields are often truncated â€” full article text requires fetching the URL directly
-- `published` date format varies by outlet â€” use `dateutil.parser.parse()` for robust parsing
-- Some outlets (Breitbart) frequently change RSS URLs â€” monitor for 404s and update accordingly
-- Paywalled articles (NYT, WaPo) will not return full body text â€” use summary only and flag in metadata
-
----
-
-## Data Source Priority
-
-When the agent is tracing a narrative's origin, sources are weighted by their position in the fringe-to-mainstream pipeline:
-
-```
-EARLIEST (most likely origin)          LATEST (mainstream adoption)
-        â”‚                                          â”‚
-        â–¼                                          â–¼
-   Reddit fringe â†’ Reddit mainstream â†’ RSS fringe â†’ GDELT â†’ NewsAPI â†’ C-SPAN
-```
-
-A narrative appearing first in C-SPAN and then in Reddit would be unusual and flagged as top-down rather than bottom-up â€” which is itself a significant finding worth highlighting in the investigation report.
-
----
-
-## Adding A New Data Source
-
-To add a new data source to RhetoriQ:
-
-1. Create a new scraper in `backend/scrapers/your_source_scraper.py`
-2. Follow the standard message schema defined in ARCHITECTURE.md
-3. Publish to an existing `raw.*` topic or create a new one (update KAFKA.md)
-4. Add credentials to `.env.example`
-5. Add a Kubernetes deployment manifest in `k8s/manifests/`
-6. Document the source in this file following the same format
-7. Update the data source priority pipeline above if relevant
+| GDELT DOC 2.0 | Implemented | Public JSON API | News discovery, metadata, and trend signals. |
+| Hacker News | Implemented | Public Algolia API | Forum/community signals and linked-story discovery. |
+| Canonical public pages | Implemented | Direct HTTP retrieval | Evidence enrichment after a URL is discovered. |
+| Broad web search | Interface only | Search API | Discovery, corroboration, contradiction, provenance, official, and community lanes. |
+| RSS/Atom | Planned | Publisher feeds | Incremental publisher monitoring. |
+| Congress.gov | Planned | First-party public API | Bills, hearings, records, votes, members, and official legislative material. |
+| Federal Register | Planned | First-party public API | Rules, notices, proposed rules, and presidential documents. |
+| Bluesky | Planned | Jetstream/public AT Protocol stream | Public social activity and early narrative signals. |
+| Reddit | Conditional | Official Data API | Community signals only after access and terms review. |
+| YouTube | Conditional | First-party Data API | Video/channel discovery and metadata; transcript access requires separate validation. |
+| NewsAPI | Optional supplement | Commercial API | Discovery only under a suitable production license. |
+| C-SPAN | No assumed connector | No verified general public transcript API | Link or ingest only through an approved first-party or licensed interface. |
 
+## Implemented connectors
+
+### GDELT DOC 2.0
+
+Implementation: `backend/services/gdelt.py`
+
+RhetoriQ queries the DOC 2.0 API in article-list JSON mode. The connector currently records:
+
+- canonical article URL;
+- title;
+- publisher domain;
+- GDELT seen date;
+- language and source country when available;
+- query and dataset metadata;
+- a heuristic RhetoriQ source classification.
+
+GDELT article-list results do not provide a reliable full article body. The current document therefore uses the title as text/snippet and retains the canonical URL for later retrieval. This makes GDELT a strong discovery and trend source, not sufficient evidence for every claim by itself.
+
+Operational requirements:
+
+- handle HTTP 429 responses with bounded backoff;
+- preserve the original GDELT timestamp and collection timestamp;
+- deduplicate by canonical URL rather than query;
+- expect duplicate and syndicated coverage;
+- expose query coverage and retrieval failures in investigation limitations.
+
+No API key is currently required.
+
+### Hacker News via Algolia
+
+Implementation: `backend/services/hn_ingestion.py`
+
+The connector searches stories by query and date range. It records the HN object ID, title, author, points, comment count, publication timestamp, and either the linked story URL or the HN item URL.
+
+HN is one community source, not a proxy for the whole public conversation. Its technical audience should be reflected in coverage limitations. Linked pages require canonical retrieval when their contents matter to a report.
+
+No API key is currently required.
+
+### Canonical-page retrieval
+
+Implementation: `backend/services/page_fetcher.py` and `backend/services/document_normalizer.py`
+
+The HTTP fetcher follows redirects, applies a timeout, validates HTML/XML content types, and can cache successful pages. The normalizer extracts a title, visible text, selected metadata, publication time, language, entities, and phrases.
+
+Canonical retrieval is not a broad crawler. It is invoked for URLs already discovered through an authorized provider or supplied by the user.
+
+Production additions should include:
+
+- robots and source-policy checks;
+- per-domain rate limits and circuit breakers;
+- response-size limits;
+- stronger article extraction and structured-data parsing;
+- content hashes and parser versions;
+- explicit paywall/access-control refusal;
+- retention and revalidation policies.
+
+## Next connectors
+
+### Broad web search
+
+The existing `SearchProvider` interface is the highest-priority gap. A production implementation should support query, date window, source-type hints, result limit, provider rank, snippet, canonical URL, and provider metadata.
+
+Brave Search is the initial recommended candidate because it exposes a first-party independent web index and fits the current interface. Before implementation, choose a plan that permits the required caching or storage. Search results should normally be treated as discovery receipts; canonical pages remain the preferred evidence record.
+
+Provider selection must remain configurable so RhetoriQ can add or replace discovery and enrichment providers without changing investigation logic.
+
+### RSS and Atom
+
+Feeds are preferred for monitored publishers because they offer stable item identifiers and incremental updates without crawling index pages.
+
+The connector should:
+
+- use `ETag` and `Last-Modified` when supported;
+- checkpoint feed item IDs and publication timestamps;
+- preserve feed URL, item GUID, and canonical article URL;
+- tolerate malformed XML and date formats;
+- fetch the article only when feed content is insufficient;
+- monitor repeated failures and retired feed URLs.
+
+Do not hard-code an outlet list as authoritative. Feed coverage should be configurable and reviewed for geographic, institutional, and ideological concentration.
+
+### Official public records
+
+Official material should come from first-party sources whenever possible.
+
+Initial targets:
+
+- Congress.gov API for legislative records, hearings, members, votes, and Congressional Record material;
+- Federal Register API for rules, notices, proposed rules, and presidential documents;
+- agency APIs, official newsroom feeds, and official document repositories;
+- state and local first-party APIs where investigations require them.
+
+Official records are high-value evidence but do not replace independent reporting or community coverage. The retrieval planner should use them as a distinct source class.
+
+### Bluesky
+
+Jetstream provides JSON-encoded public AT Protocol events and supports collection/repository filtering. A production connector should checkpoint the event cursor, filter to the required record collections, resolve identities carefully, and retain stable URI/CID identifiers.
+
+Public availability does not remove privacy, retention, or responsible-use obligations.
+
+### Reddit
+
+Use only approved official Reddit API access. Do not implement page scraping as a substitute for API authorization.
+
+Before enabling the connector:
+
+- confirm the intended commercial or research use is permitted;
+- obtain the required OAuth credentials or agreement;
+- document rate limits and allowed storage/display;
+- implement deletion/removal synchronization;
+- isolate user-generated content from model-training uses not explicitly permitted;
+- preserve post/comment IDs and subreddit context without overstating demographic representativeness.
+
+Reddit is a useful community signal, not “the most important source” and not proof that a narrative originated there.
+
+### Video and speech sources
+
+Use first-party metadata APIs and official transcripts where available. YouTube’s Data API can discover videos, channels, playlists, and caption-track metadata, but transcript download availability and authorization must be validated separately.
+
+Do not assume a general public C-SPAN transcript API. C-SPAN content may be linked as evidence or integrated later through a documented, authorized interface. For official speech text, prefer government repositories, Congressional Record material, agency transcripts, and official newsroom feeds.
+
+### NewsAPI
+
+NewsAPI is optional and supplemental. Its development plan is not a production entitlement, and its terms restrict republishing copyrighted material and building a competing news database. If adopted, use it for licensed discovery and retain only what the selected plan permits.
+
+GDELT plus a broad search provider and publisher feeds should be evaluated before adding this dependency.
+
+## Provider evaluation checklist
+
+Every proposed connector must document:
+
+| Area | Required answer |
+|---|---|
+| Authority | Is this first-party, licensed, public-domain, or an aggregator? |
+| Coverage | Which geography, languages, source classes, and time ranges are represented? |
+| Freshness | Poll, stream, webhook, or batch cadence? |
+| History | Is historical retrieval supported and complete? |
+| Content | Metadata, snippet, full text, transcript, or media only? |
+| Identity | Are stable source-native IDs available? |
+| Terms | Is production/commercial use allowed? |
+| Storage | What may be cached, retained, displayed, or redistributed? |
+| Deletion | How are removals or corrections synchronized? |
+| Limits | What quotas, concurrency, and retry rules apply? |
+| Cost | Expected cost at development and production volume? |
+| Evidence quality | Can the result support a claim, or is it discovery-only? |
+
+## Adding a connector
+
+1. Complete the provider evaluation checklist and record the approval decision.
+2. Implement the source-specific client behind a connector or `SearchProvider` boundary.
+3. Map records into the shared `Document` contract without encoding transport names as source types.
+4. Preserve provider, query/cursor, source-native ID, canonical URL, timestamps, and collection metadata.
+5. Add pagination, checkpoint, retry, rate-limit, and partial-failure behavior.
+6. Add fixture-based tests for malformed records, duplicates, pagination, timestamps, and provider errors.
+7. Define retention, deletion, and revalidation behavior.
+8. Add health metrics and update this status table.
+9. If Kafka is enabled, emit the versioned raw-document event described in [KAFKA.md](KAFKA.md).
+
+## External references
+
+- [GDELT DOC 2.0 API](https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/)
+- [Hacker News API documentation](https://hn.algolia.com/api)
+- [Brave Search API](https://brave.com/search/api/)
+- [Congress.gov API](https://api.congress.gov/)
+- [Federal Register API](https://www.federalregister.gov/developers/documentation/api/v1)
+- [Bluesky Jetstream](https://docs.bsky.app/blog/jetstream)
+- [Reddit Data API terms](https://redditinc.com/policies/data-api-terms)
+- [YouTube Data API](https://developers.google.com/youtube/v3/docs)
+- [NewsAPI terms](https://newsapi.org/terms)
 

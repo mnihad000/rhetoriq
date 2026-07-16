@@ -138,7 +138,7 @@ Returns a paginated list of completed investigation reports, sorted by most rece
 |---|---|---|---|
 | `page` | integer | 1 | Page number |
 | `limit` | integer | 20 | Results per page (max 100) |
-| `source` | string | null | Filter by origin source (reddit, newsapi, rss, gdelt, cspan) |
+| `source_type` | string | null | Filter by normalized evidence class (`national_news`, `local_news`, `forum`, `blog`, `commentary`, or `speech_transcript`). Acquisition provider is recorded separately in document metadata. |
 | `days_back` | integer | 30 | How many days back to fetch |
 
 **Response**

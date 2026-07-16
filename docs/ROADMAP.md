@@ -255,7 +255,10 @@ The full backend test suite runs against PostgreSQL, persisted workspaces surviv
 
 #### Goals
 
-- Implement production connectors for Reddit, RSS/news, GDELT, speeches, and selected community sources.
+- Implement a broad web-search provider behind the existing `SearchProvider` boundary.
+- Implement API/feed-first production connectors for RSS/Atom, GDELT, official public records, and selected public event streams.
+- Add Reddit only through approved official API access with documented retention and deletion handling.
+- Retrieve speech and video evidence through first-party public records, metadata APIs, and authorized transcripts rather than assuming a public C-SPAN transcript API.
 - Normalize every source into a shared document contract.
 - Add rate-limit handling, pagination, checkpoints, deduplication, and source-specific tests.
 - Preserve source timestamps, canonical URLs, collection timestamps, and provenance metadata.

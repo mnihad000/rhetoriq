@@ -1,223 +1,123 @@
 # RhetoriQ
 
-> An autonomous narrative intelligence agent that detects emerging political talking points in real time, traces their origin, and maps how they spread across platforms â€” without any human prompting.
+RhetoriQ is an evidence-first narrative investigation system. It detects public narrative signals, retrieves source material, maps how language changes and spreads, and produces reports whose material claims point back to inspectable evidence.
 
----
+The product deliberately distinguishes **first observed in the available dataset** from true origin and does not treat correlation as proof of coordination.
 
-## What Is RhetoriQ?
+## What the current repository implements
 
-Every political narrative starts somewhere. A phrase coined on a fringe subreddit. A talking point buried in a think tank report. A line tested at a small rally. Within days it can be on every news channel, in every politician's mouth.
+- FastAPI endpoints for ingestion, trending topics, investigations, timelines, graphs, mutations, receipts, and reports.
+- GDELT DOC 2.0 ingestion for news discovery.
+- Hacker News ingestion through the public Algolia API.
+- Direct HTTP retrieval of canonical pages for evidence enrichment.
+- A provider boundary for broad web search; the production provider is not configured yet.
+- In-memory and SQLite-backed development storage, with optional Redis caching, vector search, and agent memory.
+- A React and TypeScript investigation interface.
 
-RhetoriQ watches all of it, continuously. The moment a narrative starts gaining unusual traction, RhetoriQ autonomously investigates â€” tracing it back to its origin, mapping every node that amplified it, and delivering a full provenance report before the narrative even hits mainstream media.
+Kafka, Flink, PostgreSQL/pgvector, Elasticsearch, Neo4j, Kubernetes, and source-connector workers describe the target production architecture. They are not all present in this repository yet. See [the roadmap](docs/ROADMAP.md) for implementation status.
 
-It is not a dashboard you query. It is a detective that never sleeps.
+## Collection strategy
 
----
+RhetoriQ is **API/feed-first**, not scraper-first:
 
-## What RhetoriQ Does
+1. First-party APIs, public datasets, event streams, and RSS/Atom feeds provide structured discovery records.
+2. A broad web-search API discovers relevant URLs outside those monitored sources.
+3. RhetoriQ retrieves a canonical source page only when needed to create an evidence record.
+4. Browser automation is a last resort for important JavaScript-rendered pages with no usable API or feed.
 
-- **Detects** emerging political narratives in real time across Reddit, news outlets, and political speeches
-- **Investigates autonomously** â€” no human prompting required
-- **Traces origins** â€” finds where a narrative first appeared, down to the source and timestamp
-- **Maps spread** â€” builds a graph of every node (subreddit, outlet, politician) that amplified the narrative
-- **Delivers reports** â€” synthesizes findings into a clean, human-readable investigation report
-- **Visualizes** â€” live graph visualization of how narratives travel from fringe to mainstream
+A website, post, transcript, or official record is a source. An API, feed, or HTML fetch is the transport used to retrieve it.
 
----
+Current source status is documented in [DATA_SOURCES.md](docs/DATA_SOURCES.md).
 
-## Architecture Overview
+## Current data flow
 
+```mermaid
+flowchart LR
+    G[GDELT DOC 2.0 API] --> I[Ingestion services]
+    H[HN Algolia API] --> I
+    S[SearchProvider boundary] -. provider planned .-> D[Discovery agent]
+    I --> N[Normalized Document records]
+    D --> F[Canonical-page fetcher]
+    F --> N
+    N --> T[Trending and investigation pipelines]
+    T --> A[FastAPI]
+    A --> U[React frontend]
 ```
-Data Sources â†’ Scrapers â†’ Kafka â†’ Flink â†’ Databases â†’ LangChain Agent â†’ configured LLM â†’ Report
-                                                â†‘
-                                     PostgreSQL / pgvector
-                                     Elasticsearch
-                                     Neo4j
-                                     Redis
-```
 
-See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full deep dive.
+The target production flow adds durable connector checkpoints, Kafka replay, stream processing, and production data stores without changing the normalized document contract.
 
----
+## Repository layout
 
-## Tech Stack
-
-### Data Ingestion
-- Reddit API (PRAW)
-- GDELT Project
-- NewsAPI
-- C-SPAN API
-- RSS Feeds (NYT, BBC, Fox, Reuters, Breitbart)
-
-### Stream Processing
-- Apache Kafka
-- Apache Flink
-
-### Databases
-- PostgreSQL + pgvector (vector embeddings + semantic search)
-- Elasticsearch (full-text search)
-- Neo4j (graph â€” spread mapping)
-- Redis (caching)
-
-### AI / ML
-- LangChain (agentic investigation loop)
-- model-provider configured LLM (narrative synthesis and reasoning)
-- HuggingFace (NER, entity extraction, sentence embeddings)
-
-### Infrastructure
-- Kubernetes (container orchestration)
-- Docker (containerization)
-- Terraform (infrastructure as code)
-- ArgoCD (GitOps continuous deployment)
-- GitHub Actions (CI/CD)
-
-### Observability
-- Prometheus (metrics)
-- Grafana (dashboards)
-
-### Frontend
-- React + TypeScript
-- Neo4j graph visualization
-- WebSockets (live updates)
-
----
-
-## Folder Structure
-
-```
+```text
 rhetoriq/
-â”œâ”€â”€ README.md
-â”œâ”€â”€ ARCHITECTURE.md
-â”œâ”€â”€ ROADMAP.md
-â”œâ”€â”€ KAFKA.md
-â”œâ”€â”€ SERVICES.md
-â”œâ”€â”€ AGENT.md
-â”œâ”€â”€ INFRASTRUCTURE.md
-â”œâ”€â”€ DATA_SOURCES.md
-â”œâ”€â”€ TESTING.md
-â”œâ”€â”€ CONTRIBUTING.md
-â”œâ”€â”€ TROUBLESHOOTING.md
-â”œâ”€â”€ backend/
-â”‚   â”œâ”€â”€ BACKEND.md
-â”‚   â”œâ”€â”€ scrapers/          # One scraper microservice per data source
-â”‚   â”œâ”€â”€ processors/        # Flink stream processing jobs
-â”‚   â”œâ”€â”€ agent/             # LangChain agent and investigation loop
-â”‚   â””â”€â”€ api/               # REST API serving the frontend
-â”œâ”€â”€ frontend/
-â”‚   â”œâ”€â”€ FRONTEND.md
-â”‚   â””â”€â”€ src/
-â”œâ”€â”€ infra/
-â”‚   â””â”€â”€ terraform/         # All infrastructure as code
-â””â”€â”€ k8s/
-    â””â”€â”€ manifests/         # Kubernetes deployment manifests
+|-- backend/
+|   |-- agents/       # planning, retrieval, synthesis, and receipts
+|   |-- api/          # FastAPI route modules
+|   |-- models/       # shared Pydantic contracts
+|   |-- services/     # ingestion, retrieval, analysis, and persistence
+|   `-- tests/
+|-- frontend/         # React, TypeScript, and Vite application
+|-- docs/             # design and operating documentation
+|-- SYSTEM_DESIGN.md
+`-- README.md
 ```
 
----
+## Local development
 
-## Quick Start (Local Development)
+### Backend
 
-### Prerequisites
-- Docker Desktop
-- Python 3.11+
-- Node.js 18+
-- kubectl
-- Terraform CLI
-
-### 1. Clone the repo
-```bash
-git clone https://github.com/yourusername/rhetoriq.git
-cd rhetoriq
-```
-
-### 2. Set up environment variables
-```bash
-cp .env.example .env
-# Fill in your API keys â€” see DATA_SOURCES.md for how to get each one
-```
-
-### 3. Start core infrastructure locally
-```bash
-docker-compose up -d
-# Starts Kafka, Zookeeper, PostgreSQL, Elasticsearch, Neo4j, Redis
-```
-
-### 4. Run the scrapers
-```bash
-cd backend/scrapers
+```powershell
+cd backend
+python -m venv ..\.venv
+..\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python run_all.py
-```
-
-### 5. Start the Flink processor
-```bash
-cd backend/processors
-python flink_job.py
-```
-
-### 6. Start the agent
-```bash
-cd backend/agent
-python agent.py
-```
-
-### 7. Start the API
-```bash
-cd backend/api
 uvicorn main:app --reload
 ```
 
-### 8. Start the frontend
-```bash
+The API is available at `http://127.0.0.1:8000`; interactive documentation is at `/docs`.
+
+### Frontend
+
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-Visit `http://localhost:3000` to see RhetoriQ running.
+### Tests
 
----
+```powershell
+pytest
+cd frontend
+npm run build
+```
 
-## Environment Variables
+## Important configuration
 
-| Variable | Description |
+Settings are loaded from `backend/.env` when present.
+
+| Variable | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | model-provider API key for configured LLM |
-| `REDDIT_CLIENT_ID` | Reddit API client ID |
-| `REDDIT_CLIENT_SECRET` | Reddit API client secret |
-| `NEWS_API_KEY` | NewsAPI key |
-| `KAFKA_BOOTSTRAP_SERVERS` | Kafka broker address |
-| `POSTGRES_URL` | PostgreSQL connection string |
-| `ELASTICSEARCH_URL` | Elasticsearch connection string |
-| `NEO4J_URI` | Neo4j connection URI |
-| `NEO4J_PASSWORD` | Neo4j password |
-| `REDIS_URL` | Redis connection string |
+| `DEMO_MODE` | Use the bundled demo corpus and skip background live refreshes. |
+| `GEMINI_API_KEY` | Optional Gemini model access. |
+| `GROQ_API_KEY` | Optional Groq model access. |
+| `REDIS_URL` | Optional Redis cache, phrase store, vector store, and memory. |
+| `GDELT_BASE_URL` | GDELT DOC 2.0 endpoint. |
+| `GDELT_MAX_RECORDS` | Maximum GDELT records requested per query. |
+| `FETCH_TIMEOUT_SECONDS` | Canonical-page retrieval timeout. |
 
-See [DATA_SOURCES.md](docs/DATA_SOURCES.md) for full details on obtaining each API key.
-
----
+Future connectors must add their credentials only when implemented and approved. Reddit access, commercial search APIs, and licensed news products require terms and retention review before production use.
 
 ## Documentation
 
-| Document | Description |
+| Document | Purpose |
 |---|---|
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Full system design and data flow |
-| [KAFKA.md](docs/KAFKA.md) | Kafka topics, schemas, and partition strategy |
-| [SERVICES.md](docs/SERVICES.md) | Every microservice documented individually |
-| [AGENT.md](docs/AGENTS.md) | LangChain agent investigation loop |
-| [DATA_SOURCES.md](docs/DATA_SOURCES.md) | APIs, credentials, rate limits |
-| [INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | Kubernetes, Terraform, ArgoCD setup |
-| [TESTING.md](docs/TESTING.md) | Testing strategy per layer |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Coding standards and PR process |
-| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common failure modes and fixes |
-| [backend/BACKEND.md](docs/BACKEND.md) | API endpoints and database schemas |
-| [frontend/FRONTEND.md](docs/FRONTEND.md) | Frontend components and architecture |
-
----
-
-## Why RhetoriQ?
-
-Political narratives shape elections, policy, and public opinion. Understanding where they come from and how they spread is one of the most important open problems in political science and journalism. RhetoriQ operationalizes that problem as a real-time autonomous system â€” turning a question philosophers and researchers have argued about for decades into something measurable, traceable, and visible.
-
----
-
-*Built with the conviction that information has a history, and that history matters.*
+| [SYSTEM_DESIGN.md](SYSTEM_DESIGN.md) | Concise system principles and investigation lifecycle. |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Current and target architecture, including collection boundaries. |
+| [DATA_SOURCES.md](docs/DATA_SOURCES.md) | Source hierarchy, provider status, and compliance requirements. |
+| [SERVICES.md](docs/SERVICES.md) | Implemented service boundaries and planned connectors. |
+| [KAFKA.md](docs/KAFKA.md) | Planned replayable event contracts. |
+| [INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | Current deployment status and production principles. |
+| [ROADMAP.md](docs/ROADMAP.md) | Delivery status and future phases. |
+| [BACKEND.md](docs/BACKEND.md) | Backend contracts and endpoint reference. |
+| [FRONTEND.md](docs/FRONTEND.md) | Frontend behavior and component model. |

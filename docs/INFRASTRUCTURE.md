@@ -1,636 +1,187 @@
-# RhetoriQ â€” Infrastructure
+# RhetoriQ Infrastructure
 
-> This document covers everything infrastructure related. Kubernetes setup, Terraform provisioning, ArgoCD GitOps, GitHub Actions CI/CD, secrets management, and environment setup. If you are deploying, scaling, or modifying infrastructure, start here.
+This document separates the infrastructure that exists in the repository from the production topology planned in the roadmap.
 
----
+## Current state
 
-## Overview
+The repository currently supports local execution of:
 
-RhetoriQ's infrastructure is fully code-defined. No manual clicking in cloud consoles. No manual `kubectl apply`. Everything is reproducible from scratch with two commands:
+- one FastAPI backend process;
+- one Vite/React frontend process;
+- SQLite and in-process development stores;
+- optional Redis for cache, phrase tracking, vectors, and agent memory.
 
-```bash
-terraform apply        # Provision all cloud resources
-# ArgoCD then automatically deploys all services from Git
+The repository does not currently contain deployable Kafka, Flink, Kubernetes, Terraform, or ArgoCD implementations. Those remain production roadmap work and should not appear in setup instructions as completed resources.
+
+## Target production topology
+
+Kafka remains the central asynchronous event backbone.
+
+```mermaid
+flowchart TB
+    subgraph Edge[Collection]
+      C[Checkpointed connector workers]
+      F[Controlled canonical fetch workers]
+    end
+    subgraph Events[Event backbone]
+      K[(Managed Kafka)]
+      SR[Schema registry]
+    end
+    subgraph Compute[Processing]
+      N[Normalization/enrichment]
+      S[Signal detection]
+      I[Investigation workers]
+      A[FastAPI]
+    end
+    subgraph Data[Durable data]
+      P[(PostgreSQL + vector index)]
+      X[(Full-text index, if needed)]
+      G[(Graph store, if justified)]
+      R[(Redis)]
+      O[(Object/evidence storage)]
+    end
+    U[Frontend/CDN]
+
+    C --> K
+    F --> K
+    SR --- K
+    K --> N
+    N --> K
+    K --> S
+    K --> I
+    N --> P
+    N --> X
+    N --> G
+    N --> O
+    S --> P
+    I --> P
+    I --> R
+    K --> A
+    P --> A
+    X --> A
+    G --> A
+    A --> U
 ```
 
-### Infrastructure Stack
+## Deployment boundaries
 
-| Tool | Purpose |
-|---|---|
-| **Terraform** | Provisions all cloud resources (EKS, RDS, ElastiCache, MSK) |
-| **Kubernetes (EKS)** | Orchestrates all service deployments |
-| **ArgoCD** | GitOps â€” auto-deploys on every merge to `main` |
-| **GitHub Actions** | CI â€” runs tests and builds Docker images on every PR |
-| **Helm** | Packages third-party services (Kafka, Elasticsearch, Neo4j) |
-| **Prometheus + Grafana** | Metrics collection and dashboarding |
-| **AWS Secrets Manager** | Secrets storage â€” no secrets in Git ever |
+Use independently deployable workers where scaling, failure isolation, or provider policy requires it:
 
----
+- connector workers grouped by similar rate-limit and secret boundaries;
+- canonical-fetch workers with per-domain controls;
+- Kafka normalization and enrichment consumers;
+- signal-detection consumers;
+- investigation workers;
+- persistence/indexing consumers;
+- API and frontend services.
 
-## Cloud Architecture (AWS)
+Do not require one Kubernetes deployment per source by convention. A high-volume public stream may need isolation; several low-volume official APIs may safely share a worker.
 
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚                         AWS                                  â”‚
-â”‚                                                              â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚                    EKS Cluster                        â”‚   â”‚
-â”‚  â”‚                                                       â”‚   â”‚
-â”‚  â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”‚   â”‚
-â”‚  â”‚  â”‚  Scraper    â”‚  â”‚   Flink     â”‚  â”‚   Agent     â”‚  â”‚   â”‚
-â”‚  â”‚  â”‚  Node Group â”‚  â”‚  Node Group â”‚  â”‚  Node Group â”‚  â”‚   â”‚
-â”‚  â”‚  â”‚  (t3.small) â”‚  â”‚  (t3.large) â”‚  â”‚  (t3.medium)â”‚  â”‚   â”‚
-â”‚  â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â”‚   â”‚
-â”‚  â”‚                                                       â”‚   â”‚
-â”‚  â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”                    â”‚   â”‚
-â”‚  â”‚  â”‚   API       â”‚  â”‚  ArgoCD +   â”‚                    â”‚   â”‚
-â”‚  â”‚  â”‚  Node Group â”‚  â”‚  Prometheus â”‚                    â”‚   â”‚
-â”‚  â”‚  â”‚  (t3.small) â”‚  â”‚  (t3.small) â”‚                    â”‚   â”‚
-â”‚  â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜                    â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                                              â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”      â”‚
-â”‚  â”‚   AWS MSK    â”‚  â”‚  RDS Postgresâ”‚  â”‚ ElastiCache  â”‚      â”‚
-â”‚  â”‚   (Kafka)    â”‚  â”‚              â”‚  â”‚   (Redis)    â”‚      â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜      â”‚
-â”‚                                                              â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”                        â”‚
-â”‚  â”‚     S3       â”‚  â”‚   Secrets    â”‚                        â”‚
-â”‚  â”‚  (artifacts) â”‚  â”‚   Manager    â”‚                        â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜                        â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
+## Kafka
 
----
+Production Kafka should provide:
 
-## Terraform
+- multi-zone durability appropriate to the deployment tier;
+- TLS in transit and least-privilege topic ACLs;
+- schema registry integration;
+- controlled topic creation and versioned contracts;
+- lag, throughput, and dead-letter monitoring;
+- retention aligned with provider storage and deletion requirements.
 
-### Structure
+The topic and event design is defined in [KAFKA.md](KAFKA.md).
 
-```
-infra/
-â””â”€â”€ terraform/
-    â”œâ”€â”€ main.tf           # Root module â€” calls all child modules
-    â”œâ”€â”€ variables.tf      # Input variables
-    â”œâ”€â”€ outputs.tf        # Output values (cluster endpoint, etc.)
-    â”œâ”€â”€ versions.tf       # Provider version locks
-    â””â”€â”€ modules/
-        â”œâ”€â”€ eks/          # EKS cluster and node groups
-        â”œâ”€â”€ msk/          # AWS MSK (managed Kafka)
-        â”œâ”€â”€ rds/          # RDS PostgreSQL
-        â”œâ”€â”€ elasticache/  # Redis
-        â”œâ”€â”€ s3/           # S3 buckets
-        â””â”€â”€ secrets/      # AWS Secrets Manager entries
-```
+## Connector infrastructure
 
-### Prerequisites
+Each production connector needs:
 
-```bash
-# Install Terraform
-brew install terraform  # macOS
-# or
-wget https://releases.hashicorp.com/terraform/1.7.0/terraform_1.7.0_linux_amd64.zip
+- secrets isolated to that connector’s service account;
+- durable checkpoints or cursors;
+- distributed rate-limit coordination where replicas share a quota;
+- outbound network policy limited to required provider domains;
+- timeout, retry, and circuit-breaker configuration;
+- last-success, lag, quota, and rejection metrics;
+- a kill switch for legal, policy, or provider incidents.
 
-# Install AWS CLI
-brew install awscli
+Canonical fetch workers additionally need per-domain concurrency limits, response-size limits, content-type validation, and explicit refusal to bypass paywalls or technical access controls.
 
-# Configure AWS credentials
-aws configure
-# Enter: AWS Access Key ID, Secret Access Key, region (us-east-1), output format (json)
+## Storage
 
-# Install kubectl
-brew install kubectl
+Adopt production stores incrementally:
 
-# Install eksctl
-brew install eksctl
-```
+1. PostgreSQL for durable document and investigation records.
+2. A vector extension/index for semantic retrieval.
+3. Redis for caching, coordination, and ephemeral state.
+4. A dedicated full-text index only when PostgreSQL search no longer meets requirements.
+5. A graph database only when graph traversal requirements justify its operational cost.
+6. Object storage for permitted raw evidence, snapshots, and large artifacts.
 
-### Initial Setup
+Backups, encryption, retention, and deletion workflows must be tested before a store becomes authoritative.
 
-```bash
-cd infra/terraform
+## Secrets and configuration
 
-# Initialize Terraform â€” downloads providers and modules
-terraform init
+- Store provider credentials in a managed secret service, never in images, Kafka events, source control, or logs.
+- Mount or inject only the secrets required by each connector.
+- Rotate credentials independently.
+- Keep provider base URLs, polling cadence, rate limits, and feature flags in validated configuration.
+- Use separate development, staging, and production credentials and quotas.
 
-# Preview what will be created
-terraform plan -var-file="environments/prod.tfvars"
+Potential future secrets include a broad-search API key, Reddit OAuth credentials, Congress.gov/data.gov key, and YouTube API key. They should not be added to required configuration until the corresponding connector is implemented and approved.
 
-# Apply â€” creates all infrastructure (~15 minutes)
-terraform apply -var-file="environments/prod.tfvars"
-```
+## Network and security
 
-### Key Resources Created
-
-```hcl
-# infra/terraform/main.tf
-
-module "eks" {
-  source          = "./modules/eks"
-  cluster_name    = "rhetoriq-prod"
-  cluster_version = "1.29"
-  
-  node_groups = {
-    scrapers = {
-      instance_type  = "t3.small"
-      min_size       = 2
-      max_size       = 5
-      desired_size   = 2
-    }
-    flink = {
-      instance_type  = "t3.large"    # Flink needs more memory for HuggingFace models
-      min_size       = 1
-      max_size       = 4
-      desired_size   = 2
-    }
-    agent = {
-      instance_type  = "t3.medium"
-      min_size       = 1
-      max_size       = 3
-      desired_size   = 1
-    }
-    general = {
-      instance_type  = "t3.small"
-      min_size       = 2
-      max_size       = 6
-      desired_size   = 2
-    }
-  }
-}
-
-module "msk" {
-  source         = "./modules/msk"
-  cluster_name   = "rhetoriq-kafka"
-  kafka_version  = "3.5.1"
-  broker_count   = 3
-  instance_type  = "kafka.t3.small"
-  storage_gb     = 100
-}
-
-module "rds" {
-  source            = "./modules/rds"
-  identifier        = "rhetoriq-postgres"
-  engine_version    = "15.4"
-  instance_class    = "db.t3.medium"
-  allocated_storage = 50
-  database_name     = "rhetoriq"
-}
-
-module "elasticache" {
-  source        = "./modules/elasticache"
-  cluster_id    = "rhetoriq-redis"
-  node_type     = "cache.t3.micro"
-  num_nodes     = 1
-}
-```
-
-### Environment Variables File
-
-```hcl
-# infra/terraform/environments/prod.tfvars
-aws_region   = "us-east-1"
-environment  = "prod"
-project_name = "rhetoriq"
-```
-
-### Tearing Down
-
-```bash
-# Destroy all infrastructure
-terraform destroy -var-file="environments/prod.tfvars"
-# Type 'yes' to confirm
-```
-
----
-
-## Kubernetes
-
-### Connect to EKS Cluster
-
-```bash
-# After terraform apply, configure kubectl
-aws eks update-kubeconfig \
-  --region us-east-1 \
-  --name rhetoriq-prod
-
-# Verify connection
-kubectl get nodes
-```
-
-### Namespace Structure
-
-```bash
-# Create namespaces
-kubectl create namespace rhetoriq        # All RhetoriQ services
-kubectl create namespace monitoring      # Prometheus + Grafana
-kubectl create namespace argocd          # ArgoCD
-```
-
-### Folder Structure
-
-```
-k8s/
-â””â”€â”€ manifests/
-    â”œâ”€â”€ scrapers/
-    â”‚   â”œâ”€â”€ reddit-scraper.yaml
-    â”‚   â”œâ”€â”€ news-scraper.yaml
-    â”‚   â”œâ”€â”€ rss-scraper.yaml
-    â”‚   â”œâ”€â”€ gdelt-scraper.yaml
-    â”‚   â””â”€â”€ cspan-scraper.yaml
-    â”œâ”€â”€ processors/
-    â”‚   â”œâ”€â”€ flink-processor.yaml
-    â”‚   â””â”€â”€ storage-worker.yaml
-    â”œâ”€â”€ agent/
-    â”‚   â””â”€â”€ agent.yaml
-    â”œâ”€â”€ api/
-    â”‚   â”œâ”€â”€ api-deployment.yaml
-    â”‚   â””â”€â”€ api-service.yaml
-    â”œâ”€â”€ frontend/
-    â”‚   â”œâ”€â”€ frontend-deployment.yaml
-    â”‚   â””â”€â”€ frontend-service.yaml
-    â””â”€â”€ config/
-        â”œâ”€â”€ configmap.yaml
-        â””â”€â”€ hpa.yaml              # Horizontal Pod Autoscaler rules
-```
-
-### Example Deployment Manifest
-
-```yaml
-# k8s/manifests/scrapers/reddit-scraper.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: reddit-scraper
-  namespace: rhetoriq
-  labels:
-    app: reddit-scraper
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: reddit-scraper
-  template:
-    metadata:
-      labels:
-        app: reddit-scraper
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "8090"
-    spec:
-      containers:
-        - name: reddit-scraper
-          image: your-ecr-repo/rhetoriq-reddit-scraper:latest
-          ports:
-            - containerPort: 8090    # Health check port
-          env:
-            - name: KAFKA_BOOTSTRAP_SERVERS
-              valueFrom:
-                configMapKeyRef:
-                  name: rhetoriq-config
-                  key: KAFKA_BOOTSTRAP_SERVERS
-            - name: REDDIT_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: rhetoriq-secrets
-                  key: REDDIT_CLIENT_ID
-            - name: REDDIT_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: rhetoriq-secrets
-                  key: REDDIT_CLIENT_SECRET
-          resources:
-            requests:
-              memory: "256Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
-              cpu: "250m"
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8090
-            initialDelaySeconds: 30
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8090
-            initialDelaySeconds: 10
-            periodSeconds: 5
-      restartPolicy: Always
-```
-
-### Horizontal Pod Autoscaler
-
-```yaml
-# k8s/manifests/config/hpa.yaml
-
-# Scale Flink processor based on CPU
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: flink-processor-hpa
-  namespace: rhetoriq
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: flink-processor
-  minReplicas: 1
-  maxReplicas: 4
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-
-# Scale agent based on Kafka consumer lag
-# Requires KEDA (Kubernetes Event-Driven Autoscaling)
-apiVersion: keda.sh/v1alpha1
-kind: ScaledObject
-metadata:
-  name: agent-scaledobject
-  namespace: rhetoriq
-spec:
-  scaleTargetRef:
-    name: agent
-  minReplicaCount: 1
-  maxReplicaCount: 3
-  triggers:
-    - type: kafka
-      metadata:
-        bootstrapServers: your-msk-endpoint:9092
-        consumerGroup: agent-consumer
-        topic: anomalies.detected
-        lagThreshold: "10"    # Scale up if lag exceeds 10 messages
-```
-
----
-
-## ArgoCD â€” GitOps
-
-ArgoCD watches the `main` branch of this repository. Every merge to `main` automatically deploys updated manifests to the EKS cluster. You never run `kubectl apply` manually in production.
-
-### Install ArgoCD
-
-```bash
-kubectl create namespace argocd
-
-kubectl apply -n argocd \
-  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-
-# Wait for ArgoCD to be ready
-kubectl wait --for=condition=available \
-  --timeout=300s deployment/argocd-server -n argocd
-
-# Get initial admin password
-kubectl -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath="{.data.password}" | base64 -d
-```
-
-### Access ArgoCD UI
-
-```bash
-# Port-forward to ArgoCD UI
-kubectl port-forward svc/argocd-server -n argocd 8080:443
-# Open https://localhost:8080
-# Login: admin / <password from above>
-```
-
-### Create ArgoCD Application
-
-```yaml
-# argocd-app.yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: rhetoriq
-  namespace: argocd
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/yourusername/rhetoriq.git
-    targetRevision: main
-    path: k8s/manifests
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: rhetoriq
-  syncPolicy:
-    automated:
-      prune: true       # Remove resources deleted from Git
-      selfHeal: true    # Revert manual kubectl changes
-    syncOptions:
-      - CreateNamespace=true
-```
-
-```bash
-kubectl apply -f argocd-app.yaml
-```
-
-From this point forward, every merge to `main` triggers an automatic deployment.
-
----
-
-## GitHub Actions â€” CI/CD
-
-### Workflow
-
-```
-Push to PR branch
-      â”‚
-      â–¼
-Run tests (pytest)
-      â”‚
-      â–¼
-Build Docker images
-      â”‚
-      â–¼
-Push to ECR (only on merge to main)
-      â”‚
-      â–¼
-ArgoCD detects new image tag â†’ deploys automatically
-```
-
-### CI Workflow
-
-```yaml
-# .github/workflows/ci.yml
-name: CI
-
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          pip install -r backend/requirements.txt
-          pip install -r backend/requirements-test.txt
-
-      - name: Run tests
-        run: |
-          pytest backend/ -v --cov=backend --cov-report=xml
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-
-  build:
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Login to ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and push images
-        run: |
-          IMAGE_TAG=${{ github.sha }}
-          ECR_REGISTRY=${{ secrets.ECR_REGISTRY }}
-          
-          services=("reddit-scraper" "news-scraper" "rss-scraper" 
-                    "gdelt-scraper" "cspan-scraper" "flink-processor" 
-                    "storage-worker" "agent" "api")
-          
-          for service in "${services[@]}"; do
-            docker build -t $ECR_REGISTRY/rhetoriq-$service:$IMAGE_TAG \
-              -f backend/Dockerfile.$service .
-            docker push $ECR_REGISTRY/rhetoriq-$service:$IMAGE_TAG
-            
-            # Update the image tag in k8s manifests
-            sed -i "s|rhetoriq-$service:.*|rhetoriq-$service:$IMAGE_TAG|g" \
-              k8s/manifests/**/$service.yaml
-          done
-          
-          # Commit updated manifests â€” ArgoCD will pick up the change
-          git config user.email "ci@rhetoriq.com"
-          git config user.name "RhetoriQ CI"
-          git add k8s/manifests/
-          git commit -m "ci: update image tags to $IMAGE_TAG"
-          git push
-```
-
----
-
-## Secrets Management
-
-**No secrets are ever stored in Git.** All secrets live in AWS Secrets Manager and are injected into pods at runtime via the AWS Secrets Store CSI Driver.
-
-### Secrets Structure in AWS Secrets Manager
-
-```
-rhetoriq/prod/
-â”œâ”€â”€ reddit_client_id
-â”œâ”€â”€ reddit_client_secret
-â”œâ”€â”€ news_api_key
-â”œâ”€â”€ cspan_api_key
-â”œâ”€â”€ openai_api_key
-â”œâ”€â”€ postgres_password
-â”œâ”€â”€ neo4j_password
-â””â”€â”€ redis_auth_token
-```
-
-### Syncing Secrets to Kubernetes
-
-```yaml
-# k8s/manifests/config/secret-store.yaml
-apiVersion: secrets-store.csi.x-k8s.io/v1
-kind: SecretProviderClass
-metadata:
-  name: rhetoriq-secrets
-  namespace: rhetoriq
-spec:
-  provider: aws
-  parameters:
-    objects: |
-      - objectName: "rhetoriq/prod/openai_api_key"
-        objectType: "secretsmanager"
-        objectAlias: "OPENAI_API_KEY"
-      - objectName: "rhetoriq/prod/reddit_client_id"
-        objectType: "secretsmanager"
-        objectAlias: "REDDIT_CLIENT_ID"
-      # ... all other secrets
-  secretObjects:
-    - secretName: rhetoriq-secrets
-      type: Opaque
-      data:
-        - objectName: "OPENAI_API_KEY"
-          key: OPENAI_API_KEY
-        - objectName: "REDDIT_CLIENT_ID"
-          key: REDDIT_CLIENT_ID
-```
-
----
+- Default-deny service-to-service and outbound network policy where practical.
+- Require authenticated, encrypted access to Kafka and durable stores.
+- Put the API behind managed TLS, request limits, and an application firewall appropriate to the threat model.
+- Prevent connector workers from reaching internal control planes they do not need.
+- Redact URLs or query parameters that may contain sensitive values from logs.
+- Audit administrative access and production replay operations.
 
 ## Observability
 
-### Install Prometheus + Grafana
+Minimum production dashboards:
 
-```bash
-helm repo add prometheus-community \
-  https://prometheus-community.github.io/helm-charts
+- connector checkpoint age and last successful collection;
+- provider error, throttle, and quota status;
+- canonical-fetch success and latency by domain class;
+- Kafka producer errors, consumer lag, and dead-letter counts;
+- processing throughput and document rejection reasons;
+- investigation duration, evidence coverage, and stage failures;
+- API latency/error rate;
+- store capacity, query latency, and backup health.
 
-helm install prometheus prometheus-community/kube-prometheus-stack \
-  --namespace monitoring \
-  --create-namespace \
-  --set grafana.adminPassword=your_password
+Alerts should identify the affected provider or stage without leaking document content.
+
+## Delivery approach
+
+The recommended sequence is:
+
+1. containerize and deploy the existing backend/frontend;
+2. add durable PostgreSQL persistence;
+3. implement and test source connectors with checkpoints;
+4. introduce Kafka contracts and idempotent consumers;
+5. split background processing into independently deployable workers;
+6. add autoscaling from measured CPU, queue lag, and connector backlog;
+7. add GitOps or equivalent automated deployment after manifests exist;
+8. add specialized search/graph stores only when justified by measured requirements.
+
+Infrastructure as code should describe real resources checked into the repository. Documentation must not include pretend Terraform modules, Kubernetes manifests, costs, or secret names before those artifacts exist.
+
+## Local development
+
+Backend:
+
+```powershell
+cd backend
+..\.venv\Scripts\Activate.ps1
+uvicorn main:app --reload
 ```
 
-### Access Grafana
+Frontend:
 
-```bash
-kubectl port-forward svc/prometheus-grafana 3000:80 -n monitoring
-# Open http://localhost:3000
-# Login: admin / your_password
+```powershell
+cd frontend
+npm run dev
 ```
 
-### Key Dashboards to Build
-
-| Dashboard | Key Panels |
-|---|---|
-| **Kafka Health** | Consumer lag per group, messages/sec per topic, broker disk usage |
-| **Flink Processor** | Documents processed/sec, anomalies detected/hr, processing latency p99 |
-| **Agent** | Investigations/hr, investigation duration p95, model-provider cost/day, failed investigations |
-| **Storage** | Write latency per database, connection pool usage, query latency p99 |
-| **Infrastructure** | Pod CPU/memory per node group, HPA scaling events, pod restarts |
-
----
-
-## Estimated Monthly Cost
-
-| Resource | Instance | Est. Cost/Month |
-|---|---|---|
-| EKS Control Plane | â€” | $73 |
-| EC2 Node Groups (8 nodes avg) | t3.small/medium/large | ~$180 |
-| AWS MSK (Kafka) | kafka.t3.small x3 | ~$150 |
-| RDS PostgreSQL | db.t3.medium | ~$60 |
-| ElastiCache Redis | cache.t3.micro | ~$15 |
-| S3 | â€” | ~$5 |
-| Data Transfer | â€” | ~$20 |
-| **Total** | | **~$500/month** |
-
-For development, run everything locally with Docker Compose â€” see SERVICES.md. Only deploy to AWS when testing production behavior.
-
+Redis is optional for development features. Kafka should be added to local setup when the B3 event contracts and consumers are implemented, not before.
 

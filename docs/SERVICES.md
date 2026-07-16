@@ -1,598 +1,147 @@
-# RhetoriQ â€” Services
+# RhetoriQ Services
 
-> This document covers every microservice in RhetoriQ. Each service is documented individually â€” what it does, what it consumes and produces, its dependencies, environment variables, how to run it in isolation, and common failure modes.
+This document describes the service boundaries that exist in the repository and the worker boundaries planned for production. It does not use “scraper” as the generic name for collection services; collection is performed by source connectors with different transports.
 
----
+## Current runtime
 
-## Overview
+The current backend runs as one FastAPI process with modular agents and services. In non-demo mode, an in-process background thread periodically refreshes trending data. These modules can later be separated into workers without changing their core contracts.
 
-RhetoriQ is composed of 10 microservices. Each runs as an independent Kubernetes deployment and communicates exclusively through Kafka.
+| Area | Location | Responsibility |
+|---|---|---|
+| API | `backend/main.py`, `backend/api/` | HTTP routes, validation, and application startup. |
+| GDELT connector | `backend/services/gdelt.py` | Query GDELT DOC 2.0 and normalize article metadata. |
+| HN connector | `backend/services/hn_ingestion.py` | Query the Algolia HN API for stories. |
+| Ingestion coordinator | `backend/services/ingestion.py` | Run current connectors, persist partial successes, and report errors. |
+| Search provider boundary | `backend/services/search_provider.py` | Abstract discovery and enrichment search; currently unconfigured. |
+| Discovery agent | `backend/agents/discovery_agent.py` | Generate queries, deduplicate candidates, fetch pages, and normalize evidence. |
+| Page fetcher | `backend/services/page_fetcher.py` | Retrieve canonical HTML with redirect, timeout, content-type, and cache handling. |
+| Document normalizer | `backend/services/document_normalizer.py` | Map HTML and provider metadata into the shared `Document` model. |
+| Trending pipeline | `backend/services/trending_*.py` | Discover, rank, cache, and serve live narrative topics. |
+| Investigation pipeline | `backend/agents/`, `backend/services/research_loop_runner.py` | Plan retrieval lanes and build evidence-limited artifacts. |
+| Persistence | repository, store, cache, and Redis modules | Development documents, investigations, cache, vectors, and memory. |
+| Frontend | `frontend/` | Investigation workspace and narrative views. |
 
-| Service | Language | Kafka Consumes | Kafka Produces | Description |
-|---|---|---|---|---|
-| `reddit-scraper` | Python | â€” | `raw.reddit` | Streams Reddit posts |
-| `news-scraper` | Python | â€” | `raw.news` | Polls NewsAPI |
-| `rss-scraper` | Python | â€” | `raw.news` | Polls RSS feeds |
-| `gdelt-scraper` | Python | â€” | `raw.gdelt` | Polls GDELT every 15min |
-| `cspan-scraper` | Python | â€” | `raw.speeches` | Polls C-SPAN API |
-| `flink-processor` | Python | `raw.*` | `documents.processed`, `anomalies.detected` | Cleans, embeds, detects anomalies |
-| `storage-worker` | Python | `documents.processed` | â€” | Writes to all 4 databases |
-| `agent` | Python | `anomalies.detected` | `investigations.complete` | Autonomous investigation loop |
-| `api` | Python | `investigations.complete` | â€” | REST API + WebSocket server |
-| `frontend` | TypeScript | â€” | â€” | React dashboard |
+## Current collection sequence
 
----
+```mermaid
+sequenceDiagram
+    participant API
+    participant Coordinator
+    participant Connector
+    participant Store
+    participant Investigator
+    participant Fetcher
 
-## 1. reddit-scraper
-
-### What It Does
-Streams new posts from monitored subreddits in real time using PRAW's streaming API. Publishes each post to `raw.reddit` immediately upon ingestion.
-
-### Location
-```
-backend/scrapers/reddit_scraper.py
-```
-
-### Kafka
-- **Produces:** `raw.reddit`
-- **Partition key:** subreddit name
-
-### Dependencies
-- PRAW (Python Reddit API Wrapper)
-- kafka-python
-- Redis (bloom filter for deduplication)
-
-### Environment Variables
-```env
-REDDIT_CLIENT_ID=
-REDDIT_CLIENT_SECRET=
-REDDIT_USER_AGENT=rhetoriq:v1.0 (by /u/yourusername)
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-REDIS_URL=redis://localhost:6379
+    API->>Coordinator: ingest(query, time window)
+    Coordinator->>Connector: GDELT and HN queries
+    Connector-->>Coordinator: normalized Documents or provider error
+    Coordinator->>Store: save successful documents
+    API->>Investigator: run investigation
+    Investigator->>Fetcher: fetch discovered canonical URLs
+    Fetcher-->>Investigator: RawPage or FetchFailure
+    Investigator->>Store: save normalized evidence and artifacts
 ```
 
-### Running Locally
-```bash
-cd backend/scrapers
+Provider errors are isolated and returned as partial failures. A failed source must not discard successful records from another source.
+
+## Source connector boundary
+
+Production connectors should share:
+
+- capability metadata;
+- query or incremental collection requests;
+- cursor/checkpoint persistence;
+- pagination and bounded retries;
+- provider-aware rate limiting;
+- normalized batch results with partial errors;
+- health, lag, and quota metrics;
+- retention and deletion policy hooks.
+
+A connector name identifies the provider (`gdelt`, `hn_algolia`, `rss`, `congress`); it must not determine the evidence source type. A GDELT result, for example, can represent national news, local news, commentary, or a blog.
+
+## Planned workers
+
+These are roadmap targets, not current deployable directories:
+
+| Worker | Input | Output | Notes |
+|---|---|---|---|
+| Connector workers | APIs, feeds, streams, approved URLs | `raw.documents.v1` | Independently checkpointed and scalable. |
+| Normalization worker | Raw document events | `documents.processed.v1` | Validates, deduplicates, classifies, and enriches. |
+| Signal worker | Processed documents | `signals.detected.v1` | Maintains baselines and emits evidence-backed spikes. |
+| Persistence workers | Processed events and artifacts | Durable stores/indexes | Idempotent writes keyed by event/document ID. |
+| Investigation worker | User requests or detected signals | Stage events and completed reports | Executes supervised research loops. |
+| API service | Durable stores and events | REST/WebSocket responses | Does not directly poll source providers. |
+
+The production deployment may group low-volume connectors into one worker or isolate high-volume/regulated connectors. Deployment topology should follow scaling and compliance needs, not a rule that every source requires its own microservice.
+
+## Broad search provider
+
+The immediate service gap is `build_search_provider()`, which currently returns `UnconfiguredSearchProvider`.
+
+The first implementation should:
+
+- satisfy the existing `SearchProvider.search()` contract;
+- translate time windows and source hints where supported;
+- preserve provider rank, score, query, and metadata;
+- use Redis caching only within provider storage terms;
+- retry 429 and transient 5xx responses with bounded backoff;
+- return discovery records rather than pretending snippets are complete evidence;
+- allow separate discovery and enrichment providers.
+
+## RSS connector
+
+The planned feed worker should use conditional requests, checkpoint GUIDs/canonical URLs, preserve feed metadata, and hand off article URLs to canonical retrieval only when necessary. Feed polling intervals are per-feed configuration, not a hard-coded global 60-second loop.
+
+## Official-source connectors
+
+Congress.gov, Federal Register, agency feeds, and other first-party public records should be their own source class. They replace the old undocumented assumption that a public C-SPAN transcript API can supply all political speech evidence.
+
+## Platform connectors
+
+- Bluesky should use Jetstream or another documented AT Protocol interface.
+- Reddit must use approved official API access and implement removal/retention requirements.
+- YouTube should use the Data API for discovery and only ingest captions/transcripts when access and terms permit it.
+- No platform connector may fall back to evading authentication, rate limits, paywalls, or technical access controls.
+
+## Running the current application
+
+Backend:
+
+```powershell
+cd backend
+..\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python reddit_scraper.py
+uvicorn main:app --reload
 ```
 
-### Key Implementation Notes
-- Uses `subreddit.stream.submissions(skip_existing=True)` â€” only processes new posts, not historical backfill on startup
-- Checks Redis bloom filter before publishing â€” drops duplicates silently
-- Monitors these subreddits: `politics`, `worldnews`, `news`, `conspiracy`, `conservatives`, `progressive`, `Libertarian`, `PoliticalDiscussion`
-- Reconnects automatically on PRAW stream timeout (common after ~16 hours)
+Frontend:
 
-### Common Failures
-| Failure | Cause | Fix |
-|---|---|---|
-| `prawcore.exceptions.ResponseException: 401` | Invalid credentials | Check `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` |
-| Stream silently stops | PRAW stream timeout | Implement watchdog thread that restarts stream if no message in 60s |
-| `KafkaTimeoutError` | Kafka not running | Start Kafka with `docker-compose up -d` |
-
----
-
-## 2. news-scraper
-
-### What It Does
-Polls NewsAPI every 60 seconds for the latest US political news articles. Publishes each article to `raw.news`.
-
-### Location
-```
-backend/scrapers/news_scraper.py
-```
-
-### Kafka
-- **Produces:** `raw.news`
-- **Partition key:** outlet name
-
-### Dependencies
-- requests
-- kafka-python
-- Redis (deduplication)
-
-### Environment Variables
-```env
-NEWS_API_KEY=
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-REDIS_URL=redis://localhost:6379
-```
-
-### Running Locally
-```bash
-cd backend/scrapers
-python news_scraper.py
-```
-
-### Key Implementation Notes
-- Polls `/v2/everything` with query `politics OR congress OR senate` sorted by `publishedAt`
-- Deduplicates by URL hash stored in Redis with 24hr TTL
-- On free tier, `content` is truncated â€” stores truncated content and flags `is_truncated: true` in metadata
-- Backs off exponentially on 429 rate limit responses
-
-### Common Failures
-| Failure | Cause | Fix |
-|---|---|---|
-| `426 Upgrade Required` | Hit free tier limit | Switch to GDELT as primary, use NewsAPI as supplement |
-| Empty results | Query too narrow | Broaden query terms |
-| Duplicate articles | Redis TTL expired | Increase Redis TTL to 48hrs |
-
----
-
-## 3. rss-scraper
-
-### What It Does
-Polls 8 RSS feeds from politically diverse outlets every 60 seconds. Publishes each article to `raw.news`.
-
-### Location
-```
-backend/scrapers/rss_scraper.py
-```
-
-### Kafka
-- **Produces:** `raw.news`
-- **Partition key:** outlet name
-
-### Dependencies
-- feedparser
-- requests
-- kafka-python
-- Redis (deduplication)
-
-### Environment Variables
-```env
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-REDIS_URL=redis://localhost:6379
-```
-
-### Running Locally
-```bash
-cd backend/scrapers
-python rss_scraper.py
-```
-
-### Key Implementation Notes
-- Polls all 8 feeds concurrently using `ThreadPoolExecutor`
-- Feed URLs are defined in `config/rss_feeds.json` â€” update there without touching code
-- Uses `dateutil.parser.parse()` for robust date parsing across outlet formats
-- Fetches full article body for non-paywalled outlets â€” implements 5 second request timeout
-
-### Common Failures
-| Failure | Cause | Fix |
-|---|---|---|
-| Feed returns 404 | Outlet changed RSS URL | Update `config/rss_feeds.json` |
-| Empty body | Paywalled article | Use `summary` field as fallback, flag `is_paywalled: true` |
-| Malformed date | Outlet using non-standard format | `dateutil.parser.parse()` handles most cases â€” add manual override if needed |
-
----
-
-## 4. gdelt-scraper
-
-### What It Does
-Fetches the GDELT Global Knowledge Graph (GKG) update every 15 minutes. Parses the CSV and publishes each event to `raw.gdelt`. GDELT is the highest volume source â€” each update contains thousands of events.
-
-### Location
-```
-backend/scrapers/gdelt_scraper.py
-```
-
-### Kafka
-- **Produces:** `raw.gdelt`
-- **Partition key:** null (round-robin)
-
-### Dependencies
-- requests
-- pandas
-- kafka-python
-
-### Environment Variables
-```env
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-```
-
-### Running Locally
-```bash
-cd backend/scrapers
-python gdelt_scraper.py
-```
-
-### Key Implementation Notes
-- Fetches manifest from `http://data.gdeltproject.org/gdeltv2/lastupdate.txt` every 15 minutes
-- Caches last fetched manifest URL in memory â€” skips if unchanged
-- Filters GKG records to English-language US political content using `SOURCECOUNTRY` and theme filters
-- Parses GDELT's `YYYYMMDDHHMMSS` timestamp format explicitly â€” never rely on pandas auto-parsing here
-- Publishes in batches of 500 using Kafka producer batching
-
-### Common Failures
-| Failure | Cause | Fix |
-|---|---|---|
-| Empty dataframe | GDELT CSV malformed | Use `on_bad_lines='skip'` in pandas read_csv |
-| Stale data | Polling too infrequently | Ensure poll interval is exactly 15 minutes |
-| High Kafka lag | Too many events per update | Increase Flink consumer parallelism |
-
----
-
-## 5. cspan-scraper
-
-### What It Does
-Polls the C-SPAN API every hour for new program transcripts. Downloads and publishes full transcript text to `raw.speeches`. This is the lowest volume but highest signal source â€” a narrative in a C-SPAN transcript means it has reached formal political adoption.
-
-### Location
-```
-backend/scrapers/cspan_scraper.py
-```
-
-### Kafka
-- **Produces:** `raw.speeches`
-- **Partition key:** null (round-robin)
-
-### Dependencies
-- requests
-- kafka-python
-- Redis (deduplication)
-
-### Environment Variables
-```env
-CSPAN_API_KEY=
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-REDIS_URL=redis://localhost:6379
-```
-
-### Running Locally
-```bash
-cd backend/scrapers
-python cspan_scraper.py
-```
-
-### Key Implementation Notes
-- Polls with 1 hour delay after program air time â€” transcripts are not immediately available
-- Chunks transcripts over 50,000 words into overlapping segments before publishing
-- Parses speaker attribution from `>>` prefix in raw transcript text
-- Stores `program_id` in Redis to avoid reprocessing
-
-### Common Failures
-| Failure | Cause | Fix |
-|---|---|---|
-| Transcript not available | Too soon after air time | Increase poll delay to 2 hours |
-| Malformed transcript | Auto-generated captions | Flag `is_autocaption: true` â€” downstream NER should lower confidence |
-| Missing speakers | No `>>` prefix in transcript | Fall back to `program.speakers` metadata field |
-
----
-
-## 6. flink-processor
-
-### What It Does
-The most complex service in RhetoriQ. Consumes from all `raw.*` Kafka topics, runs a 4-step processing pipeline on every document, and outputs to `documents.processed` and `anomalies.detected`.
-
-### Location
-```
-backend/processors/flink_job.py
-```
-
-### Kafka
-- **Consumes:** `raw.reddit`, `raw.news`, `raw.speeches`, `raw.gdelt`
-- **Produces:** `documents.processed`, `anomalies.detected`
-- **Consumer group:** `flink-raw-consumer`
-
-### Dependencies
-- apache-flink
-- kafka-python
-- transformers (HuggingFace)
-- torch
-- Redis (bloom filter)
-
-### Environment Variables
-```env
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-REDIS_URL=redis://localhost:6379
-HUGGINGFACE_MODEL=sentence-transformers/all-MiniLM-L6-v2
-HUGGINGFACE_NER_MODEL=dslim/bert-base-NER
-ANOMALY_SPIKE_THRESHOLD=3.0
-ANOMALY_WINDOW_MINUTES=10
-```
-
-### Running Locally
-```bash
-cd backend/processors
-pip install -r requirements.txt
-python flink_job.py
-```
-
-### Pipeline Steps
-
-#### Step 1 â€” Deduplication
-```python
-# Check Redis bloom filter
-if redis_client.bf().exists("doc_bloom_filter", document["id"]):
-    return  # Drop duplicate
-redis_client.bf().add("doc_bloom_filter", document["id"])
-```
-
-#### Step 2 â€” Cleaning
-- Strip HTML with `BeautifulSoup`
-- Normalize whitespace
-- Truncate to 10,000 characters
-- Convert timestamp to UTC
-
-#### Step 3 â€” Entity Extraction
-```python
-# Uses dslim/bert-base-NER
-ner_pipeline = pipeline("ner", model="dslim/bert-base-NER", aggregation_strategy="simple")
-entities = ner_pipeline(document["body_clean"])
-# Groups: PER (persons), ORG (organizations), LOC (locations)
-```
-
-#### Step 4 â€” Embedding
-```python
-# Uses sentence-transformers/all-MiniLM-L6-v2
-# Produces 384-dimension vector
-embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-embedding = embedder.encode(document["body_clean"]).tolist()
-```
-
-#### Step 5 â€” Anomaly Detection
-```python
-# Tumbling window of 10 minutes
-# Count phrase frequency per window
-# Compare against 7-day rolling baseline stored in Redis
-# If frequency > ANOMALY_SPIKE_THRESHOLD * baseline: publish anomaly
-```
-
-### Common Failures
-| Failure | Cause | Fix |
-|---|---|---|
-| OOM error | HuggingFace models too large for pod | Increase pod memory limit in K8s manifest to 4Gi |
-| High processing latency | Embedding bottleneck | Run embedding on GPU node or reduce model size |
-| False positive anomalies | Breaking news causes legitimate spike | Add news event filter â€” check if phrase is in NewsAPI top headlines |
-
----
-
-## 7. storage-worker
-
-### What It Does
-Consumes from `documents.processed` and writes each document to all four databases simultaneously: PostgreSQL (with pgvector embedding), Elasticsearch (full text), Neo4j (graph edges), and Redis (cache).
-
-### Location
-```
-backend/processors/storage_worker.py
-```
-
-### Kafka
-- **Consumes:** `documents.processed`
-- **Consumer group:** `storage-worker`
-
-### Dependencies
-- psycopg2 (PostgreSQL)
-- elasticsearch
-- neo4j
-- redis
-- kafka-python
-
-### Environment Variables
-```env
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-POSTGRES_URL=postgresql://user:password@localhost:5432/rhetoriq
-ELASTICSEARCH_URL=http://localhost:9200
-NEO4J_URI=bolt://localhost:7687
-NEO4J_PASSWORD=
-REDIS_URL=redis://localhost:6379
-```
-
-### Running Locally
-```bash
-cd backend/processors
-python storage_worker.py
-```
-
-### Key Implementation Notes
-- Writes to all 4 databases in parallel using `asyncio.gather()`
-- If any single database write fails, logs the error and retries up to 3 times before dead-lettering
-- Creates Neo4j edges between documents that share entities (persons, organizations) within a 24hr window â€” this builds the spread graph organically
-- Uses connection pooling for all databases â€” never opens a new connection per message
-
-### Common Failures
-| Failure | Cause | Fix |
-|---|---|---|
-| `pgvector` extension missing | Fresh Postgres install | Run `CREATE EXTENSION vector;` in Postgres |
-| Neo4j constraint violation | Duplicate node creation | Use `MERGE` instead of `CREATE` in all Cypher queries |
-| Elasticsearch index mapping error | Schema mismatch | Delete and recreate index with correct mapping |
-
----
-
-## 8. agent
-
-### What It Does
-The core of RhetoriQ. Consumes anomaly alerts from `anomalies.detected`, autonomously conducts a full investigation using LangChain tools, and publishes a complete investigation report to `investigations.complete`. See [AGENTS.md](./AGENTS.md) for the full investigation loop documentation.
-
-### Location
-```
-backend/agent/agent.py
-```
-
-### Kafka
-- **Consumes:** `anomalies.detected`
-- **Produces:** `investigations.complete`
-- **Consumer group:** `agent-consumer`
-
-### Dependencies
-- langchain
-- langchain-openai
-- psycopg2
-- elasticsearch
-- neo4j
-- redis
-- kafka-python
-
-### Environment Variables
-```env
-OPENAI_API_KEY=
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-POSTGRES_URL=
-ELASTICSEARCH_URL=
-NEO4J_URI=
-NEO4J_PASSWORD=
-REDIS_URL=
-MAX_INVESTIGATION_STEPS=10
-INVESTIGATION_TIMEOUT_SECONDS=120
-```
-
-### Running Locally
-```bash
-cd backend/agent
-python agent.py
-```
-
-### Common Failures
-| Failure | Cause | Fix |
-|---|---|---|
-| `openai.RateLimitError` | Too many concurrent investigations | Limit agent consumer group to 3 workers |
-| Investigation timeout | configured LLM slow response | Increase `INVESTIGATION_TIMEOUT_SECONDS` to 180 |
-| Empty spread path | Neo4j graph not populated yet | Ensure storage-worker has been running for at least 24hrs before agent |
-
----
-
-## 9. api
-
-### What It Does
-FastAPI service that serves the frontend. Reads completed investigations from `investigations.complete`, exposes REST endpoints for the dashboard, and maintains a WebSocket connection for live investigation updates.
-
-### Location
-```
-backend/api/main.py
-```
-
-### Kafka
-- **Consumes:** `investigations.complete`
-- **Consumer group:** `api-consumer`
-
-### Dependencies
-- fastapi
-- uvicorn
-- kafka-python
-- psycopg2
-- neo4j
-- redis
-
-### Environment Variables
-```env
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-POSTGRES_URL=
-NEO4J_URI=
-NEO4J_PASSWORD=
-REDIS_URL=
-FRONTEND_URL=http://localhost:3000
-```
-
-### Running Locally
-```bash
-cd backend/api
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-# API docs at http://localhost:8000/docs
-```
-
-### Common Failures
-| Failure | Cause | Fix |
-|---|---|---|
-| CORS error | Frontend URL not whitelisted | Add frontend URL to `FRONTEND_URL` env var |
-| WebSocket drops | Client timeout | Implement ping/pong keepalive every 30 seconds |
-| Slow graph queries | Neo4j missing indexes | Add indexes on `Source.name` and `Phrase.text` nodes |
-
----
-
-## 10. frontend
-
-### What It Does
-React + TypeScript dashboard with three views: live narrative feed, investigation report viewer, and interactive spread graph visualization.
-
-### Location
-```
-frontend/
-```
-
-### Dependencies
-- React 18
-- TypeScript
-- Vite
-- Neo4j graph visualization library
-- WebSocket client
-
-### Environment Variables
-```env
-VITE_API_URL=http://localhost:8000
-VITE_WS_URL=ws://localhost:8000/ws
-```
-
-### Running Locally
-```bash
+```powershell
 cd frontend
 npm install
 npm run dev
-# Available at http://localhost:3000
 ```
 
-See [FRONTEND.md](./FRONTEND.md) for full component documentation.
+Tests:
 
----
-
-## Running All Services Locally
-
-```bash
-# 1. Start infrastructure (Kafka, databases)
-docker-compose up -d
-
-# 2. Create Kafka topics
-./scripts/create_topics.sh
-
-# 3. Start all scrapers
-cd backend/scrapers && python run_all.py &
-
-# 4. Start Flink processor
-cd backend/processors && python flink_job.py &
-
-# 5. Start storage worker
-cd backend/processors && python storage_worker.py &
-
-# 6. Start agent
-cd backend/agent && python agent.py &
-
-# 7. Start API
-cd backend/api && uvicorn main:app --reload &
-
-# 8. Start frontend
-cd frontend && npm run dev
+```powershell
+pytest
+cd frontend
+npm run build
 ```
 
-Or use the convenience script:
-```bash
-./scripts/start_local.sh
-```
+Kafka, Flink, connector worker processes, and production databases should not be included in local startup instructions until their implementations and manifests exist.
 
----
+## Health and observability
 
-## Service Health Checks
+Current health endpoints cover the API, embeddings, and optional Redis capabilities. Production connector health should add:
 
-Every service exposes a `/health` endpoint on port `8090`:
-
-```python
-# Standard health check â€” add to every service
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
-
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/health":
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"ok")
-
-def start_health_server():
-    server = HTTPServer(("0.0.0.0", 8090), HealthHandler)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.daemon = True
-    thread.start()
-```
-
-Kubernetes liveness and readiness probes hit this endpoint every 10 seconds.
+- last attempted and successful collection time;
+- current checkpoint or cursor age;
+- records read, accepted, deduplicated, and rejected;
+- retry and rate-limit counts;
+- quota remaining when exposed by the provider;
+- canonical-fetch success by domain;
+- deletion-sync lag where applicable;
+- Kafka producer lag and dead-letter counts after event-driven ingestion is implemented.
 

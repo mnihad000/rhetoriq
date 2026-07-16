@@ -80,7 +80,7 @@ frontend/
     â”‚   â”‚   â”œâ”€â”€ GraphControls.tsx # Zoom, filter, reset controls
     â”‚   â”‚   â””â”€â”€ NodeTooltip.tsx   # Hover tooltip for graph nodes
     â”‚   â””â”€â”€ shared/
-    â”‚       â”œâ”€â”€ SourceBadge.tsx   # Reddit/News/CSPAN source badge
+    â”‚       â”œâ”€â”€ SourceBadge.tsx   # Normalized evidence source-type badge
     â”‚       â”œâ”€â”€ PoliticalLean.tsx # Political lean indicator
     â”‚       â”œâ”€â”€ LoadingSpinner.tsx
     â”‚       â””â”€â”€ ErrorBoundary.tsx

@@ -1,308 +1,259 @@
-ctrl-shift-v
-# RhetoriQ â€” Architecture
+# RhetoriQ Architecture
 
-> This document covers the full system design of RhetoriQ. Every layer, every technology choice, and the reasoning behind each decision. Read this before touching any code.
+This document defines the collection, processing, evidence, and product boundaries for RhetoriQ. It distinguishes the code that exists today from the distributed production architecture planned in the roadmap.
 
----
+## Architecture status
 
-## System Philosophy
+### Implemented in this repository
 
-RhetoriQ is built around three core principles:
+- FastAPI application and React frontend.
+- GDELT DOC 2.0 and Hacker News/Algolia ingestion.
+- A normalized `Document` model and document normalizer.
+- Direct HTTP page retrieval with timeout, content-type validation, redirect handling, and optional caching.
+- An abstract `SearchProvider` boundary; live broad-web search is intentionally unconfigured.
+- Trending detection, retrieval, timeline, graph, source-diversity, mutation, receipts, debate, and report services.
+- SQLite and in-process development persistence, plus optional Redis-backed capabilities.
 
-1. **Nothing talks to anything directly.** Every service communicates through Kafka. This means any single service can die without cascading failures across the system.
-2. **Each database has exactly one job.** We use four databases and each one does something the others cannot. There is no redundancy â€” each is chosen for a specific access pattern.
-3. **The agent is fully autonomous.** Once deployed, RhetoriQ requires zero human prompting. It detects, investigates, and reports by itself.
+### Target production architecture
 
----
+- Additional source connectors for feeds, search, public records, public event streams, and approved platforms.
+- Durable connector checkpoints and idempotent ingestion.
+- Kafka contracts and replayable processing.
+- Stream processing and durable production stores.
+- Independently scalable connector workers and processing services.
+- Production secrets, observability, and compliance controls.
 
-## High Level Data Flow
+Kafka, Flink, Kubernetes, PostgreSQL/pgvector, Elasticsearch, and Neo4j should not be described as already implemented until their roadmap phases are complete.
 
-```mermaid
-flowchart TD
-    subgraph Sources["Data Sources"]
-        Reddit["Reddit API"]
-        GDELT["GDELT"]
-        NewsAPI["NewsAPI"]
-        CSPAN["C-SPAN"]
-        RSS["RSS Feeds"]
-    end
+## Core collection rule
 
-    subgraph Scrapers["Scraper Microservices"]
-        Scraper["One Python service per data source<br/>running on Kubernetes"]
-    end
+RhetoriQ is **API/feed-first**.
 
-    Kafka["Kafka"]
-    Flink["Apache Flink"]
-    Storage["Storage Layer<br/>PostgreSQL + pgvector<br/>Elasticsearch<br/>Neo4j<br/>Redis"]
-    Agent["LangChain Agent<br/>Autonomous investigation loop"]
-    API["REST API<br/>FastAPI serving the frontend"]
-    Frontend["Frontend<br/>React + TypeScript<br/>Neo4j graph visualization<br/>WebSocket live updates"]
+Acquisition priority is:
 
-    Reddit --> Scraper
-    GDELT --> Scraper
-    NewsAPI --> Scraper
-    CSPAN --> Scraper
-    RSS --> Scraper
-    Scraper -->|"publishes raw documents"| Kafka
-    Kafka --> Flink
-    Flink -->|"documents.processed"| Storage
-    Flink -->|"anomalies.detected"| Agent
-    Storage --> Agent
-    Agent -->|"investigations.complete"| API
-    API --> Frontend
-```
+1. First-party APIs and official bulk datasets.
+2. RSS, Atom, JSON Feed, webhooks, or public event streams.
+3. A licensed or terms-compatible search API for broad discovery.
+4. Direct retrieval of a canonical public page for evidence enrichment.
+5. Browser automation only when an important source has no structured interface and cannot be retrieved with a normal HTTP client.
 
----
+“Scraper” is not used as the umbrella term. The umbrella is **source connector**. A connector may use an API, feed, stream, file download, or controlled page fetch.
 
-## Layer 1 â€” Data Ingestion
+## High-level flow
 
-### Overview
-Five independent scraper microservices run continuously on Kubernetes. Each scraper is responsible for exactly one data source. They do zero processing â€” their only job is to fetch raw content and publish it to Kafka as fast as possible.
-
-### Scrapers
-
-| Scraper | Source | Kafka Topic | Poll Interval |
-|---|---|---|---|
-| `reddit-scraper` | Reddit API (PRAW) | `raw.reddit` | 30 seconds |
-| `news-scraper` | NewsAPI + RSS Feeds | `raw.news` | 60 seconds |
-| `gdelt-scraper` | GDELT Project | `raw.gdelt` | 15 minutes |
-| `cspan-scraper` | C-SPAN API | `raw.speeches` | 1 hour |
-| `rss-scraper` | NYT, BBC, Fox, Reuters, Breitbart | `raw.news` | 60 seconds |
-
-### Raw Message Schema
-Every scraper publishes documents in this standard format:
-```json
-{
-  "id": "uuid-v4",
-  "source": "reddit",
-  "source_id": "original_id_from_source",
-  "url": "https://...",
-  "title": "string or null",
-  "body": "full text content",
-  "author": "string or null",
-  "published_at": "ISO 8601 timestamp",
-  "metadata": {
-    "subreddit": "politics",
-    "upvotes": 1200,
-    "outlet": null
-  },
-  "ingested_at": "ISO 8601 timestamp"
-}
-```
-
-### Why separate scrapers per source?
-If Reddit's API goes down, the news scraper keeps running. If we want to add a new source, we add one new microservice without touching anything else. Each scraper can also be scaled independently based on volume.
-
----
-
-## Layer 2 â€” Kafka
-
-### Overview
-Kafka is the central nervous system of RhetoriQ. Every service communicates exclusively through Kafka topics. No service calls another service directly.
-
-### Topics
-
-| Topic | Producer | Consumer | Description |
-|---|---|---|---|
-| `raw.reddit` | reddit-scraper | Flink | Raw Reddit posts |
-| `raw.news` | news-scraper, rss-scraper | Flink | Raw news articles |
-| `raw.speeches` | cspan-scraper | Flink | Raw speech transcripts |
-| `raw.gdelt` | gdelt-scraper | Flink | Raw GDELT events |
-| `documents.processed` | Flink | Storage workers | Cleaned, embedded documents |
-| `anomalies.detected` | Flink | LangChain agent | Detected narrative spikes |
-| `investigations.complete` | LangChain agent | REST API | Finished investigation reports |
-
-### Partition Strategy
-- `raw.*` topics: 6 partitions each (parallelizes ingestion)
-- `documents.processed`: 12 partitions (highest volume topic)
-- `anomalies.detected`: 3 partitions (low volume, high priority)
-- `investigations.complete`: 3 partitions (low volume)
-
-See [KAFKA.md](./KAFKA.md) for full topic configuration and consumer group details.
-
----
-
-## Layer 3 â€” Apache Flink
-
-### Overview
-Flink sits between raw Kafka topics and the storage layer. It consumes raw documents, processes them in real time, and outputs to two destinations: processed documents for storage, and anomaly alerts for the agent.
-
-### Flink Pipeline Steps
-
-#### Step 1 â€” Clean & Normalize
-- Strip HTML tags
-- Remove duplicates (using Redis bloom filter)
-- Normalize timestamps to UTC
-- Truncate documents over 10,000 characters
-
-#### Step 2 â€” Entity Extraction
-Using a HuggingFace NER (Named Entity Recognition) model:
-- Extract politician names
-- Extract organization names
-- Extract locations
-- Extract key phrases (noun chunks over 3 words)
-
-#### Step 3 â€” Anomaly Detection
-Using a Flink tumbling window (10 minutes):
-- Count phrase frequency per window
-- Compare against rolling 7-day baseline
-- If frequency > 3x baseline: publish to `anomalies.detected`
-- Anomaly payload includes the phrase, spike magnitude, and top sources
-
-#### Step 4 â€” Embedding Generation
-Using HuggingFace `sentence-transformers/all-MiniLM-L6-v2`:
-- Generate a 384-dimension vector embedding for each document
-- Attach embedding to the processed document payload
-- Publish to `documents.processed`
-
-### Why Flink over Kafka Streams?
-Flink has superior windowing capabilities for anomaly detection and handles stateful stream processing more cleanly at scale. Kafka Streams would work but Flink's exactly-once semantics and richer windowing API make it the right tool for the anomaly detection step specifically.
-
----
-
-## Layer 4 â€” Storage
-
-### Overview
-Four databases, each with a single responsibility. Never use one where another is the correct tool.
-
-### PostgreSQL + pgvector
-**Job: Semantic similarity search**
-
-Stores every processed document alongside its vector embedding. When the agent needs to find documents that are semantically similar to a detected phrase, it queries pgvector.
-
-```sql
--- Example: find the 20 most semantically similar documents to a given embedding
-SELECT id, body, source, published_at
-FROM documents
-ORDER BY embedding <-> $1  -- pgvector cosine distance operator
-LIMIT 20;
-```
-
-Key tables: `documents`, `entities`, `phrases`
-
-### Elasticsearch
-**Job: Full-text search and phrase tracking over time**
-
-Stores the full text of every document. Used to find exact and near-exact phrase matches, track how a specific phrase has appeared over time, and power the search feature in the frontend.
-
-Key indices: `documents`, `phrases`
-
-### Neo4j
-**Job: Spread mapping**
-
-Every time source A publishes something and source B republishes or references it, a directed edge is created in the graph. This builds a live map of how narratives travel.
-
-```cypher
-// Example: find the origin of a narrative and all nodes it passed through
-MATCH path = (origin:Source)-[:AMPLIFIED*]->(mainstream:Source {type: 'politician'})
-WHERE origin.type = 'fringe'
-RETURN path
-ORDER BY length(path)
-```
-
-Key nodes: `Source`, `Document`, `Phrase`
-Key relationships: `PUBLISHED`, `AMPLIFIED`, `REFERENCED`
-
-### Redis
-**Job: Caching and deduplication**
-
-- Caches active investigation states so the agent doesn't re-query Postgres on every step
-- Stores a bloom filter for document deduplication in Flink
-- Caches politician and source profiles
-- TTL of 1 hour on most keys
-
----
-
-## Layer 5 â€” The LangChain Agent
-
-### Overview
-The agent is the core of RhetoriQ. It runs as a Kubernetes deployment, continuously consuming from `anomalies.detected`. When an anomaly arrives, it autonomously conducts a full investigation without any human input.
-
-### Investigation Loop
+Kafka remains the production event backbone. The first diagram shows the current development runtime; the second shows the target production topology.
 
 ```mermaid
 flowchart TD
-    Start["anomalies.detected"] --> Parse["1. Parse anomaly<br/>Extract phrase, spike data, and top sources"]
-    Parse --> Search["2. Search backwards<br/>pgvector semantic search for earliest occurrences"]
-    Search --> Trace["3. Trace graph<br/>Neo4j traversal to map the spread network"]
-    Trace --> FullText["4. Full-text search<br/>Elasticsearch for exact and near-exact usage with timestamps"]
-    FullText --> Synthesize["5. Synthesize<br/>Configured LLM generates a human-readable report"]
-    Synthesize --> Publish["6. Publish<br/>Report pushed to investigations.complete Kafka topic"]
+    subgraph Sources[Public sources]
+      G[GDELT DOC 2.0]
+      H[Hacker News via Algolia]
+      R[RSS and Atom feeds]
+      W[Broad web-search API]
+      O[Official public-record APIs]
+      P[Approved platform APIs and public streams]
+    end
+
+    subgraph Collection[Collection layer]
+      C[Source connectors]
+      F[Canonical-page fetcher]
+      N[Normalizer and provenance recorder]
+    end
+
+    subgraph Processing[Processing layer]
+      D[Deduplication and classification]
+      T[Phrase and trend detection]
+      V[Retrieval and investigation stages]
+    end
+
+    subgraph Product[Product layer]
+      S[(Development persistence and optional Redis)]
+      A[FastAPI]
+      U[React frontend]
+    end
+
+    G --> C
+    H --> C
+    R -. planned .-> C
+    W -. planned .-> C
+    O -. planned .-> C
+    P -. planned .-> C
+    C --> N
+    C -->|candidate URL requires evidence| F
+    F --> N
+    N --> D
+    D --> T
+    D --> V
+    T --> S
+    V --> S
+    S --> A
+    A --> U
 ```
 
-### Tools Available to the Agent
-The LangChain agent has access to these tools:
-- `semantic_search(query, limit)` â€” queries pgvector
-- `graph_trace(phrase)` â€” queries Neo4j for spread path
-- `full_text_search(phrase, date_range)` â€” queries Elasticsearch
-- `get_source_profile(source_id)` â€” queries Redis/Postgres for source metadata
-- `synthesize_report(findings)` â€” calls configured LLM with structured findings
+### Target production topology
 
-See [AGENTS.md](./AGENTS.md) for the full agent prompt strategy and tool implementations.
-
----
-
-## Layer 6 â€” REST API
-
-### Overview
-A FastAPI service that sits between the storage layer and the frontend. It reads from the databases and the `investigations.complete` Kafka topic and serves data to the frontend via REST and WebSockets.
-
-### Key Responsibilities
-- Serve completed investigation reports
-- Serve live narrative feed (active anomalies being investigated)
-- Serve graph data for Neo4j visualization
-- WebSocket endpoint for live investigation updates
-
-See [BACKEND.md](./BACKEND.md) for full endpoint documentation.
-
----
-
-## Layer 7 â€” Frontend
-
-### Overview
-A React + TypeScript dashboard with three main views:
-
-1. **Live Feed** â€” real-time stream of detected anomalies and active investigations
-2. **Investigation Report** â€” full provenance report for a completed investigation
-3. **Spread Graph** â€” interactive Neo4j graph visualization showing how a narrative traveled
-
-See [FRONTEND.md](./FRONTEND.md) for full component documentation.
-
----
-
-## Infrastructure
-
-### Kubernetes
-Every service runs as a Kubernetes deployment. Scrapers, Flink jobs, the agent, and the API are all separate deployments with independent scaling rules.
-
-### Terraform
-All infrastructure is provisioned as code. The entire system can be torn down and rebuilt with:
-```bash
-terraform destroy
-terraform apply
+```mermaid
+flowchart LR
+    S[APIs, feeds, streams, and approved pages] --> C[Checkpointed source connectors]
+    C --> K[(Kafka)]
+    K --> P[Normalization and stream processing]
+    P --> K
+    K --> D[(Durable document, search, graph, and cache stores)]
+    K --> I[Investigation workers]
+    D --> I
+    I --> K
+    D --> A[FastAPI]
+    K --> A
+    A --> U[React frontend]
 ```
 
-### ArgoCD
-GitOps continuous deployment. Every merge to `main` automatically triggers a deployment. No manual `kubectl apply` ever.
+Kafka provides durable replay, back-pressure, failure isolation, and independent scaling. Source connectors do not call processing or investigation workers directly in this topology.
 
-### Observability
-- **Prometheus** scrapes metrics from every service
-- **Grafana** dashboards for Kafka consumer lag, Flink throughput, agent investigation latency, and database query times
+## Collection responsibilities
 
-See [INFRASTRUCTURE.md](./INFRASTRUCTURE.md) for full setup instructions.
+### Discovery versus evidence
 
----
+Discovery APIs answer “which records or URLs might matter?” They are not automatically the evidence used in a report.
 
-## Technology Decision Log
+When a provider returns only a title, URL, or snippet, RhetoriQ should retrieve the canonical source where permitted and store:
 
-| Decision | Chosen | Alternatives Considered | Reason |
+- provider and query;
+- provider rank or score;
+- original and final canonical URL;
+- source-native identifier;
+- title, author, and publication timestamp;
+- collection timestamp;
+- extracted text or permitted excerpt;
+- retrieval status and content type;
+- content hash and parser version;
+- applicable retention or deletion policy.
+
+If the canonical page cannot be retrieved, the provider result may remain a discovery record, but the limitation must be visible and its evidentiary weight reduced.
+
+### Connector contract
+
+Every production connector should expose equivalent behavior even when transports differ:
+
+```python
+class SourceConnector(Protocol):
+    name: str
+    capabilities: ConnectorCapabilities
+
+    def collect(self, request: CollectionRequest) -> CollectionBatch: ...
+    def checkpoint(self) -> ConnectorCheckpoint: ...
+```
+
+Capabilities should include:
+
+- `supports_history`;
+- `supports_incremental_sync`;
+- `supports_full_text`;
+- `supports_streaming`;
+- `requires_canonical_fetch`;
+- `rate_limit_policy`;
+- `retention_policy`;
+- `deletion_sync_policy`.
+
+### Failure isolation
+
+Connectors fail independently. A Reddit authorization failure, dead RSS feed, GDELT throttle, or canonical-page timeout must not stop other collection lanes. Each batch reports partial success, provider-specific errors, retryability, and the last committed checkpoint.
+
+## Current connectors
+
+| Connector | Transport | Current role | Full text |
 |---|---|---|---|
-| Message broker | Kafka | RabbitMQ, AWS SQS | Kafka's durability and replay capability is essential for a system processing historical data |
-| Stream processor | Flink | Kafka Streams, Spark Streaming | Flink's stateful windowing is superior for anomaly detection |
-| Vector DB | pgvector | Pinecone, Weaviate | Keeps vector search inside Postgres, reduces operational complexity |
-| Graph DB | Neo4j | Amazon Neptune, ArangoDB | Best-in-class graph query language (Cypher), strong visualization ecosystem |
-| Agent framework | LangChain | LlamaIndex, raw model-provider | LangChain's tool-use abstraction maps cleanly to our investigation steps |
-| LLM | configured LLM | Claude, Gemini | Best reasoning capability for synthesis tasks at the time of build |
-| Infra as code | Terraform | Pulumi, CDK | Most widely used, best documentation, most recruiter-recognizable |
-| CD | ArgoCD | FluxCD, Jenkins X | GitOps model fits cleanly with our Kubernetes-first architecture |
+| GDELT | DOC 2.0 JSON API | News discovery and trend signals | No; current mapping uses title/snippet and canonical URL. |
+| Hacker News | Algolia HN Search API | Community/forum discovery | Story metadata and title; linked pages require canonical fetch. |
+| Canonical page | Direct HTTP GET | Evidence enrichment after discovery | Extracted from retrievable HTML. |
+| Broad web search | `SearchProvider` interface | Planned discovery and enrichment lanes | Provider-dependent; canonical fetch normally required. |
 
+The current trending detector polls a fixed seed-topic list. Production discovery should add broader query generation and connector-specific incremental collection rather than treating those seeds as complete coverage.
+
+## Planned connector order
+
+1. Implement one broad web-search provider behind the existing `SearchProvider` interface.
+2. Add an RSS/Atom connector with ETag, `Last-Modified`, and item-ID checkpoints.
+3. Add first-party public-record connectors such as Congress.gov and Federal Register.
+4. Add Bluesky Jetstream or equivalent public event streams where their terms fit the product.
+5. Add Reddit only through approved official API access, with deletion and retention handling.
+6. Add video or speech metadata through first-party APIs; use official transcripts or licensed caption access rather than assuming a public C-SPAN transcript API.
+
+NewsAPI may be evaluated as a supplemental discovery provider, but it is not the default evidence store and must not be described as a production dependency without a suitable paid license and content-use review.
+
+## Normalized document boundary
+
+All transports map into the shared `Document` contract before analysis. Important fields include source identity, source type, canonical URL, publication and collection timestamps, text/snippet, entities, phrases, and provider metadata.
+
+Source types describe the nature of the evidence (`national_news`, `local_news`, `forum`, `blog`, `commentary`, `speech_transcript`), not the transport used to acquire it. Provider names such as `gdelt` or `brave_search` belong in metadata.
+
+## Processing and investigation
+
+After normalization, deterministic services perform:
+
+- deduplication and source classification;
+- phrase extraction and spike scoring;
+- semantic retrieval and source-diversity measurement;
+- timeline and provenance construction;
+- narrative-family and mutation analysis;
+- counter-frame and skeptic analysis;
+- receipt generation and final report assembly.
+
+The system must preserve caveats from collection through synthesis. Provider coverage, failed fetches, missing official sources, uncertain dates, and duplicate syndication all affect confidence.
+
+## Target Kafka event architecture
+
+Kafka is the planned durable production boundary, not the definition of a source connector:
+
+```mermaid
+flowchart LR
+    C[Connector workers] --> R[raw.documents.v1]
+    R --> P[Normalization and enrichment]
+    P --> D[documents.processed.v1]
+    D --> X[Indexes and durable stores]
+    D --> Q[Signal detection]
+    Q --> E[signals.detected.v1]
+    E --> I[Investigation workflow]
+    I --> O[investigations.completed.v1]
+```
+
+A single versioned raw-document topic is preferred unless volume, retention, security, or ordering requirements justify source-specific topics. The event includes `provider`, `transport`, and `source_type`, so downstream consumers do not depend on connector deployment names.
+
+See [KAFKA.md](KAFKA.md) for the planned event contracts.
+
+## Storage evolution
+
+Development uses lightweight persistence so the product can run locally. The production target separates access patterns:
+
+- PostgreSQL for durable documents and investigation artifacts;
+- pgvector or an equivalent vector index for semantic retrieval;
+- a full-text index when PostgreSQL search is insufficient;
+- a graph store only when graph queries justify its operational cost;
+- Redis for caches, ephemeral state, rate-limit coordination, and optional vector/memory features.
+
+These stores are implementation choices, not evidence sources. Canonical provenance remains in the normalized document and receipt contracts.
+
+## Security, compliance, and retention
+
+Before enabling a connector in production:
+
+- review provider terms and intended commercial use;
+- document allowed storage, display, and redistribution;
+- implement credential isolation and rotation;
+- respect robots and access controls for direct retrieval;
+- identify personal-data and deletion obligations;
+- define retention and revalidation rules;
+- record parser and connector versions for auditability.
+
+No connector may bypass authentication, paywalls, technical access controls, or provider rate limits.
+
+## Technology decisions
+
+| Decision | Choice | Reason |
+|---|---|---|
+| Collection abstraction | Capability-based source connectors | Keeps APIs, feeds, streams, and fetches behind one normalized boundary. |
+| Default acquisition | APIs and feeds | More stable metadata, clearer identifiers, and lower operational fragility. |
+| Broad discovery | Pluggable search provider | Avoids coupling investigations to one vendor. |
+| Evidence enrichment | Canonical HTTP retrieval | Preserves the source page behind aggregator metadata when permitted. |
+| Browser automation | Last-resort adapter | High cost and fragility make it unsuitable as the default. |
+| Production messaging | Versioned Kafka events, planned | Enables replay and independent scaling without leaking deployment names into schemas. |
+| Evidence language | “First observed in our dataset” | Coverage cannot prove true origin. |
