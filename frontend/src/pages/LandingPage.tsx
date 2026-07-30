@@ -17,6 +17,7 @@ import {
   type Variants,
 } from "framer-motion";
 import Header from "../components/layout/Header";
+import AtcShader from "@/components/ui/atc-shader";
 import {
   ApiError,
   createInvestigation,
@@ -115,11 +116,14 @@ export default function LandingPage() {
   }
 
   return (
-    <main className="relative overflow-x-clip">
-      <Header />
-      <Hero onGetStarted={scrollToStream} />
-      <Stream ref={streamRef} feed={feed} errorMessage={feedErrorMessage} />
-      <SiteFooter />
+    <main className="landing-page relative isolate overflow-x-clip">
+      <AtcShader className="pointer-events-none fixed inset-0 -z-20 h-full w-full" />
+      <div className="relative z-0">
+        <Header variant="landing" />
+        <Hero onGetStarted={scrollToStream} />
+        <Stream ref={streamRef} feed={feed} errorMessage={feedErrorMessage} />
+        <SiteFooter />
+      </div>
     </main>
   );
 }
@@ -148,7 +152,7 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
         initial={{ scaleY: 0, opacity: 0 }}
         animate={{ scaleY: 1, opacity: 1 }}
         transition={{ delay: 0.9, duration: 1.1, ease: EASE_OUT }}
-        className="absolute bottom-0 left-1/2 h-24 w-px origin-top -translate-x-1/2 bg-gradient-to-b from-transparent via-[var(--border)] to-[var(--ink)]"
+        className="absolute bottom-0 left-1/2 h-24 w-px origin-top -translate-x-1/2 bg-gradient-to-b from-transparent via-[var(--border)] to-[var(--accent)]"
       />
 
       <motion.p
@@ -160,7 +164,7 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
         Source-grounded narrative intelligence
       </motion.p>
 
-      <h1 className="mt-7 max-w-4xl text-5xl font-semibold leading-[0.98] tracking-[-0.05em] text-[var(--ink)] sm:text-6xl lg:text-7xl">
+      <h1 className="mt-7 max-w-4xl text-5xl font-semibold leading-[0.98] tracking-normal text-[var(--ink)] drop-shadow-[0_0_24px_rgba(255,173,97,0.28)] sm:text-6xl lg:text-7xl">
         {headline.map((word, i) => (
           <span key={word} className="inline-block overflow-hidden align-baseline">
             <motion.span
@@ -195,7 +199,7 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
         <button
           type="button"
           onClick={onGetStarted}
-          className="group inline-flex items-center gap-3 rounded-full bg-[var(--ink)] px-7 py-3.5 text-sm font-semibold tracking-wide text-white transition hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-18px_rgba(19,35,58,0.6)]"
+          className="group inline-flex items-center gap-3 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-7 py-3.5 text-sm font-semibold tracking-normal text-[#171016] transition hover:-translate-y-0.5 hover:bg-[#ffc184] hover:shadow-[0_0_28px_rgba(255,173,97,0.48)]"
         >
           Get started
           <motion.span
@@ -374,7 +378,7 @@ const Stream = forwardRef<
             {/* Static track */}
             <path
               d={pathD}
-              stroke="rgba(23,44,71,0.13)"
+              stroke="var(--border)"
               strokeWidth={2}
               strokeLinecap="round"
               vectorEffect="non-scaling-stroke"
@@ -383,7 +387,7 @@ const Stream = forwardRef<
             <motion.path
               ref={pathRef}
               d={pathD}
-              stroke="var(--ink)"
+              stroke="var(--accent)"
               strokeWidth={2.4}
               strokeLinecap="round"
               vectorEffect="non-scaling-stroke"
@@ -396,8 +400,8 @@ const Stream = forwardRef<
                 cx={a.x}
                 cy={a.y}
                 r={lit[i] ? 5 : 3.5}
-                fill={lit[i] ? "var(--ink)" : "#ffffff"}
-                stroke="var(--ink)"
+                fill={lit[i] ? "var(--accent)" : "var(--surface-strong)"}
+                stroke="var(--accent)"
                 strokeWidth={1.4}
                 vectorEffect="non-scaling-stroke"
                 style={{ transition: "r 0.3s ease, fill 0.3s ease" }}
@@ -408,10 +412,10 @@ const Stream = forwardRef<
               cx={nodeX}
               cy={nodeY}
               r={7}
-              fill="var(--ink)"
+              fill="var(--accent)"
               opacity={0.16}
             />
-            <motion.circle cx={nodeX} cy={nodeY} r={3.5} fill="var(--ink)" />
+            <motion.circle cx={nodeX} cy={nodeY} r={3.5} fill="var(--accent)" />
           </svg>
 
           {/* Cards */}
@@ -439,8 +443,8 @@ const Stream = forwardRef<
           aria-hidden="true"
           className="relative z-10 mx-auto mt-2 flex h-10 w-10 items-center justify-center"
         >
-          <span className="absolute h-3 w-3 rounded-full bg-[var(--ink)]" />
-          <span className="absolute h-10 w-10 rounded-full border border-[var(--ink)] opacity-20" />
+          <span className="absolute h-3 w-3 rounded-full bg-[var(--accent)]" />
+          <span className="absolute h-10 w-10 rounded-full border border-[var(--accent)] opacity-40" />
         </div>
 
         <PromptModule />
@@ -485,8 +489,8 @@ function StreamStateCard({
       <div
         className={
           tone === "error"
-            ? "mx-auto max-w-2xl rounded-[1.5rem] border border-[rgba(146,71,71,0.18)] bg-[rgba(255,244,244,0.92)] p-6 text-[rgb(130,50,50)]"
-            : "mx-auto max-w-2xl rounded-[1.5rem] border border-[var(--border)] bg-[var(--surface-strong)] p-6 text-[var(--muted)] shadow-[0_24px_60px_-44px_rgba(19,35,58,0.5)]"
+            ? "mx-auto max-w-2xl rounded-md border border-[var(--error-border)] bg-[var(--error-surface)] p-6 text-[var(--error-ink)] shadow-[0_0_32px_rgba(255,111,85,0.14)]"
+            : "mx-auto max-w-2xl rounded-md border border-[var(--border)] bg-[var(--surface-strong)] p-6 text-[var(--muted)] shadow-[0_0_32px_rgba(0,0,0,0.34)] backdrop-blur-md"
         }
       >
         <p className="eyebrow">{title}</p>
@@ -559,7 +563,7 @@ const StoryRow = forwardRef<
           onClick={handleInvestigate}
         />
         {errorMessage ? (
-          <p className="mt-4 rounded-[1rem] border border-[rgba(146,71,71,0.18)] bg-[rgba(255,244,244,0.92)] px-4 py-3 text-sm leading-6 text-[rgb(130,50,50)]">
+          <p className="mt-4 rounded-md border border-[var(--error-border)] bg-[var(--error-surface)] px-4 py-3 text-sm leading-6 text-[var(--error-ink)]">
             {errorMessage}
           </p>
         ) : null}
@@ -591,24 +595,24 @@ function StoryCard({
       animate={{
         opacity: lit ? 1 : 0.4,
         y: lit ? 0 : 16,
-        borderColor: lit ? "rgba(23,44,71,0.28)" : "rgba(23,44,71,0.1)",
+        borderColor: lit ? "var(--border)" : "rgba(255, 173, 97, 0.18)",
       }}
       transition={{ duration: 0.5, ease: EASE_OUT }}
       whileHover={{ y: -4 }}
-      className="group block w-full rounded-[1.5rem] border bg-[var(--surface-strong)] p-6 text-left shadow-[0_24px_60px_-44px_rgba(19,35,58,0.5)] backdrop-blur-md transition-shadow hover:shadow-[0_34px_70px_-40px_rgba(19,35,58,0.5)] disabled:cursor-wait disabled:opacity-70"
+      className="group block w-full rounded-md border bg-[var(--surface-strong)] p-6 text-left shadow-[0_18px_48px_-30px_rgba(0,0,0,0.8)] backdrop-blur-md transition-[border-color,box-shadow] hover:border-[var(--accent)] hover:shadow-[0_0_32px_rgba(255,173,97,0.2)] disabled:cursor-wait disabled:opacity-70"
     >
       <div
         className={`flex items-baseline gap-3 ${alignRight ? "md:flex-row-reverse" : ""}`}
       >
-        <span className="font-[Iowan_Old_Style,Palatino_Linotype,Book_Antiqua,Georgia,serif] text-sm font-semibold tracking-[0.1em] text-[var(--accent)]">
+        <span className="font-mono text-sm font-semibold tracking-normal text-[var(--accent)]">
           {label}
         </span>
-        <span className="text-[0.66rem] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
+        <span className="font-mono text-[0.66rem] font-semibold uppercase tracking-normal text-[var(--muted)]">
           {topic.status}
         </span>
       </div>
 
-      <h3 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-[var(--ink)]">
+      <h3 className="mt-3 text-2xl font-semibold tracking-normal text-[var(--ink)]">
         {topic.title}
       </h3>
       <p className="mt-3 text-[0.95rem] leading-7 text-[var(--muted)]">
@@ -707,7 +711,7 @@ const PromptModule = forwardRef<HTMLDivElement>(function PromptModule(_props, re
       className="mx-auto mt-2 max-w-2xl text-center"
     >
       <p className="eyebrow">The thread ends with you</p>
-      <h2 className="mt-5 text-4xl font-semibold tracking-[-0.04em] text-[var(--ink)] sm:text-5xl">
+      <h2 className="mt-5 text-4xl font-semibold tracking-normal text-[var(--ink)] sm:text-5xl">
         Start your own investigation.
       </h2>
       <p className="mx-auto mt-4 max-w-lg text-base leading-7 text-[var(--muted)]">
@@ -724,12 +728,12 @@ const PromptModule = forwardRef<HTMLDivElement>(function PromptModule(_props, re
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Paste a headline, claim, article URL, or topic…"
             disabled={isSubmitting}
-            className="w-full rounded-full border border-[var(--border)] bg-white px-6 py-4 text-base text-[var(--ink)] shadow-[0_18px_40px_-30px_rgba(17,35,59,0.4)] outline-none transition placeholder:text-[color:rgba(90,104,125,0.8)] focus:border-[var(--accent)] focus:ring-4 focus:ring-[rgba(124,144,172,0.16)]"
+            className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-strong)] px-6 py-4 text-base text-[var(--ink)] shadow-[0_18px_40px_-30px_rgba(0,0,0,0.8)] outline-none backdrop-blur-md transition placeholder:text-[color:rgba(230,191,165,0.7)] focus:border-[var(--accent)] focus:ring-4 focus:ring-[rgba(255,173,97,0.2)]"
           />
           <button
             type="submit"
             disabled={isSubmitting}
-            className="shrink-0 rounded-full bg-[var(--ink)] px-7 py-4 text-base font-semibold text-white transition hover:-translate-y-0.5 hover:shadow-[0_18px_44px_-20px_rgba(19,35,58,0.6)] disabled:opacity-60"
+            className="shrink-0 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-7 py-4 text-base font-semibold text-[#171016] transition hover:-translate-y-0.5 hover:bg-[#ffc184] hover:shadow-[0_0_28px_rgba(255,173,97,0.48)] disabled:opacity-60"
           >
             {isSubmitting ? "Starting…" : "Investigate"}
           </button>
@@ -737,12 +741,12 @@ const PromptModule = forwardRef<HTMLDivElement>(function PromptModule(_props, re
       </form>
 
       {errorMessage ? (
-        <p className="mx-auto mt-4 max-w-lg rounded-[1rem] border border-[rgba(146,71,71,0.18)] bg-[rgba(255,244,244,0.92)] px-4 py-3 text-sm leading-6 text-[rgb(130,50,50)]">
+        <p className="mx-auto mt-4 max-w-lg rounded-md border border-[var(--error-border)] bg-[var(--error-surface)] px-4 py-3 text-sm leading-6 text-[var(--error-ink)]">
           {errorMessage}
         </p>
       ) : null}
 
-      <p className="mt-16 pb-10 text-xs font-medium uppercase tracking-[0.24em] text-[var(--muted)]">
+      <p className="mt-16 pb-10 font-mono text-xs font-medium uppercase tracking-normal text-[var(--muted)]">
         Source-grounded · Nonpartisan by design · Built for human review
       </p>
     </motion.div>
@@ -752,7 +756,7 @@ const PromptModule = forwardRef<HTMLDivElement>(function PromptModule(_props, re
 function SiteFooter() {
   return (
     <footer className="px-4 pb-12 pt-10 text-center sm:px-6">
-      <p className="text-[0.72rem] font-medium uppercase tracking-[0.18em] text-[var(--muted)]">
+      <p className="font-mono text-[0.72rem] font-medium uppercase tracking-normal text-[var(--muted)]">
         UC Berkeley AI Hackathon 2021
       </p>
     </footer>

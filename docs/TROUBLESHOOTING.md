@@ -1,21 +1,38 @@
 # RhetoriQ Troubleshooting
 
-## Source Collection Is Stale
+## Backend does not start
 
-Check connector health, credentials, rate-limit responses, last successful poll time, and Kafka producer errors. A source outage must not stop other connectors from publishing.
+Run the backend from `backend/` so imports resolve correctly. Confirm the virtual environment is active and dependencies are installed:
 
-## Kafka Consumer Lag Grows
+```powershell
+cd backend
+..\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn main:app --reload
+```
 
-Inspect partition skew, consumer-group membership, processor errors, and downstream storage latency. Scale the affected consumer or processor only after confirming that partitioning and retries are correct.
+Use `http://127.0.0.1:8000/health` to confirm the API is running.
 
-## No Anomalies Are Detected
+## Frontend cannot reach the API
 
-Verify the baseline window, phrase-extraction output, event timestamps, and threshold configuration. Reprocess retained source events to separate data-quality issues from detector logic.
+Start the backend first, then start Vite from `frontend/`. The interface deliberately falls back to demo data for unavailable live content; inspect the browser network panel and backend logs to distinguish fallback behavior from a successful API response.
 
-## Investigation Has Weak Evidence
+## Redis is unavailable
 
-Review retrieval lanes, source coverage, date range, semantic-query quality, and graph context. The system should surface an evidence gap or limitation rather than generate a confident conclusion.
+Redis is optional. Check `GET /api/redis/status` or `GET /api/health/redis`; the backend should continue using its non-Redis paths. To use Redis features, ensure `REDIS_URL` points to a reachable instance and restart the backend.
 
-## Dashboard Is Incomplete
+## Embeddings are unavailable or slow
 
-Check the API health response, WebSocket connection state, graph-query latency, and browser console errors. The interface must display partial-stage and unavailable-dependency states clearly.
+Check `GET /health/embeddings`. The local embedding model can require a first-run download unless the environment is configured for local-only operation. Demo-mode flows should remain usable when optional embedding support is unavailable.
+
+## Trending data is stale or empty
+
+In demo mode, expected data is deterministic. With `DEMO_MODE=false`, inspect GDELT/Hacker News responses and backend logs, then use `POST /api/trending/refresh` to request a refresh. External providers can throttle or return no publishable snapshot; the API may fall back to demo-friendly results.
+
+## Investigation is incomplete
+
+Review the workspace status, receipts, and evidence gaps. A partial or unavailable external retrieval is a limitation, not a reason to invent a conclusion. Broad-web autonomous research is not configured in the current MVP.
+
+## Not applicable to the MVP
+
+Kafka lag, Flink checkpoints, Kubernetes probes, PostgreSQL migrations, Elasticsearch indexes, Neo4j queries, and WebSocket connection errors have no current local runtime because those components are planned work.

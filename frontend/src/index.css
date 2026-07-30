@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@import "@fontsource/space-grotesk/400.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/600.css";
+@import "@fontsource/space-grotesk/700.css";
 
 :root {
   color-scheme: light;
@@ -124,6 +128,50 @@ select {
   color: var(--accent);
   font-size: 0.92rem;
   font-weight: 700;
+}
+
+.landing-page {
+  --surface: rgba(10, 9, 14, 0.66);
+  --surface-strong: rgba(12, 10, 16, 0.78);
+  --border: rgba(255, 180, 103, 0.42);
+  --ink: #fff3e4;
+  --muted: #e6bfa5;
+  --accent: #ffad61;
+  --accent-soft: rgba(255, 173, 97, 0.16);
+  --error-border: rgba(255, 111, 85, 0.62);
+  --error-surface: rgba(79, 18, 22, 0.78);
+  --error-ink: #ffd0bf;
+  color: var(--ink);
+  font-family: "Space Grotesk", "Aptos", "Segoe UI", sans-serif;
+}
+
+.landing-page h1,
+.landing-page h2,
+.landing-page h3,
+.landing-page h4,
+.landing-page h5,
+.landing-page h6 {
+  font-family: "Space Grotesk", "Aptos", "Segoe UI", sans-serif;
+  letter-spacing: 0;
+}
+
+.landing-page .eyebrow {
+  border-color: var(--border);
+  border-radius: 0.375rem;
+  background: rgba(9, 8, 13, 0.64);
+  color: var(--accent);
+  font-family: ui-monospace, "Cascadia Code", "SFMono-Regular", monospace;
+  letter-spacing: 0;
+}
+
+.landing-page .section-title,
+.landing-page .section-copy {
+  color: var(--ink);
+  letter-spacing: 0;
+}
+
+.landing-page .section-copy {
+  color: var(--muted);
 }
 
 .page-enter {

@@ -74,19 +74,17 @@ These are roadmap targets, not current deployable directories:
 
 The production deployment may group low-volume connectors into one worker or isolate high-volume/regulated connectors. Deployment topology should follow scaling and compliance needs, not a rule that every source requires its own microservice.
 
-## Broad search provider
+## Planned autonomous research runtime
 
-The immediate service gap is `build_search_provider()`, which currently returns `UnconfiguredSearchProvider`.
+The next major runtime is a LangGraph workflow, documented in [AGENTS.md](AGENTS.md). It will replace the fixed retrieval orchestration while retaining the existing normalization, retrieval, receipts, confidence, and workspace services.
 
-The first implementation should:
+The graph supervisor will choose among:
 
-- satisfy the existing `SearchProvider.search()` contract;
-- translate time windows and source hints where supported;
-- preserve provider rank, score, query, and metadata;
-- use Redis caching only within provider storage terms;
-- retry 429 and transient 5xx responses with bounded backoff;
-- return discovery records rather than pretending snippets are complete evidence;
-- allow separate discovery and enrichment providers.
+- self-operated search adapters for broad discovery and coverage comparison;
+- a self-operated browser adapter for bounded public-browser research;
+- the existing canonical-page fetcher and internal corpus retrieval.
+
+Each adapter must preserve provider and query metadata, use bounded retries, respect source and search-engine policies, and return discovery records rather than treating snippets as complete evidence. Graph runs are traced and evaluated in RhetoriQ-controlled storage; no managed observability SaaS is required.
 
 ## RSS connector
 
@@ -125,7 +123,7 @@ npm run dev
 Tests:
 
 ```powershell
-pytest
+pytest backend/tests
 cd frontend
 npm run build
 ```
@@ -144,4 +142,3 @@ Current health endpoints cover the API, embeddings, and optional Redis capabilit
 - canonical-fetch success by domain;
 - deletion-sync lag where applicable;
 - Kafka producer lag and dead-letter counts after event-driven ingestion is implemented.
-

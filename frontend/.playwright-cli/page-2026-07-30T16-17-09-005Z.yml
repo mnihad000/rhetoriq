@@ -1,0 +1,33 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - link "RhetoriQ" [ref=e7] [cursor=pointer]:
+      - /url: /
+    - generic [ref=e8]:
+      - paragraph [ref=e9]: Source-grounded narrative intelligence
+      - heading "Trace how political stories spread." [level=1] [ref=e10]:
+        - generic [ref=e11]: Trace
+        - generic [ref=e13]: how
+        - generic [ref=e15]: political
+        - generic [ref=e17]: stories
+        - generic [ref=e19]: spread.
+      - paragraph [ref=e21]: Follow a single thread through every claim — how a narrative emerges, mutates, and gets challenged, with receipts at every turn.
+      - button "Get started" [ref=e23]:
+        - text: Get started
+        - generic [ref=e24]: ↓
+    - generic [ref=e26]:
+      - generic [ref=e27]:
+        - paragraph [ref=e28]: Live narrative radar
+        - heading "Breaking into the conversation" [level=2] [ref=e29]
+        - paragraph [ref=e30]: The thread runs under each story, lighting it up in turn — then ends where you can start your own investigation.
+      - generic [ref=e34]:
+        - paragraph [ref=e35]: Loading hot political news
+        - paragraph [ref=e36]: Fetching the latest published narrative snapshot from the backend.
+      - generic [ref=e40]:
+        - paragraph [ref=e41]: The thread ends with you
+        - heading "Start your own investigation." [level=2] [ref=e42]
+        - paragraph [ref=e43]: Paste a headline, claim, article URL, or topic. RhetoriQ traces it back to the source.
+        - generic [ref=e45]:
+          - textbox "Paste a headline, claim, article URL, or topic…" [ref=e46]
+          - button "Investigate" [ref=e47]
+        - paragraph [ref=e48]: Source-grounded · Nonpartisan by design · Built for human review
+    - paragraph [ref=e50]: UC Berkeley AI Hackathon 2021

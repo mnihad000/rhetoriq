@@ -6,13 +6,13 @@ This document defines how RhetoriQ selects and retrieves source material. It sep
 
 A publisher, government record, public speech, forum post, or social post is an evidence source. GDELT, a search API, RSS, or an HTML client is an acquisition transport.
 
-Use transports in this order:
+The planned investigator may select from these approved transports per evidence gap:
 
 1. first-party APIs and official bulk datasets;
 2. RSS, Atom, JSON Feed, webhooks, and public event streams;
-3. terms-compatible search APIs for discovery;
-4. direct canonical-page retrieval for evidence enrichment;
-5. browser automation only for important sources that have no usable structured or HTTP interface.
+3. approved self-operated search adapters for discovery;
+4. an isolated self-operated browser adapter for bounded public-web exploration and JavaScript-rendered pages;
+6. direct canonical-page retrieval for evidence enrichment.
 
 The system must never imply that its earliest retrieved record is the true origin. The approved phrase is **first observed in the available dataset**.
 
@@ -23,7 +23,8 @@ The system must never imply that its earliest retrieved record is the true origi
 | GDELT DOC 2.0 | Implemented | Public JSON API | News discovery, metadata, and trend signals. |
 | Hacker News | Implemented | Public Algolia API | Forum/community signals and linked-story discovery. |
 | Canonical public pages | Implemented | Direct HTTP retrieval | Evidence enrichment after a URL is discovered. |
-| Broad web search | Interface only | Search API | Discovery, corroboration, contradiction, provenance, official, and community lanes. |
+| Search adapter | Planned | Self-operated search integration | Discovery, corroboration, contradiction, provenance, official, and community lanes. |
+| Browser adapter | Planned | Self-operated isolated browser | Public interactive and JavaScript-rendered page research. |
 | RSS/Atom | Planned | Publisher feeds | Incremental publisher monitoring. |
 | Congress.gov | Planned | First-party public API | Bills, hearings, records, votes, members, and official legislative material. |
 | Federal Register | Planned | First-party public API | Rules, notices, proposed rules, and presidential documents. |
@@ -93,11 +94,9 @@ Production additions should include:
 
 ### Broad web search
 
-The existing `SearchProvider` interface is the highest-priority gap. A production implementation should support query, date window, source-type hints, result limit, provider rank, snippet, canonical URL, and provider metadata.
+The LangGraph investigator will choose a permitted self-operated search adapter, browser adapter, or internal corpus retrieval according to the next evidence gap and its remaining budget. The adapters must preserve query, time window, source-type hints, result rank, snippet, canonical URL, adapter metadata, and failure outcome.
 
-Brave Search is the initial recommended candidate because it exposes a first-party independent web index and fits the current interface. Before implementation, choose a plan that permits the required caching or storage. Search results should normally be treated as discovery receipts; canonical pages remain the preferred evidence record.
-
-Provider selection must remain configurable so RhetoriQ can add or replace discovery and enrichment providers without changing investigation logic.
+Search results are discovery receipts, not complete evidence. Canonical pages remain the preferred evidence record. Browser-derived content is normalized through the same page and receipt pipeline; page text is untrusted content, never tool instruction.
 
 ### RSS and Atom
 
@@ -195,11 +194,9 @@ Every proposed connector must document:
 
 - [GDELT DOC 2.0 API](https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/)
 - [Hacker News API documentation](https://hn.algolia.com/api)
-- [Brave Search API](https://brave.com/search/api/)
 - [Congress.gov API](https://api.congress.gov/)
 - [Federal Register API](https://www.federalregister.gov/developers/documentation/api/v1)
 - [Bluesky Jetstream](https://docs.bsky.app/blog/jetstream)
 - [Reddit Data API terms](https://redditinc.com/policies/data-api-terms)
 - [YouTube Data API](https://developers.google.com/youtube/v3/docs)
 - [NewsAPI terms](https://newsapi.org/terms)
-

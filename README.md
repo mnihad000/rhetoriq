@@ -10,11 +10,11 @@ The product deliberately distinguishes **first observed in the available dataset
 - GDELT DOC 2.0 ingestion for news discovery.
 - Hacker News ingestion through the public Algolia API.
 - Direct HTTP retrieval of canonical pages for evidence enrichment.
-- A provider boundary for broad web search; the production provider is not configured yet.
+- A provider boundary for broad web search; live broad-web research is not configured yet.
 - In-memory and SQLite-backed development storage, with optional Redis caching, vector search, and agent memory.
 - A React and TypeScript investigation interface.
 
-Kafka, Flink, PostgreSQL/pgvector, Elasticsearch, Neo4j, Kubernetes, and source-connector workers describe the target production architecture. They are not all present in this repository yet. See [the roadmap](docs/ROADMAP.md) for implementation status.
+LangGraph-based autonomous research, self-hosted observability, Kafka, Flink, PostgreSQL/pgvector, Elasticsearch, Neo4j, Kubernetes, and source-connector workers describe the target production architecture. They are not all present in this repository yet. See [the roadmap](docs/ROADMAP.md) for implementation status.
 
 ## Collection strategy
 
@@ -22,8 +22,8 @@ RhetoriQ is **API/feed-first**, not scraper-first:
 
 1. First-party APIs, public datasets, event streams, and RSS/Atom feeds provide structured discovery records.
 2. A broad web-search API discovers relevant URLs outside those monitored sources.
-3. RhetoriQ retrieves a canonical source page only when needed to create an evidence record.
-4. Browser automation is a last resort for important JavaScript-rendered pages with no usable API or feed.
+3. The planned investigator selects structured search or isolated browser research per evidence gap, subject to budgets and source policy.
+4. RhetoriQ retrieves a canonical source page only when needed to create an evidence record.
 
 A website, post, transcript, or official record is a source. An API, feed, or HTML fetch is the transport used to retrieve it.
 
@@ -35,7 +35,7 @@ Current source status is documented in [DATA_SOURCES.md](docs/DATA_SOURCES.md).
 flowchart LR
     G[GDELT DOC 2.0 API] --> I[Ingestion services]
     H[HN Algolia API] --> I
-    S[SearchProvider boundary] -. provider planned .-> D[Discovery agent]
+    S[Search and browser tools] -. planned .-> D[LangGraph investigator]
     I --> N[Normalized Document records]
     D --> F[Canonical-page fetcher]
     F --> N
@@ -87,7 +87,7 @@ npm run dev
 ### Tests
 
 ```powershell
-pytest
+pytest backend/tests
 cd frontend
 npm run build
 ```
@@ -121,3 +121,5 @@ Future connectors must add their credentials only when implemented and approved.
 | [ROADMAP.md](docs/ROADMAP.md) | Delivery status and future phases. |
 | [BACKEND.md](docs/BACKEND.md) | Backend contracts and endpoint reference. |
 | [FRONTEND.md](docs/FRONTEND.md) | Frontend behavior and component model. |
+| [TESTING.md](docs/TESTING.md) | Current verification commands and planned test layers. |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Local runtime and optional-service troubleshooting. |

@@ -1,23 +1,34 @@
-# RhetoriQ Testing Strategy
+# RhetoriQ Testing
 
-Testing follows the architecture boundaries so a failure can be localized to collection, processing, storage, investigation, API, or presentation.
+The current MVP verification baseline is backend tests, Python compilation, and the frontend production build. Kafka, Flink, PostgreSQL, Elasticsearch, Neo4j, container integration, and browser end-to-end tests are planned and are not local prerequisites.
 
-## Test Layers
+## Backend tests
 
-| Layer | Required coverage |
-|---|---|
-| Source connectors | Authentication failures, pagination, rate limits, source normalization, and duplicate input. |
-| Kafka contracts | Schema validation, compatibility, idempotent consumption, partition key behavior, and dead-letter routing. |
-| Flink processing | Text normalization, entity extraction, embeddings, windowed anomaly detection, late events, and replay. |
-| Storage | Migrations, retrieval correctness, vector similarity, full-text filters, graph traversal, and cache expiry. |
-| Agent workflow | Tool selection, evidence attribution, uncertainty handling, unsupported-claim rejection, and receipt completeness. |
-| API | Request validation, authorization, pagination, error responses, and contract snapshots. |
-| Frontend | Loading, error, accessibility, route behavior, and rendering of evidence versus generated interpretation. |
+From the repository root, with the backend dependencies installed:
 
-## Environments
+```powershell
+pytest backend/tests
+```
 
-Unit tests use fixtures and local fakes. Integration tests run against disposable Kafka, PostgreSQL, Elasticsearch, Neo4j, and Redis containers. End-to-end tests start the API and frontend against a seeded corpus, then verify a complete narrative-to-report flow.
+The suite uses local fixtures and supports optional dependencies being absent. Tests that require an unavailable optional runtime may be skipped.
 
-## Acceptance Checks
+## Python compilation
 
-An investigation is acceptable only when every report claim is either linked to evidence, explicitly marked as an inference, or omitted. Tests must assert that source URLs, timestamps, and limitations survive the pipeline and are visible in the API response.
+```powershell
+python -m compileall backend
+```
+
+## Frontend production build
+
+```powershell
+cd frontend
+npm run build
+```
+
+## Documentation checks
+
+Before merging documentation changes, verify that project-authored Markdown has no conflict markers or mojibake and that all relative Markdown links resolve within the repository. The check may be run with the PowerShell command in the A1 completion record in [ROADMAP.md](ROADMAP.md).
+
+## Future test layers
+
+As Track B is implemented, add tests with the feature rather than documenting them as existing coverage: migration tests for PostgreSQL, fixture tests for source connectors, contract/replay tests for Kafka and Flink, and integration tests for specialized stores.

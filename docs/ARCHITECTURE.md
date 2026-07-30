@@ -22,6 +22,7 @@ This document defines the collection, processing, evidence, and product boundari
 - Stream processing and durable production stores.
 - Independently scalable connector workers and processing services.
 - Production secrets, observability, and compliance controls.
+- A self-hosted LangGraph investigative workflow that chooses approved browser and search tools, with RhetoriQ-controlled tracing and evaluation.
 
 Kafka, Flink, Kubernetes, PostgreSQL/pgvector, Elasticsearch, and Neo4j should not be described as already implemented until their roadmap phases are complete.
 
@@ -33,9 +34,9 @@ Acquisition priority is:
 
 1. First-party APIs and official bulk datasets.
 2. RSS, Atom, JSON Feed, webhooks, or public event streams.
-3. A licensed or terms-compatible search API for broad discovery.
-4. Direct retrieval of a canonical public page for evidence enrichment.
-5. Browser automation only when an important source has no structured interface and cannot be retrieved with a normal HTTP client.
+3. An approved search API for broad discovery.
+4. An isolated browser for public, JavaScript-rendered, or interactive sources when it improves evidence coverage.
+5. Direct retrieval of a canonical public page for evidence enrichment.
 
 “Scraper” is not used as the umbrella term. The umbrella is **source connector**. A connector may use an API, feed, stream, file download, or controlled page fetch.
 
@@ -165,14 +166,16 @@ Connectors fail independently. A Reddit authorization failure, dead RSS feed, GD
 | GDELT | DOC 2.0 JSON API | News discovery and trend signals | No; current mapping uses title/snippet and canonical URL. |
 | Hacker News | Algolia HN Search API | Community/forum discovery | Story metadata and title; linked pages require canonical fetch. |
 | Canonical page | Direct HTTP GET | Evidence enrichment after discovery | Extracted from retrievable HTML. |
-| Broad web search | `SearchProvider` interface | Planned discovery and enrichment lanes | Provider-dependent; canonical fetch normally required. |
+| Search adapter | Planned | Agent-selected broad discovery and coverage fallback | Discovery receipts; canonical fetch normally required. |
+| Browser adapter | Planned | Agent-selected public-web exploration | Controlled browser navigation; normalized pages are the evidence. |
 
 The current trending detector polls a fixed seed-topic list. Production discovery should add broader query generation and connector-specific incremental collection rather than treating those seeds as complete coverage.
 
 ## Planned connector order
 
-1. Implement one broad web-search provider behind the existing `SearchProvider` interface.
-2. Add an RSS/Atom connector with ETag, `Last-Modified`, and item-ID checkpoints.
+1. Implement the self-hosted LangGraph investigative workflow with receipt-preserving search and browser adapters.
+2. Add RhetoriQ-controlled tracing and offline evaluation.
+3. Add an RSS/Atom connector with ETag, `Last-Modified`, and item-ID checkpoints.
 3. Add first-party public-record connectors such as Congress.gov and Federal Register.
 4. Add Bluesky Jetstream or equivalent public event streams where their terms fit the product.
 5. Add Reddit only through approved official API access, with deletion and retention handling.
@@ -252,8 +255,10 @@ No connector may bypass authentication, paywalls, technical access controls, or 
 |---|---|---|
 | Collection abstraction | Capability-based source connectors | Keeps APIs, feeds, streams, and fetches behind one normalized boundary. |
 | Default acquisition | APIs and feeds | More stable metadata, clearer identifiers, and lower operational fragility. |
-| Broad discovery | Pluggable search provider | Avoids coupling investigations to one vendor. |
+| Investigation orchestration | LangGraph | Supports a durable, bounded workflow that combines deterministic evidence stages with autonomous tool selection. |
+| Broad discovery | Pluggable self-operated search adapters | Maintains provider independence and avoids a managed-SaaS dependency. |
 | Evidence enrichment | Canonical HTTP retrieval | Preserves the source page behind aggregator metadata when permitted. |
-| Browser automation | Last-resort adapter | High cost and fragility make it unsuitable as the default. |
+| Browser automation | Self-operated browser adapter selected by the investigator | Covers public rendered and interactive pages without making browser use mandatory. |
+| Agent observability | RhetoriQ-controlled traces and evaluations | Keeps investigation telemetry under project control without a managed-SaaS dependency. |
 | Production messaging | Versioned Kafka events, planned | Enables replay and independent scaling without leaking deployment names into schemas. |
 | Evidence language | “First observed in our dataset” | Coverage cannot prove true origin. |

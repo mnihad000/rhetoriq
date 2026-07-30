@@ -1,17 +1,5 @@
 # RhetoriQ Lakehouse and Databricks Decision
 
-2. Is the Mini-Databricks project paid?
+RhetoriQ does not currently use Databricks, Spark, Delta Lake, or MLflow. The MVP uses FastAPI, SQLite, optional Redis, and a React/Vite frontend.
 
-Mostly no, if you build it smart.
-
-The free/open-source route:
-
-Component	Paid?	Notes
-Apache Spark	Free	Spark is open source and supports batch/streaming workloads.
-Delta Lake	Free	Delta Lake is open source and supports Spark, streaming/batch, ACID transactions, and lakehouse architecture.
-MLflow	Free	MLflow is open source for tracking/evaluating/monitoring ML and AI apps.
-Prometheus	Free	Open-source monitoring and alerting.
-Grafana	Free if self-hosted	You can run it locally with Docker.
-Databricks Free Edition	Free but limited	Good for learning/prototyping.
-AWS/GCP/Azure managed deployment	Potentially paid	Avoid unless you use free credits.
-
+Track B's planned processing path is Kafka and Flink, as documented in [ROADMAP.md](ROADMAP.md). A lakehouse evaluation may be revisited only if real workload, retention, analytics, or model-evaluation needs justify its cost and operational complexity. Until then, Databricks must not appear in startup, deployment, or implemented-architecture documentation.

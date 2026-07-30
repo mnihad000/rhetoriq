@@ -72,10 +72,11 @@ The current repository is a functional narrative-investigation MVP, not an empty
 - Trending discovery orchestration, persistence, ranking, snapshots, cache support, and investigation creation.
 - Demo trending data when live discovery cannot produce a publishable snapshot.
 
-### Cleanup and Verification
+### Research-stack decision
 
-- Browserbase, Arize, Band, Tavily, and SerpAPI integrations have been removed from active code, configuration, routes, dependencies, UI types, and tests.
-- The removal is documented in [LEGACY_SAAS_REMOVAL.md](LEGACY_SAAS_REMOVAL.md).
+- The next investigative runtime will use self-hosted LangGraph for autonomous orchestration and RhetoriQ-controlled tracing and evaluation.
+- It will use pluggable self-operated search and browser adapters rather than managed SaaS integrations.
+- No managed observability, search, browser, or orchestration SaaS is planned. The runtime is not implemented yet.
 - Current verification baseline:
   - 183 backend tests pass;
   - 10 backend tests are skipped for unavailable optional runtime dependencies;
@@ -84,9 +85,9 @@ The current repository is a functional narrative-investigation MVP, not an empty
 
 ### Known MVP Boundary
 
-Live internet search is temporarily unconfigured. The planner and retriever still decide what to search, produce follow-up queries, and preserve retrieval lanes through the `SearchProvider` abstraction. The next implementation phase will add model-native web research behind that boundary.
+Live internet search is temporarily unconfigured. The current planner and retriever still determine queries, follow-up searches, and retrieval lanes through the `SearchProvider` abstraction. The next implementation phase will introduce the LangGraph autonomous research workflow.
 
-The current MVP does **not** claim that LangChain, React Query, Sigma.js, WebSockets, PostgreSQL, Kafka, Flink, Elasticsearch, Neo4j, Docker orchestration, Kubernetes, Terraform, ArgoCD, Prometheus, or Grafana are implemented.
+The current MVP does **not** claim that LangGraph, React Query, Sigma.js, WebSockets, PostgreSQL, Kafka, Flink, Elasticsearch, Neo4j, Docker orchestration, Kubernetes, Terraform, ArgoCD, Prometheus, or Grafana are implemented.
 
 ---
 
@@ -94,7 +95,7 @@ The current MVP does **not** claim that LangChain, React Query, Sigma.js, WebSoc
 
 ### A1. Documentation and Baseline Hardening
 
-**Status: In Progress**
+**Status: Completed**
 
 **Estimate: 1–2 weeks**
 
@@ -115,9 +116,11 @@ The current MVP does **not** claim that LangChain, React Query, Sigma.js, WebSoc
 
 All project-authored Markdown renders cleanly, contains no broken local links or conflict markers, and accurately describes both the current runtime and future architecture.
 
+Completion record (2026-07-30): the project-authored Markdown was reconciled with the FastAPI/React MVP, stale implemented-as-planned backend and frontend descriptions were replaced, and local-link, conflict-marker, and encoding checks passed.
+
 ---
 
-### A2. Model-Native Internet Research
+### A2. Autonomous Internet Research
 
 **Status: Next**
 
@@ -125,21 +128,20 @@ All project-authored Markdown renders cleanly, contains no broken local links or
 
 #### Goals
 
-- Implement model-native web search behind the existing `SearchProvider` interface.
-- Keep query choice under agent control: the planner and retriever continue generating initial queries, follow-up searches, contradiction searches, official-source searches, and provenance searches.
-- Normalize model-discovered sources into the existing `SearchResult`, page-fetching, document-normalization, receipt, and persistence pipeline.
-- Preserve source URL, title, snippet, search query, retrieval lane, and citation metadata.
-- Add bounded retries, timeouts, quota handling, duplicate suppression, partial-result behavior, and clear warnings when search is unavailable.
-- Support trending discovery without restoring Tavily or SerpAPI.
+- Implement a self-hosted LangGraph supervisor that autonomously selects a permitted search adapter, browser adapter, canonical-page retrieval, or internal-corpus retrieval by evidence gap.
+- Normalize discovered sources into the existing `SearchResult`, page-fetching, document-normalization, receipt, and persistence pipeline.
+- Preserve the source URL, title, snippet, search query/action summary, retrieval lane, provider metadata, and citation metadata.
+- Add tool, time, spend, result-count, and per-domain budgets; bounded retries; duplicate suppression; partial-result behavior; and visible warnings.
+- Add RhetoriQ-controlled tracing and evaluation without a managed observability SaaS.
+- Enforce public-access-only research, prompt-injection handling, and an evidence-threshold publication gate.
 
 #### Dependencies
 
-- A1 documentation and configuration cleanup.
 - Existing planner, retriever, `SearchProvider`, page fetcher, and document normalizer.
 
 #### Completion condition
 
-A live investigation can start from a user question, let the agents determine what to search, retrieve and persist real public-web sources, and produce a cited report without Tavily or SerpAPI.
+A live investigation can start from a user question, autonomously choose permitted web-research tools, persist a structured evidence trail, and either publish a cited report that meets thresholds or return `insufficient_evidence`.
 
 ---
 
@@ -159,7 +161,7 @@ A live investigation can start from a user question, let the agents determine wh
 
 #### Dependencies
 
-- A2 model-native internet research.
+- A2 autonomous internet research.
 - Stable retrieved-document and receipt contracts.
 
 #### Completion condition
@@ -446,8 +448,8 @@ Product and infrastructure work should alternate so the project remains demoable
 
 | Order | Focus | Status |
 |---|---|---|
-| 1 | A1 Documentation and baseline hardening | In Progress |
-| 2 | A2 Model-native internet research | Next |
+| 1 | A1 Documentation and baseline hardening | Completed |
+| 2 | A2 Autonomous internet research | Next |
 | 3 | A3 Investigation quality and evaluation | Planned |
 | 4 | A5 Deployable MVP foundation | Planned |
 | 5 | B1 PostgreSQL and pgvector migration | Planned |

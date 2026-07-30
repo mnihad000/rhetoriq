@@ -6,11 +6,11 @@ RhetoriQ is an evidence-first narrative investigation system. It identifies publ
 
 1. **Evidence before synthesis.** Reports must link material claims to retrievable source records.
 2. **Observed is not proven.** The system says “first observed in the available dataset” and never treats correlation as proof of coordination.
-3. **API/feed-first collection.** Prefer first-party APIs, public datasets, streams, and feeds. Retrieve HTML only for evidence enrichment or when no structured interface exists.
+3. **Autonomous but bounded research.** The planned LangGraph investigator will select approved self-operated search, browser, and corpus tools per evidence gap; fixed budgets and source policy will constrain every run.
 4. **Transport is not source.** A publisher, public record, or social post is the source; an API, feed, search result, or page fetch is how it is acquired.
 5. **Decomposed investigation.** Retrieval, timeline building, graph analysis, source-diversity analysis, and report synthesis are separate stages.
 6. **Inspectable outputs.** Intermediate artifacts, limitations, provider coverage, and unresolved gaps remain visible.
-7. **Durable processing.** Production connectors use checkpoints and replayable events so each layer can scale and recover independently.
+7. **Durable processing.** The production architecture will use checkpoints and replayable events so each layer can scale and recover independently.
 
 ## System flow
 
@@ -19,7 +19,7 @@ flowchart TB
     subgraph Collection
       A[First-party APIs and public datasets]
       B[RSS, Atom, and event streams]
-      C[Broad web-search API]
+      C[Search APIs and isolated browser]
       D[Canonical-page retrieval]
       A --> E[Source connectors]
       B --> E
@@ -37,8 +37,8 @@ flowchart TB
       H -. target .-> J[(PostgreSQL, search index, graph store, Redis)]
     end
     subgraph Product
-      I --> K[Investigation agents]
-      J --> K
+      I --> K[Current investigation services]
+      J -. target .-> K
       K --> L[FastAPI]
       L --> M[React frontend]
     end
@@ -52,7 +52,7 @@ flowchart TB
 | Evidence retrieval | Fetch canonical pages when necessary, respecting access policy, and record retrieval outcomes. |
 | Processing | Deduplicate, classify, extract phrases and entities, calculate embeddings, and detect signals. |
 | Storage | Preserve documents, receipts, vectors, investigation state, and source relationships. |
-| Agents | Plan source-grounded research and construct evidence-limited artifacts. |
+| Investigative workflow | Select approved research tools, preserve a structured trail, and construct evidence-limited artifacts. |
 | API | Provide stable interfaces for ingestion, investigations, narratives, and graph data. |
 | Frontend | Present a narrative radar and inspectable investigation workspace. |
 
@@ -60,11 +60,11 @@ flowchart TB
 
 1. A structured connector detects activity or a user submits a research question.
 2. The planner converts the question into retrieval lanes and uncertainty requirements.
-3. Discovery providers return candidate URLs and structured source records.
-4. The retriever fetches canonical evidence where required and records failures as evidence gaps.
+3. The current retriever follows the planner's retrieval lanes, normalizes canonical evidence where required, and records actions and failures as receipts or evidence gaps.
+4. The planned LangGraph supervisor will select permitted search, browser, or corpus tools based on the next evidence gap.
 5. Deterministic stages build the timeline, narrative family, counter-frames, source-diversity summary, and spread graph.
 6. A skeptic pass identifies unsupported conclusions and missing source classes.
 7. The report synthesizer produces cautious findings and attaches receipts.
-8. The API persists and serves the investigation workspace.
+8. An evidence-threshold gate publishes a cited report or returns `insufficient_evidence`; the API persists and serves the investigation workspace.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component-level boundaries and [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) for source policy.
