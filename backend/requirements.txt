@@ -9,5 +9,9 @@ pytest-asyncio==0.24.0
 redis==5.0.1
 google-genai==1.16.0
 groq==0.11.0
+langgraph==1.2.9
+langgraph-checkpoint-sqlite==3.1.0
+playwright==1.61.0
+tldextract==5.3.1
 sentence-transformers==5.6.0
-numpy==1.26.4
+numpy==2.2.6

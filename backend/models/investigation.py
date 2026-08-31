@@ -92,6 +92,9 @@ ClaimVerificationState = Literal[
     "pending",
     "not_available",
 ]
+ClaimEvidenceVerdict = Literal["entails", "contradicts", "neutral"]
+ClaimDisposition = Literal["supported", "contradicted", "unresolved", "withheld"]
+SourceRole = Literal["primary", "official", "original_reporting", "commentary", "reposting", "community", "unknown"]
 ReceiptsConfidenceLabel = Literal["low", "medium", "high"]
 AgentDebateConfidenceLabel = Literal["low", "medium", "high"]
 ReportConfidenceLabel = Literal["low", "medium", "high"]
@@ -555,6 +558,63 @@ class ReceiptEvidence(BaseModel):
     verification_status: ReceiptVerificationStatus = "pending"
 
 
+class SourceIntelligence(BaseModel):
+    """Auditable source-quality signals used by the A3 verifier."""
+
+    document_id: str
+    registrable_domain: str | None = None
+    independence_group: str
+    source_role: SourceRole = "unknown"
+    role_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    date_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class ClaimEvidenceVerification(BaseModel):
+    """One claim-to-document decision with a reproducible evidence span."""
+
+    claim_id: str
+    document_id: str
+    evidence_side: Literal["support", "counter"]
+    evidence_span: str
+    span_start: int = Field(ge=0)
+    span_end: int = Field(ge=0)
+    semantic_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
+    nli_verdict: ClaimEvidenceVerdict = "neutral"
+    nli_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    verifier_provenance: list[str] = Field(default_factory=list)
+    source_intelligence: SourceIntelligence
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class ClaimVerificationRecord(BaseModel):
+    claim_id: str
+    claim_text: str
+    disposition: ClaimDisposition
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    supporting_evidence: list[ClaimEvidenceVerification] = Field(default_factory=list)
+    contradicting_evidence: list[ClaimEvidenceVerification] = Field(default_factory=list)
+    reason_codes: list[str] = Field(default_factory=list)
+    summary: str
+
+
+class ClaimVerificationResult(BaseModel):
+    investigation_id: str
+    verifier_version: str = "a3-v1"
+    records: list[ClaimVerificationRecord] = Field(default_factory=list)
+    model_provenance: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    cached: bool = False
+
+
+class ClaimVerificationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    force_refresh: bool = False
+
+
 class ClaimReceiptReview(BaseModel):
     claim_id: str
     claim_text: str
@@ -632,6 +692,7 @@ class FinalReportClaim(BaseModel):
     counterpoint_summary: str | None = None
     counterpoint_type: ClaimCounterpointType | None = None
     counter_citations: list[ReportCitation] = Field(default_factory=list)
+    verification: ClaimVerificationRecord | None = None
 
 
 class FinalReportSections(BaseModel):
@@ -672,6 +733,7 @@ class FinalReportResult(BaseModel):
     confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
     confidence_label: ReportConfidenceLabel = "low"
     confidence_dimensions: ConfidenceDimensions | None = None
+    verifier_version: str | None = None
     cached: bool = False
 
 
@@ -829,6 +891,9 @@ class RunInvestigationRequest(BaseModel):
     force_refresh: bool = False
 
 
+from models.research import ResearchRunSummary
+
+
 class InvestigationWorkspace(BaseModel):
     investigation_id: str
     query_text: str
@@ -852,8 +917,10 @@ class InvestigationWorkspace(BaseModel):
     analyst: AnalystResult | None = None
     claim_counterpoints: ClaimCounterpointResult | None = None
     receipts: ReceiptsResult | None = None
+    claim_verification: ClaimVerificationResult | None = None
     agent_debate: AgentDebateResult | None = None
     report: FinalReportResult | None = None
+    research_run: ResearchRunSummary | None = None
 
 
 def _default_retrieval_lanes(intent: PlannerIntent) -> list[RetrievalLane]:

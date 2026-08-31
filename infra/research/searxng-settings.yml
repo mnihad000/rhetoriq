@@ -1,0 +1,32 @@
+use_default_settings:
+  engines:
+    keep_only:
+      - bing
+      - brave
+      - duckduckgo
+      - google
+      - wikipedia
+
+general:
+  debug: false
+  instance_name: RhetoriQ Research Search
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  default_lang: en
+  formats:
+    - html
+    - json
+
+server:
+  limiter: true
+  image_proxy: false
+  bind_address: 0.0.0.0
+  port: 8080
+
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 12.0
+  pool_connections: 50
+  pool_maxsize: 10

@@ -122,7 +122,7 @@ Completion record (2026-07-30): the project-authored Markdown was reconciled wit
 
 ### A2. Autonomous Internet Research
 
-**Status: Next**
+**Status: Completed**
 
 **Estimate: 2–3 weeks**
 
@@ -143,11 +143,17 @@ Completion record (2026-07-30): the project-authored Markdown was reconciled wit
 
 A live investigation can start from a user question, autonomously choose permitted web-research tools, persist a structured evidence trail, and either publish a cited report that meets thresholds or return `insufficient_evidence`.
 
+#### Implementation record (2026-07-31)
+
+The repository now contains the LangGraph state graph, separate SQLite checkpointer, leased embedded/worker scheduler, idempotent action recovery, SearXNG/GDELT/Hacker News/canonical/browser/internal adapters, shared public-network policy, deterministic publication gate, recorded replay, audit APIs, SSE stream, interactive React Flow console, isolated research Compose stack, and the versioned 14-fixture A2 scorecard.
+
+The phase is **Completed**. The implementation passes the full backend regression suite, frontend production build, dependency and compilation checks, Compose configuration validation, deterministic graph/recovery/replay tests, and every threshold in the committed 14-fixture A2 scorecard. Live provider demonstrations remain repeatable portfolio evidence rather than a blocker to the completed implementation phase.
+
 ---
 
 ### A3. Investigation Quality and Evaluation
 
-**Status: Planned**
+**Status: Completed**
 
 **Estimate: 3–5 weeks**
 
@@ -167,6 +173,10 @@ A live investigation can start from a user question, autonomously choose permitt
 #### Completion condition
 
 The evaluation suite demonstrates that difficult and low-evidence investigations produce cautious, cited output and reject or soften conclusions that the retrieved record cannot support.
+
+#### Implementation record (2026-08-30)
+
+The repository now contains the versioned A3 claim-evidence verifier, persisted span-level audit records, source-independence and date-confidence signals, optional hosted second-opinion support, a fail-closed local NLI path, A2 publication-gate integration, explicit historical re-verification, and a claim-level frontend audit panel. The local `cross-encoder/nli-deberta-v3-base` model has been preloaded for the active development environment. Backend regression and frontend production-build checks pass. A captured-real-source scorecard and live-canary utility are committed; the 30-case curated corpus remains a future quality-expansion artifact by explicit product decision.
 
 ---
 
@@ -449,7 +459,7 @@ Product and infrastructure work should alternate so the project remains demoable
 | Order | Focus | Status |
 |---|---|---|
 | 1 | A1 Documentation and baseline hardening | Completed |
-| 2 | A2 Autonomous internet research | Next |
+| 2 | A2 Autonomous internet research | Completed |
 | 3 | A3 Investigation quality and evaluation | Planned |
 | 4 | A5 Deployable MVP foundation | Planned |
 | 5 | B1 PostgreSQL and pgvector migration | Planned |

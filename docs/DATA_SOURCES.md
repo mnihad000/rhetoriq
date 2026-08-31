@@ -6,7 +6,7 @@ This document defines how RhetoriQ selects and retrieves source material. It sep
 
 A publisher, government record, public speech, forum post, or social post is an evidence source. GDELT, a search API, RSS, or an HTML client is an acquisition transport.
 
-The planned investigator may select from these approved transports per evidence gap:
+The A2 investigator may select from these approved transports per evidence gap:
 
 1. first-party APIs and official bulk datasets;
 2. RSS, Atom, JSON Feed, webhooks, and public event streams;
@@ -23,8 +23,8 @@ The system must never imply that its earliest retrieved record is the true origi
 | GDELT DOC 2.0 | Implemented | Public JSON API | News discovery, metadata, and trend signals. |
 | Hacker News | Implemented | Public Algolia API | Forum/community signals and linked-story discovery. |
 | Canonical public pages | Implemented | Direct HTTP retrieval | Evidence enrichment after a URL is discovered. |
-| Search adapter | Planned | Self-operated search integration | Discovery, corroboration, contradiction, provenance, official, and community lanes. |
-| Browser adapter | Planned | Self-operated isolated browser | Public interactive and JavaScript-rendered page research. |
+| SearXNG search adapter | Implemented | Self-hosted JSON search API | Discovery, corroboration, contradiction, provenance, official, and community lanes. |
+| Browser adapter | Implemented | Isolated local Playwright service | Bounded public navigation and JavaScript-rendered evidence. |
 | RSS/Atom | Planned | Publisher feeds | Incremental publisher monitoring. |
 | Congress.gov | Planned | First-party public API | Bills, hearings, records, votes, members, and official legislative material. |
 | Federal Register | Planned | First-party public API | Rules, notices, proposed rules, and presidential documents. |
@@ -74,27 +74,23 @@ No API key is currently required.
 
 ### Canonical-page retrieval
 
-Implementation: `backend/services/page_fetcher.py` and `backend/services/document_normalizer.py`
+Implementation: `backend/services/research_tools.py`, `backend/services/url_policy.py`, and `backend/services/document_normalizer.py`
 
 The HTTP fetcher follows redirects, applies a timeout, validates HTML/XML content types, and can cache successful pages. The normalizer extracts a title, visible text, selected metadata, publication time, language, entities, and phrases.
 
 Canonical retrieval is not a broad crawler. It is invoked for URLs already discovered through an authorized provider or supplied by the user.
 
-Production additions should include:
+The A2 fetcher adds robots enforcement, public-IP validation, redirect revalidation, response-size limits, bounded redirects, content-type checks, and visible refusal receipts. Production hardening should still include:
 
-- robots and source-policy checks;
 - per-domain rate limits and circuit breakers;
-- response-size limits;
 - stronger article extraction and structured-data parsing;
-- content hashes and parser versions;
-- explicit paywall/access-control refusal;
 - retention and revalidation policies.
 
 ## Next connectors
 
-### Broad web search
+### Broad web search and isolated rendering
 
-The LangGraph investigator will choose a permitted self-operated search adapter, browser adapter, or internal corpus retrieval according to the next evidence gap and its remaining budget. The adapters must preserve query, time window, source-type hints, result rank, snippet, canonical URL, adapter metadata, and failure outcome.
+The LangGraph investigator chooses SearXNG, the isolated browser adapter, or internal corpus retrieval according to the next evidence gap and remaining budget. The adapters preserve query, time window, source-type hints, result rank, snippet, canonical URL, adapter metadata, and failure outcome.
 
 Search results are discovery receipts, not complete evidence. Canonical pages remain the preferred evidence record. Browser-derived content is normalized through the same page and receipt pipeline; page text is untrusted content, never tool instruction.
 

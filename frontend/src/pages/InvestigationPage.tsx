@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from "react";
+import { lazy, startTransition, Suspense, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import InvestigationFlowchart from "../components/investigation-flowchart/InvestigationFlowchart";
 import Header from "../components/layout/Header";
@@ -7,6 +7,7 @@ import {
   ApiError,
   getInvestigationWorkspace,
   runInvestigation,
+  verifyInvestigationClaims,
 } from "../lib/api";
 import {
   buildInvestigationExperienceFromWorkspace,
@@ -24,6 +25,8 @@ import {
 } from "../lib/mockInvestigation";
 import type { LiveInvestigationWorkspace } from "../types/rhetoriq";
 
+const ResearchConsole = lazy(() => import("../components/research-console/ResearchConsole"));
+
 export default function InvestigationPage() {
   const { id = "" } = useParams();
   const [searchParams] = useSearchParams();
@@ -32,6 +35,7 @@ export default function InvestigationPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isNotFound, setIsNotFound] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isReverifying, setIsReverifying] = useState(false);
   const [workspace, setWorkspace] = useState<LiveInvestigationWorkspace | null>(null);
 
   useEffect(() => {
@@ -129,6 +133,21 @@ export default function InvestigationPage() {
   const resolvedGaps = workspace ? getResolvedGaps(workspace) : [];
   const claimLedger = workspace ? getClaimLedgerEntries(workspace) : [];
 
+  async function handleReverify() {
+    if (!workspace || isReverifying) return;
+    setIsReverifying(true);
+    setErrorMessage(null);
+    try {
+      await verifyInvestigationClaims(workspace.investigation_id);
+      const updated = await getInvestigationWorkspace(workspace.investigation_id);
+      startTransition(() => setWorkspace(updated));
+    } catch (error) {
+      setErrorMessage(error instanceof ApiError ? error.message : "Claim re-verification failed.");
+    } finally {
+      setIsReverifying(false);
+    }
+  }
+
   return (
     <main className="investigation-page min-h-screen bg-white">
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0">
@@ -210,6 +229,11 @@ export default function InvestigationPage() {
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(18rem,24rem)]">
               <div className="space-y-6">
                 <InvestigationBriefCard workspace={workspace} />
+                {workspace.research_run ? (
+                  <Suspense fallback={<div className="h-72 animate-pulse rounded-3xl border border-white/10 bg-white/[0.03]" />}>
+                    <ResearchConsole investigationId={workspace.investigation_id} initialRun={workspace.research_run} />
+                  </Suspense>
+                ) : null}
                 <InvestigationFlowchart
                   data={experience?.flowchartData}
                   isLoading={
@@ -235,6 +259,13 @@ export default function InvestigationPage() {
                 ) : null}
                 {claimLedger.length > 0 ? (
                   <ClaimLedgerCard entries={claimLedger} />
+                ) : null}
+                {workspace.report ? (
+                  <ClaimVerificationCard
+                    verification={workspace.claim_verification ?? null}
+                    isReverifying={isReverifying}
+                    onReverify={handleReverify}
+                  />
                 ) : null}
                 {recommendedChecks.length > 0 ? (
                   <InfoCard title="Recommended Human Checks">
@@ -503,6 +534,73 @@ function ClaimLedgerCard({
           key={entry.claim_id}
           value={`${entry.state.replaceAll("_", " ")}: ${entry.claim_text}`}
         />
+      ))}
+    </InfoCard>
+  );
+}
+
+function ClaimVerificationCard({
+  verification,
+  isReverifying,
+  onReverify,
+}: {
+  verification: NonNullable<LiveInvestigationWorkspace["claim_verification"]> | null;
+  isReverifying: boolean;
+  onReverify: () => void;
+}) {
+  if (!verification) {
+    return (
+      <InfoCard title="Claim Evidence Audit">
+        <p className="text-sm leading-6 text-[var(--muted)]">
+          This report predates A3 verification. Re-verification creates a new audit record without modifying the original investigation evidence.
+        </p>
+        <button
+          type="button"
+          onClick={onReverify}
+          disabled={isReverifying}
+          className="rounded-xl border border-[rgba(19,35,58,0.14)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isReverifying ? "Re-verifying…" : "Create A3 audit"}
+        </button>
+      </InfoCard>
+    );
+  }
+  return (
+    <InfoCard title={`Claim Evidence Audit · ${verification.verifier_version}`}>
+      <button
+        type="button"
+        onClick={onReverify}
+        disabled={isReverifying}
+        className="rounded-xl border border-[rgba(19,35,58,0.14)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {isReverifying ? "Re-verifying…" : "Re-verify evidence"}
+      </button>
+      <p className="text-sm leading-6 text-[var(--muted)]">
+        {Math.round(verification.confidence_score * 100)}% aggregate verification confidence. Evidence spans and source independence are recorded per claim.
+      </p>
+      {verification.records.map((record) => (
+        <details key={record.claim_id} className="rounded-[1.05rem] border border-[rgba(19,35,58,0.08)] bg-white/92 p-4">
+          <summary className="cursor-pointer list-none text-sm font-semibold leading-6 text-[var(--ink)]">
+            <span className="mr-2 inline-flex rounded-full bg-[rgba(19,35,58,0.07)] px-2 py-1 text-[0.65rem] uppercase tracking-[0.12em] text-[var(--muted)]">
+              {record.disposition}
+            </span>
+            {record.claim_text}
+          </summary>
+          <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{record.summary}</p>
+          <div className="mt-4 space-y-3">
+            {[...record.supporting_evidence, ...record.contradicting_evidence].map((evidence) => (
+              <div key={`${evidence.evidence_side}-${evidence.document_id}-${evidence.span_start}`} className="rounded-xl bg-[rgba(245,247,250,0.9)] p-3">
+                <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+                  {evidence.evidence_side} · {evidence.nli_verdict} · {Math.round(evidence.confidence_score * 100)}%
+                </p>
+                <p className="mt-2 text-sm leading-6 text-[var(--ink)]">“{evidence.evidence_span}”</p>
+                <p className="mt-2 text-xs leading-5 text-[var(--muted)]">
+                  {evidence.source_intelligence.source_role.replaceAll("_", " ")} · {evidence.source_intelligence.registrable_domain ?? "domain unavailable"} · date confidence {Math.round(evidence.source_intelligence.date_confidence * 100)}%
+                </p>
+              </div>
+            ))}
+          </div>
+        </details>
       ))}
     </InfoCard>
   );

@@ -30,13 +30,14 @@ The application uses `react-router-dom` and communicates with the FastAPI API th
 
 - Landing and dashboard pages with responsive layouts.
 - Trending narrative cards and persisted recent-investigation list.
-- Investigation creation and polling for supervised background work.
+- Investigation creation with SSE research progress and polling fallback.
+- A lazily loaded React Flow research console showing the active graph path, action trail, budgets, evidence gate, terminal explanation, and recorded replay control.
 - Completed workspace views for reports, claim/evidence receipts, gaps, timelines, provenance, narrative families, source diversity, and agent-debate artifacts.
 - Loading, running, unavailable, and completed states.
 
 ## Current boundaries
 
-The frontend does not currently use React Query, Zustand, Sigma.js, WebSockets, or a component-test runner. Live progress is polling-based. The target architecture may introduce event streaming and richer graph views after the corresponding backend contracts exist.
+The frontend does not currently use React Query, Zustand, Sigma.js, WebSockets, or a component-test runner. The A2 console uses native `EventSource` with resumable persisted events and polling fallback; broader navigation, filtering, accessibility, and end-to-end work remains A4.
 
 ## Environment
 

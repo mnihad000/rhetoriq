@@ -5,7 +5,7 @@ All clients implement BaseModelClient.generate_json(system_prompt, user_prompt, 
 
 Priority order when building a client for production:
   GeminiModelClient  (primary — fast, structured output support)
-  GroqModelClient    (backup — llama-3.1-8b-instant, very low latency)
+  GroqModelClient    (backup — openai/gpt-oss-20b)
   OllamaModelClient  (local fallback — requires Ollama running locally)
   CachedModelClient  (last resort — returns pre-generated fixture JSON)
   MockModelClient    (deterministic — for tests and demo mode)

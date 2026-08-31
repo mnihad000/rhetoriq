@@ -1,3 +1,8 @@
+from contextlib import asynccontextmanager
+import logging
+import threading
+import time
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -5,38 +10,17 @@ from api.health import router as health_router
 from api.ingest import router as ingest_router
 from api.narratives import router as narratives_router
 from api.redis_status import router as redis_status_router
+from api.research import router as research_router
 from api.trending import router as trending_router
 from api.trending import _service as trending_service
 from config import get_settings
 
 settings = get_settings()
 
-app = FastAPI(
-    title="RhetoriQ API",
-    description="Civic AI narrative intelligence platform. Demo mode active.",
-    version="0.1.0",
-)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.include_router(health_router)
-app.include_router(ingest_router)
-app.include_router(narratives_router)
-app.include_router(redis_status_router)
-app.include_router(trending_router)
-
-
-@app.on_event("startup")
-def startup() -> None:
-    import logging
-    import threading
-    import time
+def _start_background_services() -> None:
+    from services.autonomous_research import get_research_manager
+    get_research_manager().resume_incomplete()
 
     if settings.DEMO_MODE:
         return
@@ -61,6 +45,35 @@ def startup() -> None:
         daemon=True,
         name="rq-trending-hourly",
     ).start()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    _start_background_services()
+    yield
+
+
+app = FastAPI(
+    title="RhetoriQ API",
+    description="Civic AI narrative intelligence platform. Demo mode active.",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(health_router)
+app.include_router(ingest_router)
+app.include_router(narratives_router)
+app.include_router(redis_status_router)
+app.include_router(research_router)
+app.include_router(trending_router)
 
 
 @app.get("/")

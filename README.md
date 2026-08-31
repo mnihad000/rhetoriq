@@ -10,11 +10,12 @@ The product deliberately distinguishes **first observed in the available dataset
 - GDELT DOC 2.0 ingestion for news discovery.
 - Hacker News ingestion through the public Algolia API.
 - Direct HTTP retrieval of canonical pages for evidence enrichment.
-- A provider boundary for broad web search; live broad-web research is not configured yet.
+- A durable LangGraph research runtime with budgets, leases, checkpoints, idempotent actions, replay, SSE progress, and a deterministic publication gate.
+- Self-hosted SearXNG discovery plus GDELT, Hacker News, canonical HTTP, internal-corpus, and isolated Playwright adapters.
 - In-memory and SQLite-backed development storage, with optional Redis caching, vector search, and agent memory.
-- A React and TypeScript investigation interface.
+- A React and TypeScript investigation interface with a live graph, research rail, evidence gate, and replay controls.
 
-LangGraph-based autonomous research, self-hosted observability, Kafka, Flink, PostgreSQL/pgvector, Elasticsearch, Neo4j, Kubernetes, and source-connector workers describe the target production architecture. They are not all present in this repository yet. See [the roadmap](docs/ROADMAP.md) for implementation status.
+Kafka, Flink, PostgreSQL/pgvector, Elasticsearch, Neo4j, Kubernetes, and the wider source-connector fleet remain target architecture. See [the roadmap](docs/ROADMAP.md) for exact implementation status.
 
 ## Collection strategy
 
@@ -22,7 +23,7 @@ RhetoriQ is **API/feed-first**, not scraper-first:
 
 1. First-party APIs, public datasets, event streams, and RSS/Atom feeds provide structured discovery records.
 2. A broad web-search API discovers relevant URLs outside those monitored sources.
-3. The planned investigator selects structured search or isolated browser research per evidence gap, subject to budgets and source policy.
+3. The LangGraph investigator selects structured search or isolated browser research per evidence gap, subject to budgets and source policy.
 4. RhetoriQ retrieves a canonical source page only when needed to create an evidence record.
 
 A website, post, transcript, or official record is a source. An API, feed, or HTML fetch is the transport used to retrieve it.
@@ -35,7 +36,7 @@ Current source status is documented in [DATA_SOURCES.md](docs/DATA_SOURCES.md).
 flowchart LR
     G[GDELT DOC 2.0 API] --> I[Ingestion services]
     H[HN Algolia API] --> I
-    S[Search and browser tools] -. planned .-> D[LangGraph investigator]
+    S[Search and browser tools] --> D[LangGraph investigator]
     I --> N[Normalized Document records]
     D --> F[Canonical-page fetcher]
     F --> N
@@ -84,6 +85,19 @@ npm install
 npm run dev
 ```
 
+### A2 research services
+
+The research-only Compose stack supplies SearXNG and the isolated browser renderer:
+
+```powershell
+Copy-Item infra/research/.env.example infra/research/.env
+docker compose -f infra/research/docker-compose.yml up -d
+$env:RESEARCH_RUNTIME="langgraph"
+$env:DEMO_MODE="false"
+```
+
+See [Autonomous Research](docs/AUTONOMOUS_RESEARCH.md) for worker mode, model configuration, budgets, replay, and security boundaries.
+
 ### Tests
 
 ```powershell
@@ -101,6 +115,10 @@ Settings are loaded from `backend/.env` when present.
 | `DEMO_MODE` | Use the bundled demo corpus and skip background live refreshes. |
 | `GEMINI_API_KEY` | Optional Gemini model access. |
 | `GROQ_API_KEY` | Optional Groq model access. |
+| `RESEARCH_RUNTIME` | `auto`, `native`, or `langgraph` runtime selection. |
+| `RESEARCH_EXECUTION_MODE` | `embedded` FastAPI execution or separate `worker` process. |
+| `SEARXNG_BASE_URL` | Self-hosted broad-search endpoint. |
+| `BROWSER_SERVICE_URL` | Isolated browser-rendering endpoint. |
 | `REDIS_URL` | Optional Redis cache, phrase store, vector store, and memory. |
 | `GDELT_BASE_URL` | GDELT DOC 2.0 endpoint. |
 | `GDELT_MAX_RECORDS` | Maximum GDELT records requested per query. |
@@ -122,4 +140,5 @@ Future connectors must add their credentials only when implemented and approved.
 | [BACKEND.md](docs/BACKEND.md) | Backend contracts and endpoint reference. |
 | [FRONTEND.md](docs/FRONTEND.md) | Frontend behavior and component model. |
 | [TESTING.md](docs/TESTING.md) | Current verification commands and planned test layers. |
+| [AUTONOMOUS_RESEARCH.md](docs/AUTONOMOUS_RESEARCH.md) | A2 architecture, setup, security, replay, and operating guide. |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Local runtime and optional-service troubleshooting. |

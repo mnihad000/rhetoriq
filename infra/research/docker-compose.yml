@@ -1,0 +1,42 @@
+services:
+  searxng:
+    image: ${SEARXNG_IMAGE:-docker.io/searxng/searxng:2026.7.26-b060c780d@sha256:d0aaeb14880e6e92bde1518fcc7261e995783367d63d95203383607bef9c6516}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8080/
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?Set SEARXNG_SECRET in your environment}
+    volumes:
+      - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+
+  research-browser:
+    build:
+      context: ./browser-service
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8010:8010"
+    environment:
+      BROWSER_SERVICE_TOKEN: ${BROWSER_SERVICE_TOKEN:-local-development-token}
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+      - /dev/shm:size=256m
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    cpus: 1.5
+    pids_limit: 192

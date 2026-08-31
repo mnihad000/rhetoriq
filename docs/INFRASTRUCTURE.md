@@ -10,6 +10,8 @@ The repository currently supports local execution of:
 - one Vite/React frontend process;
 - SQLite and in-process development stores;
 - optional Redis for cache, phrase tracking, vectors, and agent memory.
+- an optional research-only Compose stack with localhost-bound SearXNG and a constrained Playwright renderer;
+- embedded research execution or a separately launched leased research worker.
 
 The repository does not currently contain deployable Kafka, Flink, Kubernetes, Terraform, or ArgoCD implementations. Those remain production roadmap work and should not appear in setup instructions as completed resources.
 
@@ -185,3 +187,11 @@ npm run dev
 
 Redis is optional for development features. Kafka should be added to local setup when the B3 event contracts and consumers are implemented, not before.
 
+The A2 services start independently of the frontend/backend containers:
+
+```powershell
+Copy-Item infra/research/.env.example infra/research/.env
+docker compose -f infra/research/docker-compose.yml up -d
+```
+
+They are deliberately research-only; general application containerization remains A5.

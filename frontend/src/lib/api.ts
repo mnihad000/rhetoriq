@@ -1,5 +1,7 @@
 import type {
   LiveInvestigationWorkspace,
+  LiveClaimVerificationResult,
+  LiveResearchTrail,
   LiveRecentInvestigationSummary,
   LiveTrendingFeed,
   LiveTrendingInvestigationResponse,
@@ -96,6 +98,22 @@ export async function runInvestigation(investigationId: string) {
   );
 }
 
+export async function getResearchTrail(investigationId: string, afterSequence = 0) {
+  return request<LiveResearchTrail>(
+    `/api/investigations/${investigationId}/research-trail?after_sequence=${afterSequence}&limit=500`,
+  );
+}
+
+export function getResearchEventsUrl(investigationId: string) {
+  return `${API_BASE_URL}/api/investigations/${investigationId}/events`;
+}
+
+export async function replayResearchRun(investigationId: string, runId: string) {
+  return request(`/api/investigations/${investigationId}/runs/${runId}/replay`, {
+    method: "POST",
+  });
+}
+
 export async function runRetrieval(investigationId: string) {
   return request(`/api/investigations/${investigationId}/retrieve`, {
     body: {},
@@ -164,4 +182,14 @@ export async function runReport(investigationId: string) {
     body: {},
     method: "POST",
   });
+}
+
+export async function verifyInvestigationClaims(
+  investigationId: string,
+  forceRefresh = true,
+) {
+  return request<LiveClaimVerificationResult>(
+    `/api/investigations/${investigationId}/verification`,
+    { body: { force_refresh: forceRefresh }, method: "POST" },
+  );
 }

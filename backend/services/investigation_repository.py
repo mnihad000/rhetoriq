@@ -10,6 +10,7 @@ from models.investigation import (
     AgentDebateResult,
     AnalystResult,
     ClaimCounterpointResult,
+    ClaimVerificationResult,
     ClaimLedgerResult,
     CounterNarrativeResult,
     FinalReportResult,
@@ -120,6 +121,7 @@ class InvestigationRepository:
             analyst=self.get_analyst_result(investigation_id),
             claim_counterpoints=self.get_claim_counterpoint_result(investigation_id),
             receipts=self.get_receipts_result(investigation_id),
+            claim_verification=self.get_claim_verification_result(investigation_id),
             agent_debate=self.get_agent_debate_result(investigation_id),
             report=self.get_final_report_result(investigation_id),
         )
@@ -692,6 +694,12 @@ class InvestigationRepository:
             return None
         return ReceiptsResult.model_validate_json(row["result_json"])
 
+    def save_claim_verification_result(self, result: ClaimVerificationResult) -> None:
+        self._save_json_artifact("claim_verification_results", result.investigation_id, result.model_dump_json())
+
+    def get_claim_verification_result(self, investigation_id: str) -> ClaimVerificationResult | None:
+        return self._load_json_artifact("claim_verification_results", investigation_id, ClaimVerificationResult)
+
     def save_agent_debate_result(self, result: AgentDebateResult) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
@@ -734,6 +742,10 @@ class InvestigationRepository:
             return None
         return FinalReportResult.model_validate_json(row["result_json"])
 
+    def delete_final_report_result(self, investigation_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM final_report_results WHERE investigation_id = ?", (investigation_id,))
+
     def _save_json_artifact(self, table_name: str, investigation_id: str, payload: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
@@ -767,8 +779,10 @@ class InvestigationRepository:
         return model_cls.model_validate_json(row["result_json"])
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
+        conn = sqlite3.connect(self._db_path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
     def _ensure_parent_dir(self) -> None:
@@ -940,6 +954,13 @@ class InvestigationRepository:
                 );
 
                 CREATE TABLE IF NOT EXISTS receipts_results (
+                    investigation_id TEXT PRIMARY KEY,
+                    result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS claim_verification_results (
                     investigation_id TEXT PRIMARY KEY,
                     result_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,

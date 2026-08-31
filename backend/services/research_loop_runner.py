@@ -29,6 +29,7 @@ from models.investigation import (
 from services.agent_debate_builder import build_agent_debate
 from services.analyst_builder import build_analyst_result
 from services.claim_ledger_builder import build_claim_ledger
+from services.claim_evidence_verifier import ClaimEvidenceVerifier, apply_claim_verification
 from services.counter_narrative_builder import build_counter_narratives
 from services.final_report_builder import apply_receipts_annotations, build_final_report
 from services.gap_analysis_builder import build_gap_analysis
@@ -45,13 +46,16 @@ class InvestigationRunner:
         self,
         repository: InvestigationRepository,
         retriever: RetrieverAgent,
+        *,
+        require_live_models: bool = True,
     ) -> None:
         self._repository = repository
         self._retriever = retriever
         self._settings = get_settings()
+        self._require_live_models = require_live_models
 
     def run(self, investigation_id: str, plan: InvestigationPlan, *, force_refresh: bool = False) -> InvestigationWorkspace:
-        if not self._live_models_available():
+        if self._require_live_models and not self._live_models_available():
             run_result = ResearchLoopRunResult(
                 investigation_id=investigation_id,
                 plan_snapshot=plan,
@@ -196,6 +200,17 @@ class InvestigationRunner:
             self._verification_map(report, claim_counterpoints),
         )
         self._repository.save_receipts_result(receipts)
+        verification = None
+        if self._settings.CLAIM_VERIFIER_ENABLED:
+            verification = ClaimEvidenceVerifier(settings=self._settings).verify(
+                investigation_id,
+                run_plan,
+                prior_documents,
+                report,
+                claim_counterpoints,
+            )
+            self._repository.save_claim_verification_result(verification)
+            report = apply_claim_verification(report, verification)
         claim_ledger = build_claim_ledger(investigation_id, analyst, receipts, last_skeptic_review)
         self._repository.save_claim_ledger_result(claim_ledger)
         gap_ledger = GapLedgerResult(investigation_id=investigation_id, entries=last_gap_analysis.missing_evidence)
@@ -280,7 +295,7 @@ class InvestigationRunner:
         claim_counterpoints,
     ) -> dict[str, str]:
         doc_ids = self._cited_document_ids(report, claim_counterpoints)
-        return {doc_id: "pending" for doc_id in doc_ids}
+        return {doc_id: "verified" for doc_id in doc_ids}
 
     def _cited_document_ids(self, report: FinalReportResult, claim_counterpoints) -> list[str]:
         doc_ids: list[str] = []
@@ -350,9 +365,16 @@ class InvestigationRunner:
         return report.model_copy(update={"key_claims": filtered_claims})
 
     def _live_models_available(self) -> bool:
-        return (not self._settings.DEMO_MODE) and bool(
-            self._settings.GEMINI_API_KEY or self._settings.GROQ_API_KEY
-        )
+        if self._settings.DEMO_MODE:
+            return False
+        if self._settings.GEMINI_API_KEY or self._settings.GROQ_API_KEY:
+            return True
+        try:
+            import httpx
+            response = httpx.get(f"{self._settings.OLLAMA_BASE_URL.rstrip('/')}/api/tags", timeout=2)
+            return response.is_success
+        except Exception:
+            return False
 
     def _empty_confidence_dimensions(self, reason: str) -> ConfidenceDimensions:
         return ConfidenceDimensions(

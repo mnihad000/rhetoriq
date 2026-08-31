@@ -26,6 +26,8 @@ from models.investigation import (
     AnalystResult,
     ClaimCounterpointRequest,
     ClaimCounterpointResult,
+    ClaimVerificationRequest,
+    ClaimVerificationResult,
     CounterNarrativeRequest,
     CounterNarrativeResult,
     FinalReportRequest,
@@ -65,6 +67,12 @@ from services.page_fetcher import get_page_fetcher
 from services.search_provider import CachedSearchProvider, build_search_provider
 from services.trending_cache import TrendingRedisCache
 from services.research_loop_runner import InvestigationRunner
+from services.autonomous_research import (
+    autonomous_runtime_enabled,
+    get_research_manager,
+    get_research_repository,
+)
+from services.claim_evidence_verifier import ClaimEvidenceVerifier, apply_claim_verification
 from services.mutation_detection import MutationDetector
 from services.redis_memory import get_redis_memory_service
 from services.retrieval import Retriever
@@ -616,6 +624,23 @@ def _ensure_receipts_and_report(
     return annotated_report, receipts_result, claim_counterpoint_result
 
 
+def _verify_report(
+    investigation_id: str,
+    plan,
+    documents,
+    report: FinalReportResult,
+    counterpoints: ClaimCounterpointResult | None,
+    *,
+    force_refresh: bool = False,
+) -> tuple[FinalReportResult, ClaimVerificationResult]:
+    cached = None if force_refresh else _investigation_repo.get_claim_verification_result(investigation_id)
+    verification = cached or ClaimEvidenceVerifier().verify(
+        investigation_id, plan, documents, report, counterpoints
+    )
+    _investigation_repo.save_claim_verification_result(verification)
+    return apply_claim_verification(report, verification), verification
+
+
 # ---------------------------------------------------------------------------
 # GET /api/narratives - list spiking narratives
 # ---------------------------------------------------------------------------
@@ -674,7 +699,7 @@ def get_investigation_workspace(investigation_id: str) -> InvestigationWorkspace
     if _investigation_cache:
         cached = _investigation_cache.get_workspace(investigation_id)
         if cached is not None:
-            return cached
+            return cached.model_copy(update={"research_run": get_research_repository().get_latest_run(investigation_id)})
 
     workspace = _investigation_repo.get_investigation_workspace(investigation_id)
     if workspace is None:
@@ -683,7 +708,7 @@ def get_investigation_workspace(investigation_id: str) -> InvestigationWorkspace
     if _investigation_cache:
         _investigation_cache.cache_workspace(workspace)
 
-    return workspace
+    return workspace.model_copy(update={"research_run": get_research_repository().get_latest_run(investigation_id)})
 
 
 @router.get("/investigations/{investigation_id}/memory")
@@ -838,6 +863,14 @@ def run_investigation(
     workspace = _investigation_repo.get_investigation_workspace(investigation_id)
     if workspace is None:
         raise HTTPException(status_code=404, detail=f"Investigation workspace for '{investigation_id}' not found.")
+
+    research_manager = get_research_manager()
+    same_repository = getattr(research_manager.repository, "_db_path", None) == getattr(_investigation_repo, "_db_path", None)
+    if autonomous_runtime_enabled() and same_repository:
+        run = research_manager.start(investigation_id, force_refresh=request.force_refresh)
+        if _investigation_cache:
+            _investigation_cache.invalidate(investigation_id)
+        return workspace.model_copy(update={"research_run": run})
 
     # Already complete — return cached result
     if workspace.research_loop and not request.force_refresh:
@@ -1270,6 +1303,44 @@ def agent_debate(
 
 
 # ---------------------------------------------------------------------------
+# POST /api/investigations/{id}/verification - explicitly re-verify a report
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/investigations/{investigation_id}/verification",
+    response_model=ClaimVerificationResult,
+)
+def verify_investigation_claims(
+    investigation_id: str,
+    request: ClaimVerificationRequest,
+) -> ClaimVerificationResult:
+    if not _investigation_repo.investigation_exists(investigation_id):
+        raise HTTPException(status_code=404, detail=f"Investigation '{investigation_id}' not found.")
+    plan = _investigation_repo.get_plan(investigation_id)
+    retrieval = _investigation_repo.get_retrieval_result(investigation_id)
+    if plan is None or retrieval is None:
+        raise HTTPException(status_code=409, detail="Investigation needs a plan and retrieved evidence before verification.")
+    documents = _investigation_repo.get_retrieved_documents(investigation_id)
+    try:
+        report, _receipts, counterpoints = _ensure_receipts_and_report(
+            investigation_id, plan, retrieval, documents, force_refresh=False
+        )
+        verified_report, verification = _verify_report(
+            investigation_id,
+            plan,
+            documents,
+            report,
+            counterpoints,
+            force_refresh=request.force_refresh,
+        )
+        _investigation_repo.save_final_report_result(verified_report, update_stage=False)
+        _update_workspace_cache(investigation_id)
+        return verification.model_copy(update={"cached": not request.force_refresh})
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Claim verification failed: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
 # POST /api/investigations/{id}/report - assemble final investigation report
 # ---------------------------------------------------------------------------
 
@@ -1313,6 +1384,15 @@ def final_report(
             documents,
             force_refresh=request.force_refresh,
         )
+        if get_settings().CLAIM_VERIFIER_ENABLED:
+            result, _verification = _verify_report(
+                investigation_id,
+                plan,
+                documents,
+                result,
+                claim_counterpoint_result,
+                force_refresh=request.force_refresh,
+            )
         counter_result = _ensure_counter_narrative_result(investigation_id, plan, retrieval, documents)
         family_result = _ensure_narrative_family_result(investigation_id, plan, retrieval, documents)
         analyst_result = _ensure_analyst_result(investigation_id, plan, retrieval, documents)

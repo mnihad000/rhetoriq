@@ -29,6 +29,17 @@ npm run build
 
 Before merging documentation changes, verify that project-authored Markdown has no conflict markers or mojibake and that all relative Markdown links resolve within the repository. The check may be run with the PowerShell command in the A1 completion record in [ROADMAP.md](ROADMAP.md).
 
+## A2 deterministic benchmark
+
+The 14-case offline suite covers sparse/conflicting/duplicate evidence, chronology, browser evidence, access controls, prompt injection, private URLs, provider failure, crash recovery, budgets, replay, and unsupported-claim withholding:
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m evaluation.a2_benchmark --check
+```
+
+Use `--write` after an intentional fixture or evaluator change. The committed [A2 scorecard](evaluation/A2_SCORECARD.md) must meet every contract threshold. It measures orchestration and publication discipline; A3 remains responsible for broader semantic investigation quality.
+
 ## Future test layers
 
 As Track B is implemented, add tests with the feature rather than documenting them as existing coverage: migration tests for PostgreSQL, fixture tests for source connectors, contract/replay tests for Kafka and Flink, and integration tests for specialized stores.

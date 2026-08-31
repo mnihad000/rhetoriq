@@ -1,0 +1,28 @@
+{
+  "suite_version": "a3-live-canary-v1",
+  "canaries": [
+    {
+      "id": "usgs-homepage",
+      "url": "https://www.usgs.gov/",
+      "source_name": "U.S. Geological Survey",
+      "source_type": "national_news",
+      "title": "U.S. Geological Survey homepage",
+      "claim_text": "The page is publicly reachable evidence from the U.S. Geological Survey.",
+      "plan": {
+        "query_text": "Canary: public official source reachability",
+        "topic": "public official source reachability",
+        "canonical_phrase": "public official source reachability",
+        "intent": "general investigation",
+        "entities": [],
+        "search_queries": ["public official source reachability"],
+        "semantic_queries": [],
+        "target_source_types": ["national_news"],
+        "requested_outputs": [],
+        "time_window": {"start": null, "end": null, "label": "all_time"},
+        "retrieval_mode": "narrow",
+        "risk_notes": [],
+        "uncertainty_requirements": []
+      }
+    }
+  ]
+}

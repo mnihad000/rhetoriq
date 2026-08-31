@@ -166,8 +166,8 @@ Connectors fail independently. A Reddit authorization failure, dead RSS feed, GD
 | GDELT | DOC 2.0 JSON API | News discovery and trend signals | No; current mapping uses title/snippet and canonical URL. |
 | Hacker News | Algolia HN Search API | Community/forum discovery | Story metadata and title; linked pages require canonical fetch. |
 | Canonical page | Direct HTTP GET | Evidence enrichment after discovery | Extracted from retrievable HTML. |
-| Search adapter | Planned | Agent-selected broad discovery and coverage fallback | Discovery receipts; canonical fetch normally required. |
-| Browser adapter | Planned | Agent-selected public-web exploration | Controlled browser navigation; normalized pages are the evidence. |
+| SearXNG search adapter | Implemented in A2 | Agent-selected broad discovery and coverage fallback | Discovery receipts; canonical fetch normally required. |
+| Isolated browser adapter | Implemented in A2 | Agent-selected public-web rendering | Controlled navigation; normalized pages and retrieval receipts are the evidence. |
 
 The current trending detector polls a fixed seed-topic list. Production discovery should add broader query generation and connector-specific incremental collection rather than treating those seeds as complete coverage.
 

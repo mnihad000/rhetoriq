@@ -790,6 +790,176 @@ export type LiveReceiptsResult = {
   cached: boolean;
 };
 
+export type LiveSourceIntelligence = {
+  document_id: string;
+  registrable_domain: string | null;
+  independence_group: string;
+  source_role: "primary" | "official" | "original_reporting" | "commentary" | "reposting" | "community" | "unknown";
+  role_confidence: number;
+  date_confidence: number;
+  reasons: string[];
+};
+
+export type LiveClaimEvidenceVerification = {
+  claim_id: string;
+  document_id: string;
+  evidence_side: "support" | "counter";
+  evidence_span: string;
+  span_start: number;
+  span_end: number;
+  semantic_similarity: number;
+  nli_verdict: "entails" | "contradicts" | "neutral";
+  nli_confidence: number;
+  verifier_provenance: string[];
+  source_intelligence: LiveSourceIntelligence;
+  confidence_score: number;
+  reason_codes: string[];
+};
+
+export type LiveClaimVerificationRecord = {
+  claim_id: string;
+  claim_text: string;
+  disposition: "supported" | "contradicted" | "unresolved" | "withheld";
+  confidence_score: number;
+  supporting_evidence: LiveClaimEvidenceVerification[];
+  contradicting_evidence: LiveClaimEvidenceVerification[];
+  reason_codes: string[];
+  summary: string;
+};
+
+export type LiveClaimVerificationResult = {
+  investigation_id: string;
+  verifier_version: string;
+  records: LiveClaimVerificationRecord[];
+  model_provenance: string[];
+  limitations: string[];
+  confidence_score: number;
+  cached: boolean;
+};
+
+export type LiveResearchBudgetLimits = {
+  wall_seconds: number;
+  tool_calls: number;
+  model_calls: number;
+  model_tokens: number;
+  spend_usd: number;
+  search_results: number;
+  canonical_fetches: number;
+  browser_renders: number;
+  internal_searches: number;
+  domain_requests: number;
+  retries: number;
+};
+
+export type LiveResearchBudgetUsage = {
+  active_seconds: number;
+  tool_calls: number;
+  model_calls: number;
+  model_tokens: number;
+  spend_usd: number;
+  search_results: number;
+  canonical_fetches: number;
+  browser_renders: number;
+  internal_searches: number;
+  domain_requests: Record<string, number>;
+  retries: number;
+};
+
+export type LiveResearchRun = {
+  run_id: string;
+  investigation_id: string;
+  parent_run_id: string | null;
+  mode: "live" | "recorded";
+  plan_version: string;
+  status: "queued" | "running" | "completed" | "insufficient_evidence" | "configuration_missing" | "failed";
+  active_node: string | null;
+  active_action: string | null;
+  last_event_sequence: number;
+  limits: LiveResearchBudgetLimits;
+  usage: LiveResearchBudgetUsage;
+  action_count: number;
+  document_count: number;
+  source_count: number;
+  terminal_decision: string | null;
+  warnings: string[];
+  started_at: string | null;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export type LiveResearchEvent = {
+  run_id: string;
+  sequence: number;
+  event_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
+export type LiveResearchAction = {
+  action_id: string;
+  run_id: string;
+  sequence: number;
+  decision: {
+    action_type: string;
+    retrieval_lane: string;
+    gap_ids: string[];
+    query: string | null;
+    candidate_id: string | null;
+    requested_source_classes: string[];
+    action_summary: string;
+    expected_evidence: string;
+  };
+  status: "queued" | "running" | "completed" | "partial" | "failed" | "blocked";
+  provider: string | null;
+  result_count: number;
+  document_ids: string[];
+  receipt_ids: string[];
+  duration_ms: number | null;
+  failure_category: string | null;
+  warning: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LivePublicationCheck = {
+  key: string;
+  label: string;
+  passed: boolean;
+  measured: number | string | boolean | null;
+  threshold: number | string | boolean | null;
+  detail: string;
+};
+
+export type LiveResearchEvaluation = {
+  run_id: string;
+  investigation_id: string;
+  passed: boolean;
+  final_decision: "published" | "insufficient_evidence";
+  checks: LivePublicationCheck[];
+  failed_reasons: string[];
+  metrics: Record<string, number | boolean>;
+  created_at: string;
+};
+
+export type LiveResearchTrail = {
+  run: LiveResearchRun | null;
+  events: LiveResearchEvent[];
+  actions: LiveResearchAction[];
+  evaluation: LiveResearchEvaluation | null;
+  replay_comparison: {
+    source_run_id: string;
+    status?: string;
+    action_equivalence?: number;
+    source_artifact_hash?: string | null;
+    replay_artifact_hash?: string | null;
+    artifact_hash_equivalent?: boolean;
+    source_evaluation_decision?: string | null;
+    replay_evaluation_decision?: string | null;
+    evaluation_equivalent?: boolean;
+  } | null;
+  next_sequence: number;
+};
+
 export type LiveSoftenedClaim = {
   claim_id: string;
   original: string;
@@ -843,6 +1013,7 @@ export type LiveFinalReportClaim = {
   counterpoint_summary: string | null;
   counterpoint_type: "opposing" | "corrective" | "reframing" | null;
   counter_citations: LiveReportCitation[];
+  verification?: LiveClaimVerificationRecord | null;
 };
 
 export type LiveFinalReportResult = {
@@ -867,6 +1038,7 @@ export type LiveFinalReportResult = {
   confidence_score: number;
   confidence_label: InvestigationConfidence;
   confidence_dimensions: LiveConfidenceDimensions | null;
+  verifier_version?: string | null;
   cached: boolean;
 };
 
@@ -893,6 +1065,8 @@ export type LiveInvestigationWorkspace = {
   analyst: LiveAnalystResult | null;
   claim_counterpoints: LiveClaimCounterpointResult | null;
   receipts: LiveReceiptsResult | null;
+  claim_verification?: LiveClaimVerificationResult | null;
   agent_debate: LiveAgentDebateResult | null;
   report: LiveFinalReportResult | null;
+  research_run?: LiveResearchRun | null;
 };
