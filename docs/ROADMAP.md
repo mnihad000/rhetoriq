@@ -182,7 +182,7 @@ The repository now contains the versioned A3 claim-evidence verifier, persisted 
 
 ### A4. Frontend Completion
 
-**Status: Planned**
+**Status: Completed (2026-08-30)**
 
 **Estimate: 2–4 weeks**
 
@@ -202,6 +202,10 @@ The repository now contains the versioned A3 claim-evidence verifier, persisted 
 #### Completion condition
 
 A user can create, monitor, reload, inspect, and navigate a real investigation end to end; accessibility checks pass; and automated tests cover the primary dashboard-to-report journey.
+
+#### Implementation record (2026-08-30)
+
+Implemented the report-first investigation workspace with URL-addressable Report, Evidence, Narrative, and Method & audit views; source filtering and accessible source detail; source-aware narrative/timeline navigation; A3 audit preservation; SSE-driven workspace refresh with polling fallback; and client-side recent-investigation search and status filtering over the existing 12-record API limit. The frontend production build and the initial Vitest history-filter test pass. Browser end-to-end and visual-regression coverage are explicitly deferred to move directly into A5 deployment.
 
 ---
 
@@ -463,7 +467,7 @@ Product and infrastructure work should alternate so the project remains demoable
 | 3 | A3 Investigation quality and evaluation | Planned |
 | 4 | A5 Deployable MVP foundation | Planned |
 | 5 | B1 PostgreSQL and pgvector migration | Planned |
-| 6 | A4 Frontend completion | Planned |
+| 6 | A4 Frontend completion | Completed |
 | 7 | B2 Source connector expansion | Planned |
 | 8 | B3 Kafka contracts and replayable ingestion | Planned |
 | 9 | B4 Flink processing and anomaly detection | Planned |

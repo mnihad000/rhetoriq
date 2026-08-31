@@ -1,8 +1,8 @@
-# RhetoriQ Handoff - Start A4 Next
+# RhetoriQ Handoff - Start A5 Next
 
 ## Current status
 
-- **A1, A2, and A3 are complete by product decision.** Start **A4 Frontend Completion** next.
+- **A1, A2, A3, and A4 are complete by product decision.** Start **A5 Deployable MVP** next.
 - Do not re-open A3 unless requested. The project owner explicitly accepted the remaining 30-case curated-real-source corpus as future quality work, not a blocker.
 - The working tree was already dirty before A3. Preserve unrelated changes and do not reset/revert them.
 
@@ -45,10 +45,19 @@
 
 - `python -m evaluation.a3_scorecard` intentionally fails until a real 30-case reviewed capture corpus is curated. This is explicitly deferred.
 
-## A4 recommended starting point
+## A4 decisions and implementation
 
-1. Inspect the existing investigation page, research console, live workspace types, and A2 SSE event flow.
-2. Replace polling with the existing event-stream interface where safe, keeping graceful fallback/reconnect behavior.
-3. Improve final-report navigation between claims, receipts, sources, timeline events, gaps, provenance, and the new A3 audit evidence.
-4. Add source filtering, history/search, source-detail views, keyboard/focus management, contrast/reduced-motion behavior, component tests, and end-to-end dashboard-to-report coverage.
-5. Keep API contracts backward-compatible and preserve the A3 audit UI.
+- The investigation page is now a balanced, progressive-disclosure workspace. The default `Report` view leads with the conclusion, confidence, key claims, limitations, and recommended human checks; `Evidence`, `Narrative`, and `Method & audit` hold the deeper material.
+- Workspace view, selected source, and evidence filters are URL query state, so report views and source detail can be refreshed, shared, and navigated with browser history.
+- Evidence view provides keyword, source-type, and supporting/counter stance filters using existing workspace data. Source details open in an accessible drawer with Escape-to-close, focus return, and labelled external links.
+- Narrative groups the provenance trace and timeline. Method & audit preserves the A2 runtime console, gaps, provenance, diversity context, research history, agent debate, and the A3 span-level audit/re-verification interface.
+- Page-level updates now subscribe to the existing SSE event stream and debounce workspace refreshes. Native stream reconnection is retained; 8-second polling is used only after stream errors.
+- Recent Investigations now loads the existing maximum of 12 records and supports client-side text and status filtering. No backend API contracts changed.
+- The quiet editorial light theme remains the visual direction. Focus-visible styles, semantic view tabs, status labels, reduced-motion support, responsive layouts, empty states, and partial-artifact states were added.
+
+## A4 verification and deployment notes
+
+- Frontend production build passes: `cd frontend; npm run build`.
+- Vitest/Testing Library has been added; the recent-investigation search and status-filter flow passes with `cd frontend; npm test`.
+- Browser end-to-end and visual regression coverage were intentionally deferred by product decision to begin deployment immediately.
+- The production frontend must set `VITE_API_BASE_URL` to the public backend origin. The SSE endpoint uses that same base URL.

@@ -67,7 +67,7 @@ export async function getTrendingFeed(limit = 6) {
   return request<LiveTrendingFeed>(`/api/trending?limit=${limit}`);
 }
 
-export async function getRecentInvestigations(limit = 6) {
+export async function getRecentInvestigations(limit = 12) {
   return request<LiveRecentInvestigationSummary[]>(
     `/api/investigations?limit=${limit}`,
   );
