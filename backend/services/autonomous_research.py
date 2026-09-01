@@ -160,7 +160,7 @@ class ResearchSupervisor:
             "remaining_tool_calls": budget.limits.tool_calls - budget.usage.tool_calls,
             "allowed_actions": [
                 "web_search", "gdelt_search", "hacker_news_search", "canonical_fetch",
-                "browser_fetch", "internal_search", "assess_evidence",
+                "internal_search", "assess_evidence",
             ],
             "decision_schema": ResearchActionDecision.model_json_schema(),
         }
@@ -285,9 +285,6 @@ class AutonomousResearchEngine:
         plan = self.repository.get_plan(summary.investigation_id)
         if plan is None:
             raise KeyError(f"Plan missing for {summary.investigation_id}")
-        connection = sqlite3.connect(self.settings.RESEARCH_CHECKPOINT_DB_PATH, check_same_thread=False)
-        saver = SqliteSaver(connection)
-        graph = self._build_graph(saver)
         config = {"configurable": {"thread_id": run_id}, "recursion_limit": 200}
         initial: ResearchState = {
             "run_id": run_id,
@@ -300,13 +297,25 @@ class AutonomousResearchEngine:
             "phase": "research",
             "warnings": list(summary.warnings),
         }
+        if self.settings.DATABASE_URL:
+            from langgraph.checkpoint.postgres import PostgresSaver
+
+            with PostgresSaver.from_conn_string(self.settings.DATABASE_URL) as saver:
+                saver.setup()
+                self._invoke_graph(saver, config, initial)
+            return
+        connection = sqlite3.connect(self.settings.RESEARCH_CHECKPOINT_DB_PATH, check_same_thread=False)
         try:
-            checkpoint = saver.get_tuple(config)
-            graph.invoke(None if checkpoint is not None else initial, config)
+            self._invoke_graph(SqliteSaver(connection), config, initial)
         finally:
             connection.close()
 
-    def _build_graph(self, saver: SqliteSaver):
+    def _invoke_graph(self, saver: Any, config: dict, initial: ResearchState) -> None:
+        graph = self._build_graph(saver)
+        checkpoint = saver.get_tuple(config)
+        graph.invoke(None if checkpoint is not None else initial, config)
+
+    def _build_graph(self, saver: Any):
         builder = StateGraph(ResearchState)
         builder.add_node("initialize_run", self._initialize)
         builder.add_node("assess_research_state", self._assess)
@@ -419,6 +428,12 @@ class AutonomousResearchEngine:
     def _validate(self, state: ResearchState) -> dict:
         self._node_event(state, "validate_policy_and_budget", True)
         decision = ResearchActionDecision.model_validate(state["decision"])
+        if decision.action_type == "browser_fetch" and not self.settings.BROWSER_RENDERING_ENABLED:
+            decision = ResearchActionDecision(
+                action_type="assess_evidence", retrieval_lane="discovery",
+                action_summary="Browser rendering is disabled; assessing the accessible evidence packet.",
+                expected_evidence="A bounded publication or insufficient-evidence decision.",
+            )
         budget = ResearchBudget(configured_limits(), ResearchBudgetUsage.model_validate(state.get("usage", {})))
         domain = None
         if decision.candidate_id:
@@ -996,8 +1011,8 @@ class LeaseHeartbeat:
             self.audit.heartbeat_worker(self.worker_id, self.mode, self.run_id)
 
 
-_repository = InvestigationRepository(get_settings().INVESTIGATION_DB_PATH)
-_audit = ResearchRepository(get_settings().INVESTIGATION_DB_PATH)
+_repository = InvestigationRepository(get_settings().persistence_target)
+_audit = ResearchRepository(get_settings().persistence_target)
 _manager = ResearchRunManager(_repository, _audit)
 
 

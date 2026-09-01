@@ -140,6 +140,11 @@ class ResearchToolRegistry:
         plan: InvestigationPlan,
         candidates: list[SearchResult],
     ) -> ToolOutcome:
+        if decision.action_type == "browser_fetch" and not self.settings.BROWSER_RENDERING_ENABLED:
+            return ToolOutcome(
+                provider="policy",
+                warning="Browser rendering is disabled for this deployment; use accessible canonical sources.",
+            )
         if decision.action_type == "web_search":
             results = self.search.search(
                 decision.query or plan.query_text,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sqlite3
 from typing import AsyncIterator
 
 import httpx
@@ -27,16 +26,21 @@ def research_health() -> dict:
     except Exception as exc:
         components["langgraph"] = {"status": "missing", "detail": str(exc)}
     try:
-        conn = sqlite3.connect(settings.RESEARCH_CHECKPOINT_DB_PATH)
-        conn.execute("SELECT 1")
-        conn.close()
+        if settings.DATABASE_URL:
+            import psycopg
+            with psycopg.connect(settings.DATABASE_URL) as conn:
+                conn.execute("SELECT 1")
+        else:
+            import sqlite3
+            with sqlite3.connect(settings.RESEARCH_CHECKPOINT_DB_PATH) as conn:
+                conn.execute("SELECT 1")
         components["checkpointer"] = {"status": "ready"}
     except Exception as exc:
         components["checkpointer"] = {"status": "error", "detail": str(exc)}
-    for name, url in {
-        "searxng": f"{settings.SEARXNG_BASE_URL.rstrip('/')}/search?q=rhetoriq&format=json",
-        "browser": f"{settings.BROWSER_SERVICE_URL.rstrip('/')}/health",
-    }.items():
+    service_urls = {"searxng": f"{settings.SEARXNG_BASE_URL.rstrip('/')}/search?q=rhetoriq&format=json"}
+    if settings.BROWSER_RENDERING_ENABLED and settings.BROWSER_SERVICE_URL:
+        service_urls["browser"] = f"{settings.BROWSER_SERVICE_URL.rstrip('/')}/health"
+    for name, url in service_urls.items():
         try:
             headers = {"X-RhetoriQ-Browser-Token": settings.BROWSER_SERVICE_TOKEN} if name == "browser" and settings.BROWSER_SERVICE_TOKEN else {}
             response = httpx.get(url, headers=headers, timeout=2)
@@ -73,7 +77,9 @@ def research_health() -> dict:
     }
     required = ["langgraph", "checkpointer", "worker", "internal_retrieval"]
     if settings.RESEARCH_RUNTIME == "langgraph" and not settings.DEMO_MODE:
-        required.extend(["searxng", "browser"])
+        required.append("searxng")
+        if settings.BROWSER_RENDERING_ENABLED:
+            required.append("browser")
     return {
         "status": "ready" if all(components[name]["status"] == "ready" for name in required) else "degraded",
         "runtime": settings.RESEARCH_RUNTIME,

@@ -49,7 +49,7 @@ class TrendingService:
         self._cache = TrendingRedisCache(self._settings.REDIS_URL)
         self._discovery = discovery_agent or DiscoveryAgent(cache=self._cache)
         self._retriever = retriever_agent or RetrieverAgent(
-            InvestigationRepository(self._settings.INVESTIGATION_DB_PATH)
+            InvestigationRepository(self._settings.persistence_target)
         )
         self._ranker = TrendingRanker(
             min_docs=self._settings.TRENDING_MIN_DOCS,

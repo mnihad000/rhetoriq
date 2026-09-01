@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from config import get_settings
+from migrations.runner import run_migrations
 from models.document import Document
+from services.database import connect, ensure_parent_dir, is_postgres_database
 from models.investigation import FinalReportResult, SearchResult
 from models.research import (
     ResearchActionDecision,
@@ -31,9 +32,11 @@ class ResearchRepository:
 
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
-        if db_path != ":memory:":
-            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        ensure_parent_dir(db_path)
+        if is_postgres_database(db_path):
+            run_migrations(db_path)
+        else:
+            self._init_schema()
 
     def create_run(
         self,
@@ -496,7 +499,7 @@ class ResearchRepository:
             completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
         )
 
-    def _row_to_action(self, row: sqlite3.Row) -> ResearchActionRecord:
+    def _row_to_action(self, row) -> ResearchActionRecord:
         return ResearchActionRecord(
             action_id=row["action_id"], run_id=row["run_id"], sequence=row["sequence"],
             idempotency_key=row["idempotency_key"],
@@ -507,13 +510,8 @@ class ResearchRepository:
             created_at=datetime.fromisoformat(row["created_at"]), updated_at=datetime.fromisoformat(row["updated_at"]),
         )
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+    def _connect(self):
+        return connect(self.db_path)
 
     def _init_schema(self) -> None:
         with self._connect() as conn:

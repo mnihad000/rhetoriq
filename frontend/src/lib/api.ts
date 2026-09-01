@@ -7,8 +7,15 @@ import type {
   LiveTrendingInvestigationResponse,
 } from "../types/rhetoriq";
 
+declare global {
+  interface Window {
+    __RHETORIQ_CONFIG__?: { API_BASE_URL?: string };
+  }
+}
+
 const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
+  window.__RHETORIQ_CONFIG__?.API_BASE_URL ||
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ||
   "http://127.0.0.1:8000";
 
 type RequestOptions = {

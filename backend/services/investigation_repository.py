@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import os
-import sqlite3
 from datetime import datetime, timezone
 
 from models.document import Document
+from migrations.runner import run_migrations
+from services.database import connect, ensure_parent_dir, is_postgres_database
 from models.investigation import (
     AgentDebateResult,
     AnalystResult,
@@ -34,7 +34,10 @@ class InvestigationRepository:
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
         self._ensure_parent_dir()
-        self._init_schema()
+        if is_postgres_database(db_path):
+            run_migrations(db_path)
+        else:
+            self._init_schema()
 
     def save_plan(self, investigation_id: str, query_text: str, plan: InvestigationPlan) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -778,19 +781,11 @@ class InvestigationRepository:
             return None
         return model_cls.model_validate_json(row["result_json"])
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
-        return conn
+    def _connect(self):
+        return connect(self._db_path)
 
     def _ensure_parent_dir(self) -> None:
-        if self._db_path == ":memory:":
-            return
-        parent = os.path.dirname(self._db_path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
+        ensure_parent_dir(self._db_path)
 
     def _count_receipts(self, receipts: ReceiptsResult | None) -> int:
         if receipts is None:

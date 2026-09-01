@@ -41,7 +41,10 @@ class Settings(BaseSettings):
     EMBEDDING_CACHE_TTL_SECONDS: int = 86400
 
     # Investigation runtime
+    DEPLOYMENT_ENV: str = "development"
+    DATABASE_URL: str = ""
     INVESTIGATION_DB_PATH: str = "investigations.sqlite3"
+    CORS_ALLOW_ORIGINS: str = ""
     RETRIEVER_MAX_ROUNDS: int = 3
     RETRIEVER_MAX_RESULTS_PER_QUERY: int = 5
     RESEARCH_LOOP_MAX_PASSES: int = 2
@@ -76,6 +79,7 @@ class Settings(BaseSettings):
     SEARXNG_BASE_URL: str = "http://127.0.0.1:8080"
     BROWSER_SERVICE_URL: str = "http://127.0.0.1:8010"
     BROWSER_SERVICE_TOKEN: str = ""
+    BROWSER_RENDERING_ENABLED: bool = False
     FETCH_MAX_RESPONSE_BYTES: int = 2_000_000
     FETCH_MAX_REDIRECTS: int = 5
     DOCUMENT_PARSER_VERSION: str = "a2-visible-text-v1"
@@ -107,6 +111,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def resolve_repo_relative_paths(self) -> "Settings":
+        if self.DEPLOYMENT_ENV.lower() == "production" and not self.DATABASE_URL:
+            raise ValueError("DATABASE_URL is required when DEPLOYMENT_ENV=production")
+        if self.DATABASE_URL:
+            return self
         db_path = Path(self.INVESTIGATION_DB_PATH)
         if self.INVESTIGATION_DB_PATH != ":memory:" and not db_path.is_absolute():
             self.INVESTIGATION_DB_PATH = str(BACKEND_DIR / db_path)
@@ -114,6 +122,14 @@ class Settings(BaseSettings):
         if self.RESEARCH_CHECKPOINT_DB_PATH != ":memory:" and not checkpoint_path.is_absolute():
             self.RESEARCH_CHECKPOINT_DB_PATH = str(BACKEND_DIR / checkpoint_path)
         return self
+
+    @property
+    def persistence_target(self) -> str:
+        return self.DATABASE_URL or self.INVESTIGATION_DB_PATH
+
+    @property
+    def cors_allow_origins(self) -> list[str]:
+        return [item.strip() for item in self.CORS_ALLOW_ORIGINS.split(",") if item.strip()]
 
 
 @lru_cache

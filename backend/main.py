@@ -62,8 +62,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    # Local development remains convenient; production must declare its public
+    # frontend origin explicitly instead of combining credentials with a wildcard.
+    allow_origins=settings.cors_allow_origins or (["*"] if settings.DEMO_MODE else []),
+    allow_credentials=bool(settings.cors_allow_origins),
     allow_methods=["*"],
     allow_headers=["*"],
 )

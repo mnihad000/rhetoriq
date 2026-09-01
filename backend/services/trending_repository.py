@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import os
-import sqlite3
 from datetime import datetime, timezone
 
 from models.document import Document
+from migrations.runner import run_migrations
+from services.database import connect, ensure_parent_dir, is_postgres_database
 from models.trending import (
     DiscoveryDocumentRecord,
     DiscoveryQuery,
@@ -20,7 +20,10 @@ class TrendingRepository:
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
         self._ensure_parent_dir()
-        self._init_schema()
+        if is_postgres_database(db_path):
+            run_migrations(db_path)
+        else:
+            self._init_schema()
 
     def create_run(
         self,
@@ -206,10 +209,11 @@ class TrendingRepository:
                 )
                 conn.execute(
                     """
-                    INSERT OR IGNORE INTO discovery_document_runs (
+                    INSERT INTO discovery_document_runs (
                         run_id, doc_id, provider, search_query, created_at
                     )
                     VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (run_id, doc_id, provider, search_query) DO NOTHING
                     """,
                     (run_id, document.id, provider, search_query, now),
                 )
@@ -279,10 +283,11 @@ class TrendingRepository:
             )
             conn.execute(
                 """
-                INSERT OR IGNORE INTO discovery_document_runs (
+                INSERT INTO discovery_document_runs (
                     run_id, doc_id, provider, search_query, created_at
                 )
                 VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (run_id, doc_id, provider, search_query) DO NOTHING
                 """,
                 (run_id, document.id, provider, search_query, now),
             )
@@ -451,17 +456,11 @@ class TrendingRepository:
             }
         )
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _connect(self):
+        return connect(self._db_path)
 
     def _ensure_parent_dir(self) -> None:
-        if self._db_path == ":memory:":
-            return
-        parent = os.path.dirname(self._db_path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
+        ensure_parent_dir(self._db_path)
 
     def _init_schema(self) -> None:
         with self._connect() as conn:

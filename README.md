@@ -142,3 +142,4 @@ Future connectors must add their credentials only when implemented and approved.
 | [TESTING.md](docs/TESTING.md) | Current verification commands and planned test layers. |
 | [AUTONOMOUS_RESEARCH.md](docs/AUTONOMOUS_RESEARCH.md) | A2 architecture, setup, security, replay, and operating guide. |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Local runtime and optional-service troubleshooting. |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Live Railway deployment, environment configuration, and launch checks. |

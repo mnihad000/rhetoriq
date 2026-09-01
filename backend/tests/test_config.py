@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from config import BACKEND_DIR, Settings
 from models.document import Document
 from services.document_store import live_store
@@ -48,6 +50,11 @@ def test_memory_db_path_is_preserved(monkeypatch):
     settings = Settings(_env_file=None, INVESTIGATION_DB_PATH=":memory:")
 
     assert settings.INVESTIGATION_DB_PATH == ":memory:"
+
+
+def test_production_settings_require_a_database_url():
+    with pytest.raises(ValueError, match="DATABASE_URL"):
+        Settings(_env_file=None, DEPLOYMENT_ENV="production")
 
 
 def test_get_merged_documents_excludes_demo_docs_in_live_mode(monkeypatch):

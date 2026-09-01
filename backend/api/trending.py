@@ -10,9 +10,9 @@ from services.trending_service import TrendingService
 router = APIRouter(prefix="/api")
 
 _settings = get_settings()
-_trending_repository = TrendingRepository(_settings.INVESTIGATION_DB_PATH)
+_trending_repository = TrendingRepository(_settings.persistence_target)
 _runtime_store = TrendingRuntimeStore(_settings.REDIS_URL)
-_investigation_repository = InvestigationRepository(_settings.INVESTIGATION_DB_PATH)
+_investigation_repository = InvestigationRepository(_settings.persistence_target)
 _service = TrendingService(
     repository=_trending_repository,
     runtime_store=_runtime_store,
