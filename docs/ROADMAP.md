@@ -217,21 +217,24 @@ Implemented the report-first investigation workspace with URL-addressable Report
 
 #### Goals
 
+- Deploy a live, non-demo MVP on Railway: public frontend and FastAPI API, with private research services.
 - Containerize the current frontend and backend.
 - Add production-safe environment configuration, CORS restrictions, request limits, secret handling, structured logs, and health probes.
 - Add CI that runs backend tests, Python compilation, documentation checks, and the frontend production build.
-- Deploy a public MVP with persistent investigation storage and documented operational limits.
+- Migrate investigation, research-checkpoint, and related durable state from SQLite to Railway PostgreSQL before launch, with repeatable migrations and rollback notes.
+- Deploy SearXNG as a private service reachable only from the backend. The initial deployment deliberately excludes the Playwright browser-renderer service; unavailable JavaScript-rendered sources must be recorded as a retrieval limitation, not treated as a failure or bypassed.
+- Deploy a public MVP with persistent PostgreSQL-backed investigation storage and documented operational limits.
 - Publish a concise demo script and architecture summary suitable for a portfolio or interview.
 
 #### Dependencies
 
 - A1 documentation hardening.
-- A2 live research for a fully live demo; demo-mode deployment may happen earlier.
+- A2 live research runtime.
 - A4 frontend acceptance checks.
 
 #### Completion condition
 
-Every push is automatically validated, a reproducible containerized deployment is documented, and a public instance can complete or replay an investigation without manual database repair.
+Every push is automatically validated, a reproducible Railway deployment is documented, and a public live instance can complete or replay an investigation without manual database repair. The initial release uses PostgreSQL and does not depend on Playwright/browser rendering.
 
 ---
 
@@ -241,25 +244,25 @@ This track implements the larger distributed architecture described in [ARCHITEC
 
 ### B1. PostgreSQL and pgvector Migration
 
-**Status: Planned**
+**Status: Planned (initial PostgreSQL persistence is delivered as part of A5)**
 
 **Estimate: 2–3 weeks**
 
 #### Goals
 
-- Define migrations for investigations, documents, artifacts, claims, receipts, sources, and trending snapshots.
-- Move durable workspace persistence from SQLite to PostgreSQL.
-- Move production vector retrieval to pgvector while preserving the current repository and service boundaries.
+- Define migrations for investigations, documents, artifacts, claims, receipts, sources, trending snapshots, and research checkpoints.
+- Move durable workspace persistence from SQLite to PostgreSQL as an A5 deployment prerequisite.
+- Move production vector retrieval to pgvector after the initial PostgreSQL migration, while preserving the current repository and service boundaries.
 - Provide a repeatable development migration and seed workflow.
 
 #### Dependencies
 
 - Stable MVP schemas.
-- Containerized local PostgreSQL.
+- A5 PostgreSQL persistence baseline.
 
 #### Completion condition
 
-The full backend test suite runs against PostgreSQL, persisted workspaces survive restarts, and retrieval queries return validated pgvector results.
+The full backend test suite runs against PostgreSQL, persisted workspaces survive restarts, and retrieval queries return validated pgvector results. The A5 launch completion condition covers the first two requirements; pgvector remains the follow-on B1 milestone.
 
 ---
 
@@ -465,8 +468,8 @@ Product and infrastructure work should alternate so the project remains demoable
 | 1 | A1 Documentation and baseline hardening | Completed |
 | 2 | A2 Autonomous internet research | Completed |
 | 3 | A3 Investigation quality and evaluation | Planned |
-| 4 | A5 Deployable MVP foundation | Planned |
-| 5 | B1 PostgreSQL and pgvector migration | Planned |
+| 4 | A5 Deployable MVP foundation, including PostgreSQL persistence | Planned |
+| 5 | B1 pgvector migration and PostgreSQL hardening | Planned |
 | 6 | A4 Frontend completion | Completed |
 | 7 | B2 Source connector expansion | Planned |
 | 8 | B3 Kafka contracts and replayable ingestion | Planned |
