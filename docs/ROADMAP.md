@@ -211,7 +211,7 @@ Implemented the report-first investigation workspace with URL-addressable Report
 
 ### A5. Deployable MVP
 
-**Status: Planned**
+**Status: In Progress (2026-09-11)**
 
 **Estimate: 2–3 weeks**
 
@@ -235,6 +235,19 @@ Implemented the report-first investigation workspace with URL-addressable Report
 #### Completion condition
 
 Every push is automatically validated, a reproducible Railway deployment is documented, and a public live instance can complete or replay an investigation without manual database repair. The initial release uses PostgreSQL and does not depend on Playwright/browser rendering.
+
+#### Implementation record (2026-09-11)
+
+The local deployment foundation is implemented: the frontend and API have
+production container definitions, Compose provisions PostgreSQL and private
+SearXNG, committed PostgreSQL migrations run before API startup, CI validates
+the backend, frontend, and documentation checks, and deployment instructions
+define Railway service boundaries and secret handling. The API now applies
+bounded per-client request limits, including a stricter investigation-start
+limit; this in-process implementation is deliberately limited to the initial
+single-API deployment. Railway provisioning, production secret configuration,
+and a successful public launch/replay verification remain before A5 can be
+marked completed.
 
 ---
 

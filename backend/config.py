@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     DATABASE_URL: str = ""
     INVESTIGATION_DB_PATH: str = "investigations.sqlite3"
     CORS_ALLOW_ORIGINS: str = ""
+    # The first production deployment has one API instance, so an in-process
+    # limiter is sufficient. A multi-instance deployment must replace it with
+    # a shared limiter before scaling out.
+    REQUEST_RATE_LIMIT_PER_MINUTE: int = 120
+    INVESTIGATION_START_LIMIT_PER_HOUR: int = 5
+    REQUEST_RATE_LIMIT_MAX_CLIENTS: int = 10_000
+    TRUST_PROXY_HEADERS: bool = False
     RETRIEVER_MAX_ROUNDS: int = 3
     RETRIEVER_MAX_RESULTS_PER_QUERY: int = 5
     RESEARCH_LOOP_MAX_PASSES: int = 2
@@ -113,6 +120,12 @@ class Settings(BaseSettings):
     def resolve_repo_relative_paths(self) -> "Settings":
         if self.DEPLOYMENT_ENV.lower() == "production" and not self.DATABASE_URL:
             raise ValueError("DATABASE_URL is required when DEPLOYMENT_ENV=production")
+        if self.REQUEST_RATE_LIMIT_PER_MINUTE < 0:
+            raise ValueError("REQUEST_RATE_LIMIT_PER_MINUTE cannot be negative")
+        if self.INVESTIGATION_START_LIMIT_PER_HOUR < 0:
+            raise ValueError("INVESTIGATION_START_LIMIT_PER_HOUR cannot be negative")
+        if self.REQUEST_RATE_LIMIT_MAX_CLIENTS < 1:
+            raise ValueError("REQUEST_RATE_LIMIT_MAX_CLIENTS must be at least 1")
         if self.DATABASE_URL:
             return self
         db_path = Path(self.INVESTIGATION_DB_PATH)

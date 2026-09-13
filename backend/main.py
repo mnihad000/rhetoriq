@@ -14,8 +14,10 @@ from api.research import router as research_router
 from api.trending import router as trending_router
 from api.trending import _service as trending_service
 from config import get_settings
+from middleware.request_limits import RequestLimitMiddleware, SlidingWindowLimiter
 
 settings = get_settings()
+request_limiter = SlidingWindowLimiter(max_clients=settings.REQUEST_RATE_LIMIT_MAX_CLIENTS)
 
 
 def _start_background_services() -> None:
@@ -61,9 +63,19 @@ app = FastAPI(
 )
 
 app.add_middleware(
+    RequestLimitMiddleware,
+    requests_per_minute=settings.REQUEST_RATE_LIMIT_PER_MINUTE,
+    investigation_starts_per_hour=settings.INVESTIGATION_START_LIMIT_PER_HOUR,
+    max_clients=settings.REQUEST_RATE_LIMIT_MAX_CLIENTS,
+    trust_proxy_headers=settings.TRUST_PROXY_HEADERS,
+    limiter=request_limiter,
+)
+
+app.add_middleware(
     CORSMiddleware,
     # Local development remains convenient; production must declare its public
     # frontend origin explicitly instead of combining credentials with a wildcard.
+    # This is added last so CORS headers also accompany a rate-limit response.
     allow_origins=settings.cors_allow_origins or (["*"] if settings.DEMO_MODE else []),
     allow_credentials=bool(settings.cors_allow_origins),
     allow_methods=["*"],

@@ -57,6 +57,19 @@ def test_production_settings_require_a_database_url():
         Settings(_env_file=None, DEPLOYMENT_ENV="production")
 
 
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("REQUEST_RATE_LIMIT_PER_MINUTE", -1, "cannot be negative"),
+        ("INVESTIGATION_START_LIMIT_PER_HOUR", -1, "cannot be negative"),
+        ("REQUEST_RATE_LIMIT_MAX_CLIENTS", 0, "at least 1"),
+    ],
+)
+def test_rate_limit_settings_are_validated(name, value, message):
+    with pytest.raises(ValueError, match=message):
+        Settings(_env_file=None, **{name: value})
+
+
 def test_get_merged_documents_excludes_demo_docs_in_live_mode(monkeypatch):
     monkeypatch.delenv("DEMO_MODE", raising=False)
     live_store.clear()

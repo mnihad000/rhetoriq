@@ -50,6 +50,11 @@ RESEARCH_EXECUTION_MODE=embedded
 SEARXNG_BASE_URL=http://${{searxng.RAILWAY_PRIVATE_DOMAIN}}:8080
 BROWSER_RENDERING_ENABLED=false
 CORS_ALLOW_ORIGINS=https://<frontend-public-domain>
+REQUEST_RATE_LIMIT_PER_MINUTE=120
+INVESTIGATION_START_LIMIT_PER_HOUR=5
+REQUEST_RATE_LIMIT_MAX_CLIENTS=10000
+# Set true only when Railway is the sole ingress to this API service.
+TRUST_PROXY_HEADERS=true
 GEMINI_API_KEY=<secret, if using Gemini>
 GROQ_API_KEY=<secret, if using Groq>
 ```
@@ -92,4 +97,7 @@ Initial production is deliberately a single API instance because it executes
 research in-process. PostgreSQL makes the state safe for a future dedicated
 worker, but the worker split should be introduced and tested separately. The
 existing fetch/domain/model budgets remain active and must be kept within the
-chosen provider quotas.
+chosen provider quotas. The API also limits each client to 120 requests per
+minute and five investigation starts per hour by default. These limits are
+in-process and are appropriate only while the API remains a single instance;
+move the counters to shared storage before increasing the API replica count.
