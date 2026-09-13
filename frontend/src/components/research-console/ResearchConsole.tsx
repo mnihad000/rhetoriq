@@ -1,10 +1,11 @@
 import {
   Background,
+  BaseEdge,
   Controls,
   Handle,
   Position,
   ReactFlow,
-  type Edge,
+  type EdgeProps,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
@@ -21,6 +22,13 @@ import type {
   LiveResearchRun,
   LiveResearchTrail,
 } from "../../types/rhetoriq";
+import {
+  GRAPH_EDGES,
+  GRAPH_HANDLES,
+  GRAPH_NODES,
+  type GraphHandleId,
+  type ResearchGraphEdge,
+} from "./researchGraph";
 
 type ResearchConsoleProps = {
   investigationId: string;
@@ -30,6 +38,7 @@ type ResearchConsoleProps = {
 type ResearchNodeData = {
   label: string;
   state: "waiting" | "active" | "complete" | "failed";
+  handles: readonly GraphHandleId[];
 };
 
 const EVENT_TYPES = [
@@ -47,45 +56,6 @@ const EVENT_TYPES = [
   "run.failed",
 ];
 
-const GRAPH_NODES = [
-  ["initialize_run", "Initialize", 0, 0],
-  ["assess_research_state", "Assess gaps", 210, 0],
-  ["supervisor_select_action", "Select action", 420, 0],
-  ["validate_policy_and_budget", "Policy + budget", 630, 0],
-  ["dispatch_action", "Run tool", 630, 170],
-  ["normalize_and_persist", "Normalize + receipt", 420, 170],
-  ["build_evidence_artifacts", "Build evidence", 210, 170],
-  ["skeptic_review", "Skeptic review", 0, 170],
-  ["build_candidate_report_and_receipts", "Stage candidate", 0, 340],
-  ["publication_gate", "Publication gate", 210, 340],
-  ["publish_report", "Publish", 420, 310],
-  ["withhold_report", "Withhold", 420, 390],
-  ["finalize_insufficient_evidence", "No evidence", 630, 340],
-] as const;
-
-const GRAPH_EDGES: Edge[] = [
-  ["initialize_run", "assess_research_state"],
-  ["assess_research_state", "supervisor_select_action"],
-  ["supervisor_select_action", "validate_policy_and_budget"],
-  ["validate_policy_and_budget", "dispatch_action"],
-  ["dispatch_action", "normalize_and_persist"],
-  ["normalize_and_persist", "assess_research_state"],
-  ["assess_research_state", "build_evidence_artifacts"],
-  ["assess_research_state", "finalize_insufficient_evidence"],
-  ["build_evidence_artifacts", "skeptic_review"],
-  ["skeptic_review", "supervisor_select_action"],
-  ["skeptic_review", "build_candidate_report_and_receipts"],
-  ["build_candidate_report_and_receipts", "publication_gate"],
-  ["publication_gate", "publish_report"],
-  ["publication_gate", "withhold_report"],
-].map(([source, target], index) => ({
-  id: `research-edge-${index}`,
-  source,
-  target,
-  animated: target === "assess_research_state",
-  style: { stroke: "rgba(40, 73, 107, 0.38)", strokeWidth: 1.5 },
-}));
-
 function ResearchGraphNode({ data }: NodeProps<Node<ResearchNodeData>>) {
   return (
     <div
@@ -99,15 +69,41 @@ function ResearchGraphNode({ data }: NodeProps<Node<ResearchNodeData>>) {
               : "border-[var(--border)] bg-white text-[var(--muted)]"
       }`}
     >
-      <Handle position={Position.Left} type="target" className="!h-2 !w-2 !border-0 !bg-[var(--accent)]" />
+      {data.handles.map((id) => {
+        const handle = GRAPH_HANDLES[id];
+        const horizontal = handle.position === Position.Top || handle.position === Position.Bottom;
+        const offset = "offset" in handle ? handle.offset : undefined;
+        return (
+          <Handle
+            key={id}
+            id={id}
+            type={handle.type}
+            position={handle.position}
+            style={offset === undefined ? undefined : horizontal ? { left: `${offset}%` } : { top: `${offset}%` }}
+            className="!h-2 !w-2 !border-0 !bg-[var(--accent)]"
+          />
+        );
+      })}
       <p className="text-[0.62rem] font-semibold uppercase tracking-[0.17em]">{data.state}</p>
       <p className="mt-1 text-sm font-semibold">{data.label}</p>
-      <Handle position={Position.Right} type="source" className="!h-2 !w-2 !border-0 !bg-[var(--accent)]" />
     </div>
   );
 }
 
 const nodeTypes = { research: ResearchGraphNode };
+
+function RoutedEdge({ id, sourceX, sourceY, targetX, targetY, data, style, markerEnd }: EdgeProps<ResearchGraphEdge>) {
+  // These channels sit between the fixed rows and columns in GRAPH_NODES.
+  const path = data?.route === "retry"
+    ? `M ${sourceX} ${sourceY} L ${sourceX} 270 L 390 270 L 390 112 L ${targetX} 112 L ${targetX} ${targetY}`
+    : data?.route === "no-evidence"
+      ? `M ${sourceX} ${sourceY} L ${sourceX} 110 L 170 110 L 170 ${targetY} L ${targetX} ${targetY}`
+      : `M ${sourceX} ${sourceY} L ${sourceX} 82 L ${targetX} 82 L ${targetX} ${targetY}`;
+
+  return <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />;
+}
+
+const edgeTypes = { routed: RoutedEdge };
 
 export default function ResearchConsole({ investigationId, initialRun }: ResearchConsoleProps) {
   const [trail, setTrail] = useState<LiveResearchTrail>({
@@ -177,12 +173,13 @@ export default function ResearchConsole({ investigationId, initialRun }: Researc
 
   const nodes = useMemo<Node<ResearchNodeData>[]>(
     () =>
-      GRAPH_NODES.map(([id, label, x, y]) => ({
+      GRAPH_NODES.map(({ id, label, x, y, handles }) => ({
         id,
         type: "research",
         position: { x, y },
         data: {
           label,
+          handles,
           state:
             trail.run?.active_node === id && trail.run.status === "running"
               ? "active"
@@ -248,14 +245,15 @@ export default function ResearchConsole({ investigationId, initialRun }: Researc
 
       <div className="grid xl:grid-cols-[minmax(0,1.35fr)_minmax(19rem,0.65fr)]">
         <div className="border-b border-[var(--border)] xl:border-b-0 xl:border-r">
-          <div className="h-[520px] bg-[radial-gradient(circle_at_top,rgba(70,121,155,0.08),transparent_55%)]">
+          <div className="h-[620px] bg-[radial-gradient(circle_at_top,rgba(70,121,155,0.08),transparent_55%)]">
             <ReactFlow
               nodes={nodes}
               edges={GRAPH_EDGES}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               fitView
-              fitViewOptions={{ padding: 0.16 }}
-              minZoom={0.55}
+              fitViewOptions={{ padding: 0.12 }}
+              minZoom={0.25}
               maxZoom={1.35}
               nodesDraggable={false}
               nodesConnectable={false}
