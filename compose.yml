@@ -40,7 +40,7 @@ services:
       RESEARCH_EXECUTION_MODE: embedded
       SEARXNG_BASE_URL: http://searxng:8080
       BROWSER_RENDERING_ENABLED: "false"
-      CORS_ALLOW_ORIGINS: http://localhost:4173
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:4173}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
     depends_on:
@@ -49,7 +49,7 @@ services:
       searxng:
         condition: service_started
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
   frontend:
     build: ./frontend
@@ -59,7 +59,7 @@ services:
     environment:
       PUBLIC_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
     ports:
-      - "4173:80"
+      - "127.0.0.1:4173:80"
 
 volumes:
   postgres-data:
