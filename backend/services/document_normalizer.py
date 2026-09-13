@@ -170,6 +170,8 @@ class DocumentNormalizer:
         return deduped[:8]
 
     def _classify_source(self, domain: str) -> str:
+        if domain.endswith(".gov") or domain.endswith(".mil"):
+            return "speech_transcript"
         if any(domain.endswith(blog) or blog in domain for blog in _BLOG_DOMAINS):
             return "blog"
         if domain in _COMMENTARY_DOMAINS:
@@ -178,6 +180,8 @@ class DocumentNormalizer:
             return "national_news"
         if any(keyword in domain for keyword in _LOCAL_KEYWORDS):
             return "local_news"
+        if domain.endswith(".org"):
+            return "commentary"
         return "national_news"
 
     def _infer_content_type(self, source_type: str) -> str:

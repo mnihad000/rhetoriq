@@ -3,8 +3,6 @@ use_default_settings:
     keep_only:
       - bing
       - brave
-      - duckduckgo
-      - google
       - wikipedia
 
 general:

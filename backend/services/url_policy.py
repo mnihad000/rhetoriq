@@ -22,6 +22,21 @@ _sensitive_query_keys = {
 }
 
 
+# Reference/dictionary sites that block scraper traffic and never carry
+# claim-relevant evidence; skip them before spending fetch budget.
+LOW_VALUE_DOMAINS = {
+    "merriam-webster.com",
+    "dictionary.com",
+    "thesaurus.com",
+    "thefreedictionary.com",
+    "vocabulary.com",
+}
+
+
+def is_low_value_domain(url: str) -> bool:
+    return registrable_domain(url) in LOW_VALUE_DOMAINS
+
+
 def has_embedded_credentials(url: str) -> bool:
     parsed = urlparse(url)
     if parsed.username or parsed.password:

@@ -16,7 +16,7 @@ from services.document_normalizer import DocumentNormalizer
 from services.gdelt import GDELTIngestion
 from services.hn_ingestion import HNIngestion
 from services.ingestion import get_merged_documents
-from services.search_provider import SearxngSearchProvider
+from services.search_provider import build_search_provider
 from services.url_policy import PublicUrlPolicy
 
 
@@ -35,7 +35,50 @@ class SafePageFetcher:
         self.settings = get_settings()
         self.policy = policy or PublicUrlPolicy()
 
+    _TAVILY_FALLBACK_ERRORS = {"http_status", "response_too_large", "timeout", "http_error"}
+
     def fetch(self, url: str) -> RawPage | FetchFailure:
+        result = self._fetch_direct(url)
+        if (
+            isinstance(result, FetchFailure)
+            and result.error_type in self._TAVILY_FALLBACK_ERRORS
+            and self.settings.TAVILY_API_KEY
+        ):
+            fallback = self._fetch_via_tavily(url)
+            if fallback is not None:
+                return fallback
+        return result
+
+    def _fetch_via_tavily(self, url: str) -> RawPage | None:
+        try:
+            response = httpx.post(
+                "https://api.tavily.com/extract",
+                json={"urls": [url], "format": "markdown"},
+                headers={
+                    "Authorization": f"Bearer {self.settings.TAVILY_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                timeout=self.settings.FETCH_TIMEOUT_SECONDS + 10,
+            )
+            response.raise_for_status()
+            results = (response.json() or {}).get("results") or []
+            if not results:
+                return None
+            content = str(results[0].get("raw_content") or "")
+            if not content:
+                return None
+            return RawPage(
+                url=url,
+                final_url=str(results[0].get("url") or url),
+                status_code=200,
+                content_type="text/markdown",
+                html=content,
+                fetched_at=datetime.now(timezone.utc),
+            )
+        except Exception:
+            return None
+
+    def _fetch_direct(self, url: str) -> RawPage | FetchFailure:
         started_url = url
         try:
             self.policy.validate(url)
@@ -127,7 +170,7 @@ class BrowserServiceClient:
 class ResearchToolRegistry:
     def __init__(self) -> None:
         self.settings = get_settings()
-        self.search = SearxngSearchProvider()
+        self.search = build_search_provider()
         self.gdelt = GDELTIngestion()
         self.hn = HNIngestion()
         self.fetcher = SafePageFetcher()

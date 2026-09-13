@@ -256,9 +256,10 @@ def _extract_canonical_phrase(query_text: str) -> str | None:
 
     lowered = query_text.lower()
     phrase_patterns = [
-        r"where did the ([a-z0-9][a-z0-9\s\-]{3,80}?) (?:narrative|claim|phrase) come from",
-        r"trace the ([a-z0-9][a-z0-9\s\-]{3,80}?) (?:narrative|story|claim)",
-        r"why is everyone suddenly talking about ([a-z0-9][a-z0-9\s\-]{3,80})",
+        r"where did the ([a-z0-9][a-z0-9\s\-'’]{3,80}?) (?:narrative|claim|phrase) come from",
+        r"trace the ([a-z0-9][a-z0-9\s\-'’]{3,80}?) (?:narrative|story|claim)",
+        r"trace the (?:narrative|story|claim)\s+(?:behind|around|of|about)\s+([a-z0-9][a-z0-9\s\-'’]{3,80})",
+        r"why is everyone suddenly talking about ([a-z0-9][a-z0-9\s\-'’]{3,80})",
     ]
     for pattern in phrase_patterns:
         match = re.search(pattern, lowered)
@@ -269,7 +270,7 @@ def _extract_canonical_phrase(query_text: str) -> str | None:
             return candidate
 
     match = re.search(
-        r"(?:phrase|narrative|claim)\s+(?:behind\s+)?(?:the\s+)?([a-z0-9][a-z0-9\s\-]{3,80})",
+        r"(?:phrase|narrative|claim)\s+(?:behind|around|of|about)?\s*(?:the\s+)?([a-z0-9][a-z0-9\s\-'’]{3,80})",
         lowered,
     )
     if match:
@@ -287,7 +288,10 @@ def _classify_intent(query_text: str) -> str:
         return "counter-narrative"
     if any(term in lowered for term in ("source diversity", "source ecosystem", "what kinds of sources")):
         return "source-ecosystem"
-    if any(term in lowered for term in ("where did", "come from", "origin", "first appeared", "first appear")):
+    if any(
+        term in lowered
+        for term in ("where did", "come from", "origin", "first appeared", "first appear", "trace the")
+    ):
         return "origin"
     if any(
         term in lowered
@@ -489,6 +493,11 @@ def _normalize_phrase_candidate(value: str) -> str | None:
         if lowered.endswith(suffix):
             candidate = candidate[: -len(suffix)].strip(" .?!,:;")
             lowered = candidate.lower()
+    words = candidate.split(" ")
+    while words and words[0].lower() in _STOPWORDS:
+        words.pop(0)
+    candidate = " ".join(words)
+    lowered = candidate.lower()
     if not candidate or lowered in {"this", "that", "it"}:
         return None
     return candidate

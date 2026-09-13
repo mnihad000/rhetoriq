@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     RESEARCH_MAX_RETRIES: int = 2
     RESEARCH_SEARCH_RESULTS_PER_ACTION: int = 8
     SEARXNG_BASE_URL: str = "http://127.0.0.1:8080"
+    SEARXNG_ENGINES: str = "bing,brave,wikipedia"
+    FIRECRAWL_API_KEY: str = ""
+    TAVILY_API_KEY: str = ""
     BROWSER_SERVICE_URL: str = "http://127.0.0.1:8010"
     BROWSER_SERVICE_TOKEN: str = ""
     BROWSER_RENDERING_ENABLED: bool = False

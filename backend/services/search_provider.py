@@ -8,7 +8,7 @@ import httpx
 from config import get_settings
 
 from models.investigation import InvestigationPlanTimeWindow, SearchResult
-from services.url_policy import has_embedded_credentials
+from services.url_policy import has_embedded_credentials, is_low_value_domain
 
 
 class SearchProvider(ABC):
@@ -65,6 +65,9 @@ class SearxngSearchProvider(SearchProvider):
             "format": "json",
             "safesearch": 1,
         }
+        engines = get_settings().SEARXNG_ENGINES
+        if engines:
+            params["engines"] = engines
         time_range = {
             "today": "day",
             "this_week": "month",
@@ -93,7 +96,7 @@ class SearxngSearchProvider(SearchProvider):
             title = str(item.get("title") or "").strip()
             if not url or not title:
                 continue
-            if has_embedded_credentials(url):
+            if has_embedded_credentials(url) or is_low_value_domain(url):
                 continue
             output.append(
                 SearchResult(
@@ -111,6 +114,82 @@ class SearxngSearchProvider(SearchProvider):
                         "source_native_id": item.get("id"),
                         "time_filter": time_range,
                         "unresponsive_engines": self.last_diagnostics["unresponsive_engines"],
+                        "source_types_requested": source_types,
+                    },
+                )
+            )
+        return output
+
+
+class FirecrawlSearchProvider(SearchProvider):
+    name = "firecrawl"
+
+    def __init__(self, api_key: str | None = None) -> None:
+        self._api_key = api_key or get_settings().FIRECRAWL_API_KEY
+        self.last_diagnostics: dict = {}
+
+    def search(
+        self,
+        query: str,
+        time_window: InvestigationPlanTimeWindow,
+        source_types: list[str],
+        limit: int,
+    ) -> list[SearchResult]:
+        tbs = {
+            "today": "qdr:d",
+            "this_week": "qdr:w",
+            "this_month": "qdr:m",
+            "recent": "qdr:m",
+        }.get(time_window.label)
+        body: dict[str, object] = {
+            "query": query,
+            "limit": min(max(limit, 1), 100),
+            "sources": ["web"],
+        }
+        if tbs:
+            body["tbs"] = tbs
+        response = httpx.post(
+            "https://api.firecrawl.dev/v2/search",
+            json=body,
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=20,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        web_results = ((payload.get("data") or {}).get("web")) or []
+        self.last_diagnostics = {
+            "query": query,
+            "time_filter": tbs,
+            "unresponsive_engines": [],
+            "credits_used": payload.get("creditsUsed"),
+        }
+        output: list[SearchResult] = []
+        for rank, item in enumerate(web_results[:limit], start=1):
+            url = str(item.get("url") or "").strip()
+            title = str(item.get("title") or "").strip()
+            if not url or not title:
+                continue
+            if has_embedded_credentials(url) or is_low_value_domain(url):
+                continue
+            output.append(
+                SearchResult(
+                    query=query,
+                    title=title,
+                    url=url,
+                    snippet=str(item.get("description") or "").strip() or None,
+                    rank=rank,
+                    provider=self.name,
+                    provider_score=None,
+                    metadata={
+                        "engines": ["firecrawl"],
+                        "category": "web",
+                        "published_date": None,
+                        "source_native_id": None,
+                        "time_filter": tbs,
+                        "unresponsive_engines": [],
                         "source_types_requested": source_types,
                     },
                 )
@@ -230,6 +309,8 @@ class CachedSearchProvider(SearchProvider):
 def build_search_provider() -> SearchProvider:
     settings = get_settings()
     if settings.RESEARCH_RUNTIME in {"auto", "langgraph"} and not settings.DEMO_MODE:
+        if settings.FIRECRAWL_API_KEY:
+            return FirecrawlSearchProvider()
         return SearxngSearchProvider()
     return UnconfiguredSearchProvider()
 
