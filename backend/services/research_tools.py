@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import logging
 import time
 from urllib.parse import urlparse
 
@@ -18,6 +19,8 @@ from services.hn_ingestion import HNIngestion
 from services.ingestion import get_merged_documents
 from services.search_provider import SearxngSearchProvider
 from services.url_policy import PublicUrlPolicy
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -133,6 +136,7 @@ class ResearchToolRegistry:
         self.fetcher = SafePageFetcher()
         self.browser = BrowserServiceClient()
         self.normalizer = DocumentNormalizer()
+        self._internal_search_warning: str | None = None
 
     def execute(
         self,
@@ -250,6 +254,7 @@ class ResearchToolRegistry:
                     })
                     for item in documents
                 ],
+                warning=self._internal_search_warning,
             )
         if decision.action_type in {"canonical_fetch", "browser_fetch"}:
             result = next((item for item in candidates if self._candidate_id(item) == decision.candidate_id), None)
@@ -282,6 +287,58 @@ class ResearchToolRegistry:
         return ToolOutcome(provider="assessment")
 
     def _internal_search(self, query: str) -> list[Document]:
+        self._internal_search_warning = None
+        if self.settings.ENABLE_POSTGRES_VECTOR_SEARCH and self.settings.DATABASE_URL:
+            try:
+                from services.postgres_corpus import DEFAULT_DIMENSION, DEFAULT_MODEL, PostgresCorpusStore
+                from services.embedding_service import get_embedding_service
+
+                embedding_service = get_embedding_service()
+                query_embedding = embedding_service.embed_query(query)
+                if not query_embedding or not any(query_embedding):
+                    self._internal_search_warning = (
+                        "PostgreSQL semantic search embedding unavailable; using legacy internal corpus."
+                    )
+                else:
+                    results = PostgresCorpusStore(
+                        self.settings.DATABASE_URL,
+                        embedding_service=embedding_service,
+                        expected_dimension=DEFAULT_DIMENSION,
+                        expected_model=DEFAULT_MODEL,
+                    ).search(
+                        query_embedding,
+                        limit=self.settings.POSTGRES_VECTOR_SEARCH_TOP_K,
+                        model_name=embedding_service.model_name,
+                    )
+                    if results:
+                        return [
+                            item.document.model_copy(update={
+                                "metadata": {
+                                    **(item.document.metadata or {}),
+                                    # The database-level eligibility bit is
+                                    # authoritative. Discovery rows can never
+                                    # be promoted by stale serialized metadata.
+                                    "acquisition_receipt_valid": bool(item.citable),
+                                    "retrieval_score": item.score,
+                                    "retrieval_provider": "neon_pgvector",
+                                    "retrieval_source_kind": item.source_kind,
+                                }
+                            })
+                            for item in results
+                        ]
+                    self._internal_search_warning = (
+                        "PostgreSQL semantic corpus is empty or has no usable embeddings; "
+                        "using legacy internal corpus."
+                    )
+            except Exception as exc:
+                logger.warning("PostgreSQL semantic search unavailable: %s", exc)
+                self._internal_search_warning = (
+                    "PostgreSQL semantic search unavailable; using legacy internal corpus."
+                )
+        elif self.settings.ENABLE_POSTGRES_VECTOR_SEARCH:
+            self._internal_search_warning = (
+                "PostgreSQL semantic search has no database URL; using legacy internal corpus."
+            )
         terms = {term.lower() for term in query.split() if len(term) > 3}
         scored: list[tuple[int, Document]] = []
         for document in get_merged_documents(ALL_DOCUMENTS):

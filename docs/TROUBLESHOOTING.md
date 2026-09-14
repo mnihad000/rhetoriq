@@ -15,7 +15,22 @@ Use `http://127.0.0.1:8000/health` to confirm the API is running.
 
 ## Frontend cannot reach the API
 
-Start the backend first, then start Vite from `frontend/`. The interface deliberately falls back to demo data for unavailable live content; inspect the browser network panel and backend logs to distinguish fallback behavior from a successful API response.
+For local use, start the backend first, then start Vite from `frontend/` and
+check `VITE_API_BASE_URL`. For Railway, inspect the generated
+`runtime-config.js` value from `PUBLIC_API_BASE_URL`, confirm the API public
+origin is reachable, and ensure the exact frontend origin is listed in
+`CORS_ALLOW_ORIGINS`. The interface deliberately falls back to demo data for
+unavailable live content; inspect the browser network panel and API logs to
+distinguish fallback behavior from a successful API response.
+
+## Neon or PostgreSQL connection fails
+
+Check that Railway's API service has `DEPLOYMENT_ENV=production` and a secret
+`DATABASE_URL` copied from Neon with its TLS query parameter, normally
+`sslmode=require`. The API refuses to start in production without a database
+URL. If startup reports a migration error, stop promotion, inspect the failed
+migration and Neon logs, and use the tested forward fix or restore the
+pre-change Neon backup/branch. Do not delete migration records manually.
 
 ## Redis is unavailable
 
@@ -33,6 +48,17 @@ In demo mode, expected data is deterministic. With `DEMO_MODE=false`, inspect GD
 
 Review the workspace status, receipts, and evidence gaps. A partial or unavailable external retrieval is a limitation, not a reason to invent a conclusion. Broad-web autonomous research is not configured in the current MVP.
 
+## Browser rendering in production
+
+The initial public topology intentionally has no browser-renderer service and
+sets `BROWSER_RENDERING_ENABLED=false`. JavaScript-only sources may therefore
+appear as retrieval limitations. Do not point the public API at a local
+browser service or add a public browser endpoint; use the documented local
+research Compose stack when testing that adapter.
+
 ## Not applicable to the MVP
 
-Kafka lag, Flink checkpoints, Kubernetes probes, PostgreSQL migrations, Elasticsearch indexes, Neo4j queries, and WebSocket connection errors have no current local runtime because those components are planned work.
+Kafka lag, Flink checkpoints, Kubernetes probes, Elasticsearch indexes,
+Neo4j queries, and WebSocket connection errors have no current local runtime
+because those components are planned work. PostgreSQL migrations do have a
+local/CI check and are run by the production API startup.

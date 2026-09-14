@@ -31,12 +31,15 @@ Investigation routes support retrieval, supervised runs, source-diversity, timel
 
 ## Persistence and runtime behavior
 
-- SQLite stores persisted investigation workspaces. `INVESTIGATION_DB_PATH` defaults to `backend/investigations.sqlite3` when configured with a relative path.
+- SQLite stores persisted investigation workspaces for local development. `INVESTIGATION_DB_PATH` defaults to `backend/investigations.sqlite3` when configured with a relative path. Production uses `DATABASE_URL` and the same repository boundaries over PostgreSQL.
 - Redis is optional. When available, it can provide caching, phrase storage, vector retrieval, and agent memory; the API degrades when it is unavailable.
 - `DEMO_MODE=true` is the default. It serves the demo-friendly experience and disables automatic background trending refreshes.
 - With `DEMO_MODE=false`, the backend warms and periodically refreshes the trending feed. GDELT and Hacker News ingestion are the implemented live discovery paths.
-- `RESEARCH_RUNTIME=langgraph` enables the durable A2 runtime. Checkpoints use a separate SQLite database; sanitized runs, events, actions, receipts, model usage, and evaluations share the authoritative investigation database.
-- `RESEARCH_EXECUTION_MODE=embedded` uses a bounded executor in FastAPI. `worker` leaves queued work for `python -m research_worker`, which claims runs with renewable SQLite leases.
+- `RESEARCH_RUNTIME=langgraph` enables the durable A2 runtime. In local SQLite mode, checkpoints use a separate SQLite database; with `DATABASE_URL`, checkpoints and sanitized research records persist in PostgreSQL.
+- `RESEARCH_EXECUTION_MODE=embedded` uses a bounded executor in FastAPI. `worker` leaves queued work for `python -m research_worker`, which claims runs with renewable database leases.
+- With `DEPLOYMENT_ENV=production`, `DATABASE_URL` is required. The API image runs committed migrations before starting FastAPI; the migration runner records applied versions in `schema_migrations` and is safe to invoke again.
+- Neon is the managed PostgreSQL target for the initial Railway deployment. Preserve Neon's TLS query parameter, normally `sslmode=require`, and keep the URL in Railway secret configuration.
+- The additive B1 semantic corpus uses the existing 384-dimensional `sentence-transformers/all-MiniLM-L6-v2` model and is selected by `ENABLE_POSTGRES_VECTOR_SEARCH`. Keep that flag `false` until the Neon migration and resumable backfill are verified; the existing retrieval path remains the fallback when it is false or unavailable.
 
 ## Configuration
 
@@ -46,6 +49,12 @@ Settings load from `backend/.env` when present. No `.env` file is required for t
 |---|---:|---|
 | `DEMO_MODE` | `true` | Enables the deterministic demo-oriented runtime. |
 | `INVESTIGATION_DB_PATH` | `investigations.sqlite3` | SQLite workspace database path. |
+| `DATABASE_URL` | empty | PostgreSQL connection string. Required when `DEPLOYMENT_ENV=production`; use the Neon URL with TLS enabled. |
+| `DEPLOYMENT_ENV` | `development` | Set to `production` for Railway; production requires `DATABASE_URL`. |
+| `CORS_ALLOW_ORIGINS` | empty | Comma-separated allowed frontend origins. |
+| `ENABLE_POSTGRES_VECTOR_SEARCH` | `false` | Selects the additive Neon pgvector retrieval path after migration/backfill verification. |
+| `POSTGRES_VECTOR_SEARCH_TOP_K` | `8` | Maximum persisted semantic corpus results when the feature is enabled. |
+| `POSTGRES_VECTOR_BACKFILL_BATCH_SIZE` | `100` | Batch size for the resumable corpus backfill command. |
 | `GEMINI_API_KEY`, `GROQ_API_KEY` | empty | Optional model-provider credentials. |
 | `REDIS_URL` | `redis://localhost:6379` | Optional Redis endpoint. |
 | `EMBEDDING_MODEL_NAME` | `sentence-transformers/all-MiniLM-L6-v2` | Local embedding model identifier. |
@@ -62,4 +71,10 @@ Do not put credentials in source control. See [Troubleshooting](TROUBLESHOOTING.
 
 ## Not yet implemented
 
-The current API has no authentication requirement, WebSocket stream, PostgreSQL, Kafka consumer, Elasticsearch client, or Neo4j client. Research progress is one-way SSE with polling fallback. These remaining concerns must not be assumed by callers or deployment instructions.
+The current API has no authentication requirement, WebSocket stream, Kafka
+consumer, Elasticsearch client, or Neo4j client. Research progress is one-way
+SSE with polling fallback. PostgreSQL persistence is supported for the A5
+deployment. B1 semantic pgvector corpus retrieval is available behind its
+feature flag but requires migration/backfill verification before production
+enablement. These remaining concerns must not be assumed by callers or
+deployment instructions.

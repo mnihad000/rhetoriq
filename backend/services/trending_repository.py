@@ -217,6 +217,8 @@ class TrendingRepository:
                     """,
                     (run_id, document.id, provider, search_query, now),
                 )
+                from services.postgres_corpus import sync_document
+                sync_document(self._db_path, document, source_kind="discovery")
                 return record, True
 
             record = DiscoveryDocumentRecord.model_validate(
@@ -291,6 +293,8 @@ class TrendingRepository:
                 """,
                 (run_id, document.id, provider, search_query, now),
             )
+            from services.postgres_corpus import sync_document
+            sync_document(self._db_path, updated.document, source_kind="discovery")
             return updated, False
 
     def list_discovery_documents(self) -> list[DiscoveryDocumentRecord]:

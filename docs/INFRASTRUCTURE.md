@@ -1,6 +1,7 @@
 # RhetoriQ Infrastructure
 
-This document separates the infrastructure that exists in the repository from the production topology planned in the roadmap.
+This document separates the infrastructure that exists in the repository from
+the production topology planned in the roadmap.
 
 ## Current state
 
@@ -12,8 +13,27 @@ The repository currently supports local execution of:
 - optional Redis for cache, phrase tracking, vectors, and agent memory.
 - an optional research-only Compose stack with localhost-bound SearXNG and a constrained Playwright renderer;
 - embedded research execution or a separately launched leased research worker.
+- production API and frontend containers, with committed PostgreSQL migrations and CI coverage for PostgreSQL migration compatibility.
 
-The repository does not currently contain deployable Kafka, Flink, Kubernetes, Terraform, or ArgoCD implementations. Those remain production roadmap work and should not appear in setup instructions as completed resources.
+The initial public deployment uses Railway for the API and frontend, Neon for
+managed PostgreSQL, and private Railway SearXNG. It deliberately has no
+browser-renderer service. The repository does not currently contain deployable
+Kafka, Flink, Kubernetes, Terraform, or ArgoCD implementations. Those remain
+production roadmap work and should not appear in setup instructions as
+completed resources.
+
+## Initial public boundary
+
+```text
+public browser -> Railway frontend -> Railway API -> Neon PostgreSQL
+                                      -> private Railway SearXNG
+```
+
+Only the frontend and API receive public domains. `PUBLIC_API_BASE_URL` is
+injected into the frontend container at startup. `DATABASE_URL` is injected
+into the API from Railway secret/reference configuration and retains Neon's
+TLS setting. The API container owns startup migrations; no separate migration
+service is required. `BROWSER_RENDERING_ENABLED=false` is the public default.
 
 ## Target production topology
 
@@ -159,12 +179,13 @@ The recommended sequence is:
 
 1. containerize and deploy the existing backend/frontend;
 2. add durable PostgreSQL persistence;
-3. implement and test source connectors with checkpoints;
-4. introduce Kafka contracts and idempotent consumers;
-5. split background processing into independently deployable workers;
-6. add autoscaling from measured CPU, queue lag, and connector backlog;
-7. add GitOps or equivalent automated deployment after manifests exist;
-8. add specialized search/graph stores only when justified by measured requirements.
+3. implement pgvector corpus retrieval and test the B1 backfill path;
+4. implement and test source connectors with checkpoints;
+5. introduce Kafka contracts and idempotent consumers;
+6. split background processing into independently deployable workers;
+7. add autoscaling from measured CPU, queue lag, and connector backlog;
+8. add GitOps or equivalent automated deployment after manifests exist;
+9. add specialized search/graph stores only when justified by measured requirements.
 
 Infrastructure as code should describe real resources checked into the repository. Documentation must not include pretend Terraform modules, Kubernetes manifests, costs, or secret names before those artifacts exist.
 

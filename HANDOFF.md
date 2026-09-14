@@ -1,8 +1,8 @@
-# RhetoriQ Handoff - Start A5 Next
+# RhetoriQ Handoff - A5 Launch Closeout and B1 Next
 
 ## Current status
 
-- **A1, A2, A3, and A4 are complete by product decision.** Start **A5 Deployable MVP** next.
+- **A1, A2, A3, and A4 are complete by product decision.** A5 launch evidence is still pending. B1 semantic retrieval is implemented behind an opt-in flag and awaits pgvector integration tests plus non-production Neon migration, backfill, and comparison before production enablement.
 - Do not re-open A3 unless requested. The project owner explicitly accepted the remaining 30-case curated-real-source corpus as future quality work, not a blocker.
 - The working tree was already dirty before A3. Preserve unrelated changes and do not reset/revert them.
 
@@ -60,4 +60,13 @@
 - Frontend production build passes: `cd frontend; npm run build`.
 - Vitest/Testing Library has been added; the recent-investigation search and status-filter flow passes with `cd frontend; npm test`.
 - Browser end-to-end and visual regression coverage were intentionally deferred by product decision to begin deployment immediately.
-- The production frontend must set `VITE_API_BASE_URL` to the public backend origin. The SSE endpoint uses that same base URL.
+- Local Vite development may set `VITE_API_BASE_URL`; the production frontend container uses `PUBLIC_API_BASE_URL` for the API origin and SSE endpoint.
+
+## A5 deployment closeout
+
+- The intended public topology is Railway `frontend` plus Railway `api`, private SearXNG, and managed Neon PostgreSQL. Do not add a Railway Postgres service or a browser-renderer service for the initial release.
+- The frontend container reads `PUBLIC_API_BASE_URL` at startup and exposes it to the client runtime. `VITE_API_BASE_URL` remains the local Vite development variable.
+- The API container runs committed PostgreSQL migrations before starting FastAPI. The Railway API service owns migration execution; do not run migrations concurrently from a second release process.
+- Neon supplies `DATABASE_URL`; preserve the provider's TLS setting, normally `sslmode=require`. Keep the value in Railway secret/reference configuration.
+- A5 remains **In Progress** until the public frontend/API URLs, health responses, a live SSE investigation, workspace reload, replay after redeploy, and CI evidence are recorded in [docs/A5_LAUNCH_EVIDENCE.md](docs/A5_LAUNCH_EVIDENCE.md). No public URLs were available when this handoff was updated.
+- Rollback is an application release rollback followed by a forward database fix or Neon restore when required. The migration runner has no destructive down-migration path; take a Neon backup/branch before schema changes.

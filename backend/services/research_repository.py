@@ -350,6 +350,10 @@ class ResearchRepository:
                 """,
                 (run_id, document.id, document.model_dump_json(), _now().isoformat()),
             )
+        # Indexing is additive and best effort. A model or pgvector outage
+        # must never make the durable research artifact unavailable.
+        from services.postgres_corpus import sync_document
+        sync_document(self.db_path, document, source_kind="research")
 
     def save_candidate(self, run_id: str, candidate_key: str, result: SearchResult) -> None:
         with self._connect() as conn:
@@ -459,13 +463,27 @@ class ResearchRepository:
 
     def record_replay_comparison(self, source_run_id: str, replay_run_id: str, comparison: dict[str, Any]) -> None:
         with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO research_replay_comparisons
-                (replay_run_id, source_run_id, comparison_json, created_at) VALUES (?, ?, ?, ?)
-                """,
-                (replay_run_id, source_run_id, json.dumps(comparison), _now().isoformat()),
-            )
+            values = (replay_run_id, source_run_id, json.dumps(comparison), _now().isoformat())
+            if is_postgres_database(self.db_path):
+                conn.execute(
+                    """
+                    INSERT INTO research_replay_comparisons
+                    (replay_run_id, source_run_id, comparison_json, created_at) VALUES (?, ?, ?, ?)
+                    ON CONFLICT (replay_run_id) DO UPDATE SET
+                        source_run_id = excluded.source_run_id,
+                        comparison_json = excluded.comparison_json,
+                        created_at = excluded.created_at
+                    """,
+                    values,
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO research_replay_comparisons
+                    (replay_run_id, source_run_id, comparison_json, created_at) VALUES (?, ?, ?, ?)
+                    """,
+                    values,
+                )
 
     def get_replay_comparison(self, replay_run_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:

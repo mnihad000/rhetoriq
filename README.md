@@ -11,11 +11,12 @@ The product deliberately distinguishes **first observed in the available dataset
 - Hacker News ingestion through the public Algolia API.
 - Direct HTTP retrieval of canonical pages for evidence enrichment.
 - A durable LangGraph research runtime with budgets, leases, checkpoints, idempotent actions, replay, SSE progress, and a deterministic publication gate.
-- Self-hosted SearXNG discovery plus GDELT, Hacker News, canonical HTTP, internal-corpus, and isolated Playwright adapters.
+- Self-hosted SearXNG discovery plus GDELT, Hacker News, canonical HTTP, internal-corpus, and an isolated Playwright adapter for local research only.
 - In-memory and SQLite-backed development storage, with optional Redis caching, vector search, and agent memory.
 - A React and TypeScript investigation interface with a live graph, research rail, evidence gate, and replay controls.
+- Production container definitions for the Railway API/frontend deployment, committed PostgreSQL migrations, and CI checks for backend, frontend, documentation, and PostgreSQL migration compatibility.
 
-Kafka, Flink, PostgreSQL/pgvector, Elasticsearch, Neo4j, Kubernetes, and the wider source-connector fleet remain target architecture. See [the roadmap](docs/ROADMAP.md) for exact implementation status.
+Kafka, Flink, Elasticsearch, Neo4j, Kubernetes, and the wider source-connector fleet remain target architecture. B1 pgvector corpus retrieval is implemented behind a disabled-by-default flag and awaits Neon migration/backfill verification. The A5 deployment foundation uses managed Neon PostgreSQL; public launch evidence is tracked separately in [A5 launch evidence](docs/A5_LAUNCH_EVIDENCE.md). See [the roadmap](docs/ROADMAP.md) for exact implementation status.
 
 ## Collection strategy
 
@@ -87,7 +88,7 @@ npm run dev
 
 ### A2 research services
 
-The research-only Compose stack supplies SearXNG and the isolated browser renderer:
+The research-only Compose stack supplies SearXNG and the isolated browser renderer for local development. Browser rendering is deliberately not part of the initial public Railway deployment:
 
 ```powershell
 Copy-Item infra/research/.env.example infra/research/.env
@@ -119,6 +120,13 @@ Settings are loaded from `backend/.env` when present.
 | `RESEARCH_EXECUTION_MODE` | `embedded` FastAPI execution or separate `worker` process. |
 | `SEARXNG_BASE_URL` | Self-hosted broad-search endpoint. |
 | `BROWSER_SERVICE_URL` | Isolated browser-rendering endpoint. |
+| `BROWSER_RENDERING_ENABLED` | Keep `false` in the initial public deployment; enables the local browser adapter only when explicitly configured. |
+| `DATABASE_URL` | PostgreSQL connection string for production persistence; use the managed Neon value and keep `sslmode=require` when supplied by Neon. |
+| `DEPLOYMENT_ENV` | Set to `production` on the Railway API service; production startup requires `DATABASE_URL`. |
+| `CORS_ALLOW_ORIGINS` | Comma-separated public frontend origin(s) allowed by the API. |
+| `ENABLE_POSTGRES_VECTOR_SEARCH` | Feature flag for the additive Neon pgvector retrieval path; keep `false` until migration, backfill, and comparison checks pass. |
+| `POSTGRES_VECTOR_SEARCH_TOP_K` | Maximum persisted semantic corpus results when the Neon path is enabled. |
+| `POSTGRES_VECTOR_BACKFILL_BATCH_SIZE` | Resumable Neon corpus backfill batch size. |
 | `REDIS_URL` | Optional Redis cache, phrase store, vector store, and memory. |
 | `GDELT_BASE_URL` | GDELT DOC 2.0 endpoint. |
 | `GDELT_MAX_RECORDS` | Maximum GDELT records requested per query. |
@@ -143,3 +151,4 @@ Future connectors must add their credentials only when implemented and approved.
 | [AUTONOMOUS_RESEARCH.md](docs/AUTONOMOUS_RESEARCH.md) | A2 architecture, setup, security, replay, and operating guide. |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Local runtime and optional-service troubleshooting. |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Live Railway deployment, environment configuration, and launch checks. |
+| [A5_LAUNCH_EVIDENCE.md](docs/A5_LAUNCH_EVIDENCE.md) | Evidence checklist for public URLs, health checks, live investigation, reload, replay, and CI. |

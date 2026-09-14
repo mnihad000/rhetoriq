@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     EMBEDDING_LOCAL_ONLY: bool = False
     EMBEDDING_CACHE_TTL_SECONDS: int = 86400
 
+    # Neon/PostgreSQL semantic retrieval. Kept opt-in until the corpus has
+    # been migrated and backfilled; the legacy internal corpus remains the
+    # default path.
+    ENABLE_POSTGRES_VECTOR_SEARCH: bool = False
+    POSTGRES_VECTOR_SEARCH_TOP_K: int = 8
+    POSTGRES_VECTOR_BACKFILL_BATCH_SIZE: int = 100
+
     # Investigation runtime
     DEPLOYMENT_ENV: str = "development"
     DATABASE_URL: str = ""

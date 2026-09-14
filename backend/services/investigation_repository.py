@@ -258,6 +258,13 @@ class InvestigationRepository:
                     ),
                 )
 
+        # The serialized retrieval artifact remains authoritative. Corpus
+        # indexing is additive and may fail without rolling back that artifact.
+        from services.postgres_corpus import sync_document
+
+        for doc in documents:
+            sync_document(self._db_path, doc, source_kind="retrieved")
+
     def save_search_results(self, investigation_id: str, round_number: int, results: list[dict]) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:

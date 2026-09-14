@@ -1,6 +1,10 @@
 # RhetoriQ Testing
 
-The current MVP verification baseline is backend tests, Python compilation, and the frontend production build. Kafka, Flink, PostgreSQL, Elasticsearch, Neo4j, container integration, and browser end-to-end tests are planned and are not local prerequisites.
+The current MVP verification baseline is backend tests, Python compilation, the
+frontend production build, and the PostgreSQL migration check used by CI.
+Kafka, Flink, Elasticsearch, Neo4j, container integration, and browser
+end-to-end tests are not local prerequisites. Browser rendering is not part of
+the initial public deployment.
 
 ## Backend tests
 
@@ -18,6 +22,22 @@ The suite uses local fixtures and supports optional dependencies being absent. T
 python -m compileall backend
 ```
 
+## PostgreSQL migration check
+
+The CI backend job starts a pgvector-enabled PostgreSQL 17 service and runs the migration and corpus integration tests
+with `POSTGRES_TEST_DATABASE_URL`. To run it locally, provide a reachable
+PostgreSQL URL and execute:
+
+```powershell
+$env:POSTGRES_TEST_DATABASE_URL="postgresql://user:password@localhost:5432/rhetoriq_test"
+cd backend
+pytest tests/test_postgres_migration.py
+```
+
+The production API runs the same committed migrations against Neon during
+container startup. Reapplying a migration must be a no-op because applied
+versions are tracked in `schema_migrations`.
+
 ## Frontend production build
 
 ```powershell
@@ -28,6 +48,10 @@ npm run build
 ## Documentation checks
 
 Before merging documentation changes, verify that project-authored Markdown has no conflict markers or mojibake and that all relative Markdown links resolve within the repository. The check may be run with the PowerShell command in the A1 completion record in [ROADMAP.md](ROADMAP.md).
+
+For A5, also complete the public evidence checklist in
+[A5_LAUNCH_EVIDENCE.md](A5_LAUNCH_EVIDENCE.md). Documentation alone does not
+prove a live deployment.
 
 ## A2 deterministic benchmark
 

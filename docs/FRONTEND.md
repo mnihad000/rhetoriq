@@ -41,4 +41,15 @@ The frontend does not currently use React Query, Zustand, Sigma.js, WebSockets, 
 
 ## Environment
 
-The frontend currently uses its API helper's configured defaults and demo fallback. If deployment introduces public API configuration, document the exact variable and origin policy in the deployment change; no production environment variable is required for local use today.
+Local Vite development uses `VITE_API_BASE_URL` when set and otherwise uses
+the API helper's local default and demo fallback. The production Nginx image
+reads `PUBLIC_API_BASE_URL` at container startup from `runtime-config.js`; set
+it to the public Railway API origin, including `https://` and no trailing path.
+The API's `CORS_ALLOW_ORIGINS` must contain the exact public frontend origin.
+Changing the API domain requires updating the Railway frontend variable and
+restarting/redeploying the frontend container, not rebuilding the application
+bundle.
+
+The initial public deployment has no browser-renderer service. A source that
+requires JavaScript rendering is shown as a retrieval limitation when the
+backend cannot use the local-only browser adapter.

@@ -36,7 +36,7 @@ The current repository is a functional narrative-investigation MVP, not an empty
 ### Backend API and Persistence
 
 - FastAPI application with health, embedding health, ingestion, GDELT search, trending, investigation, graph, timeline, mutation, receipts, debate, and report functionality.
-- SQLite-backed persistence for investigation plans, retrieved documents, intermediate artifacts, and final workspaces.
+- SQLite-backed development persistence and PostgreSQL-backed production persistence for investigation plans, retrieved documents, intermediate artifacts, and final workspaces.
 - Recent-investigation listing and workspace reload support.
 - Background execution for supervised research runs with frontend polling.
 - Optional Redis-backed caching, agent memory, phrase storage, and vector retrieval.
@@ -74,20 +74,20 @@ The current repository is a functional narrative-investigation MVP, not an empty
 
 ### Research-stack decision
 
-- The next investigative runtime will use self-hosted LangGraph for autonomous orchestration and RhetoriQ-controlled tracing and evaluation.
-- It will use pluggable self-operated search and browser adapters rather than managed SaaS integrations.
-- No managed observability, search, browser, or orchestration SaaS is planned. The runtime is not implemented yet.
+- The implemented A2 investigative runtime uses self-hosted LangGraph for autonomous orchestration and RhetoriQ-controlled tracing and evaluation.
+- It uses pluggable self-operated search and an optional isolated browser adapter rather than managed search or browser SaaS integrations.
+- No managed observability, search, browser, or orchestration SaaS is planned.
 - Current verification baseline:
-  - 183 backend tests pass;
-  - 10 backend tests are skipped for unavailable optional runtime dependencies;
+  - 202 non-integration backend tests pass and 8 optional tests skip locally;
+  - PostgreSQL/pgvector integration tests are configured in CI but were not run locally without a PostgreSQL service;
   - Python source compilation passes;
-  - the frontend production build passes.
+  - the frontend production build and four frontend tests pass.
 
 ### Known MVP Boundary
 
-Live internet search is temporarily unconfigured. The current planner and retriever still determine queries, follow-up searches, and retrieval lanes through the `SearchProvider` abstraction. The next implementation phase will introduce the LangGraph autonomous research workflow.
+The A2 runtime supports SearXNG discovery, but its availability on the reported public deployment is not yet verified in the A5 evidence record. The initial production topology excludes browser rendering; JavaScript-only sources remain a recorded retrieval limitation. The planner and retriever determine queries, follow-up searches, and retrieval lanes through the `SearchProvider` abstraction.
 
-The current MVP does **not** claim that LangGraph, React Query, Sigma.js, WebSockets, PostgreSQL, Kafka, Flink, Elasticsearch, Neo4j, Docker orchestration, Kubernetes, Terraform, ArgoCD, Prometheus, or Grafana are implemented.
+The current MVP includes LangGraph, production containers, and a PostgreSQL persistence path. It does **not** claim that React Query, Sigma.js, WebSockets, Kafka, Flink, Elasticsearch, Neo4j, Kubernetes, Terraform, ArgoCD, Prometheus, or Grafana are implemented. The pgvector corpus path is opt-in and awaits Neon rollout verification.
 
 ---
 
@@ -221,7 +221,7 @@ Implemented the report-first investigation workspace with URL-addressable Report
 - Containerize the current frontend and backend.
 - Add production-safe environment configuration, CORS restrictions, request limits, secret handling, structured logs, and health probes.
 - Add CI that runs backend tests, Python compilation, documentation checks, and the frontend production build.
-- Migrate investigation, research-checkpoint, and related durable state from SQLite to Railway PostgreSQL before launch, with repeatable migrations and rollback notes.
+- Migrate investigation, research-checkpoint, and related durable state from SQLite to managed Neon PostgreSQL before launch, with repeatable migrations and rollback notes.
 - Deploy SearXNG as a private service reachable only from the backend. The initial deployment deliberately excludes the Playwright browser-renderer service; unavailable JavaScript-rendered sources must be recorded as a retrieval limitation, not treated as a failure or bypassed.
 - Deploy a public MVP with persistent PostgreSQL-backed investigation storage and documented operational limits.
 - Publish a concise demo script and architecture summary suitable for a portfolio or interview.
@@ -238,26 +238,27 @@ Every push is automatically validated, a reproducible Railway deployment is docu
 
 #### Implementation record (2026-09-11)
 
-The local deployment foundation is implemented: the frontend and API have
-production container definitions, Compose provisions PostgreSQL and private
-SearXNG, committed PostgreSQL migrations run before API startup, CI validates
-the backend, frontend, and documentation checks, and deployment instructions
-define Railway service boundaries and secret handling. The API now applies
+The deployment foundation is implemented: the frontend and API have
+production container definitions, local Compose provisions PostgreSQL and
+private SearXNG, committed PostgreSQL migrations run before API startup, and
+CI validates backend, frontend, and documentation checks. The API applies
 bounded per-client request limits, including a stricter investigation-start
-limit; this in-process implementation is deliberately limited to the initial
-single-API deployment. Railway provisioning, production secret configuration,
-and a successful public launch/replay verification remain before A5 can be
-marked completed.
+limit; these in-process limits suit the initial single-API deployment. The
+project owner reports that v1 is live on Railway with Neon PostgreSQL. The
+public URLs, deployed commit, health responses, terminal SSE investigation,
+workspace reload and replay after redeploy, and green CI run have not yet been
+recorded in [A5_LAUNCH_EVIDENCE.md](A5_LAUNCH_EVIDENCE.md), so A5 stays In
+Progress.
 
 ---
 
 ## Track B — Production Architecture
 
-This track implements the larger distributed architecture described in [ARCHITECTURE.md](ARCHITECTURE.md), [KAFKA.md](KAFKA.md), [SERVICES.md](SERVICES.md), and [INFRASTRUCTURE.md](INFRASTRUCTURE.md). These phases remain unchecked because their runtime implementations do not yet exist in this repository.
+This track implements the larger distributed architecture described in [ARCHITECTURE.md](ARCHITECTURE.md), [KAFKA.md](KAFKA.md), [SERVICES.md](SERVICES.md), and [INFRASTRUCTURE.md](INFRASTRUCTURE.md). B1 has an opt-in implementation in progress; later phases remain planned until their runtime implementations and completion checks exist.
 
 ### B1. PostgreSQL and pgvector Migration
 
-**Status: Planned (initial PostgreSQL persistence is delivered as part of A5)**
+**Status: In Progress (initial PostgreSQL persistence is delivered as part of A5)**
 
 **Estimate: 2–3 weeks**
 
@@ -276,6 +277,22 @@ This track implements the larger distributed architecture described in [ARCHITEC
 #### Completion condition
 
 The full backend test suite runs against PostgreSQL, persisted workspaces survive restarts, and retrieval queries return validated pgvector results. The A5 launch completion condition covers the first two requirements; pgvector remains the follow-on B1 milestone.
+
+#### Implementation record (2026-09-13)
+
+An additive Neon migration defines a canonical corpus keyed by the existing
+`Document.id`, preserves serialized documents and source provenance, and stores
+384-dimensional MiniLM embeddings with model and input-hash metadata. Research,
+retrieval, and discovery documents are indexed through their repository
+boundaries; discovery records remain uncitable leads. A resumable backfill,
+post-backfill cosine index command, and opt-in `ENABLE_POSTGRES_VECTOR_SEARCH`
+path are implemented. The existing internal search remains the default and is
+the visible fallback when embeddings or the corpus are unavailable. CI is
+configured for a pgvector-capable PostgreSQL service. Local non-integration
+backend tests and frontend build/tests pass, but the PostgreSQL integration
+suite, non-production Neon migration/backfill/comparison, and production
+enablement have not been verified here. CockroachDB migration remains a
+separate compatibility and data-migration milestone.
 
 ---
 
@@ -480,10 +497,10 @@ Product and infrastructure work should alternate so the project remains demoable
 |---|---|---|
 | 1 | A1 Documentation and baseline hardening | Completed |
 | 2 | A2 Autonomous internet research | Completed |
-| 3 | A3 Investigation quality and evaluation | Planned |
-| 4 | A5 Deployable MVP foundation, including PostgreSQL persistence | Planned |
-| 5 | B1 pgvector migration and PostgreSQL hardening | Planned |
-| 6 | A4 Frontend completion | Completed |
+| 3 | A3 Investigation quality and evaluation | Completed |
+| 4 | A4 Frontend completion | Completed |
+| 5 | A5 Deployable MVP foundation, including PostgreSQL persistence | In Progress |
+| 6 | B1 pgvector migration and PostgreSQL hardening | In Progress |
 | 7 | B2 Source connector expansion | Planned |
 | 8 | B3 Kafka contracts and replayable ingestion | Planned |
 | 9 | B4 Flink processing and anomaly detection | Planned |
