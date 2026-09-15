@@ -26,6 +26,18 @@ from models.document import Document
 logger = logging.getLogger(__name__)
 
 DEFAULT_EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+_MODEL_NAME_ALIASES = {
+    # The legacy project setting used Sentence Transformers' short name.
+    # Persist the canonical Hugging Face identifier so pgvector metadata and
+    # query validation use one stable model identity.
+    "all-MiniLM-L6-v2": DEFAULT_EMBEDDING_MODEL_NAME,
+}
+
+
+def canonical_embedding_model_name(model_name: str) -> str:
+    """Return the stable model identifier used in persisted embeddings."""
+    normalized = (model_name or "").strip()
+    return _MODEL_NAME_ALIASES.get(normalized, normalized)
 
 
 def normalize_embedding_text(text: str) -> str:
@@ -534,7 +546,7 @@ def _resolve_model_name(settings: Any) -> str:
     model_name = getattr(settings, "EMBEDDING_MODEL_NAME", "") or ""
     legacy_model = getattr(settings, "EMBEDDING_MODEL", "") or ""
     if model_name and model_name != DEFAULT_EMBEDDING_MODEL_NAME:
-        return model_name
+        return canonical_embedding_model_name(model_name)
     if legacy_model:
-        return legacy_model
-    return model_name or DEFAULT_EMBEDDING_MODEL_NAME
+        return canonical_embedding_model_name(legacy_model)
+    return canonical_embedding_model_name(model_name or DEFAULT_EMBEDDING_MODEL_NAME)

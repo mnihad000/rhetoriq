@@ -278,7 +278,7 @@ This track implements the larger distributed architecture described in [ARCHITEC
 
 The full backend test suite runs against PostgreSQL, persisted workspaces survive restarts, and retrieval queries return validated pgvector results. The A5 launch completion condition covers the first two requirements; pgvector remains the follow-on B1 milestone.
 
-#### Implementation record (2026-09-13)
+#### Implementation record (2026-09-14)
 
 An additive Neon migration defines a canonical corpus keyed by the existing
 `Document.id`, preserves serialized documents and source provenance, and stores
@@ -288,11 +288,15 @@ boundaries; discovery records remain uncitable leads. A resumable backfill,
 post-backfill cosine index command, and opt-in `ENABLE_POSTGRES_VECTOR_SEARCH`
 path are implemented. The existing internal search remains the default and is
 the visible fallback when embeddings or the corpus are unavailable. CI is
-configured for a pgvector-capable PostgreSQL service. Local non-integration
-backend tests and frontend build/tests pass, but the PostgreSQL integration
-suite, non-production Neon migration/backfill/comparison, and production
-enablement have not been verified here. CockroachDB migration remains a
-separate compatibility and data-migration milestone.
+configured for a pgvector-capable PostgreSQL service. The targeted pgvector
+integration suite passes against the connected Neon target (8 passed), and its
+schema migration, resumable backfill, HNSW cosine index, direct semantic query,
+and feature-flagged retrieval path were verified. The legacy
+`all-MiniLM-L6-v2` setting is normalized to the canonical model identifier
+stored with corpus embeddings. This target currently contains validation
+fixtures rather than a live investigation corpus, so the production feature
+flag remains off pending a production data backfill and comparison. CockroachDB
+migration remains a separate compatibility and data-migration milestone.
 
 ---
 

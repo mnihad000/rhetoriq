@@ -2,7 +2,7 @@
 
 ## Current status
 
-- **A1, A2, A3, and A4 are complete by product decision.** A5 launch evidence is still pending. B1 semantic retrieval is implemented behind an opt-in flag and awaits pgvector integration tests plus non-production Neon migration, backfill, and comparison before production enablement.
+- **A1, A2, A3, and A4 are complete by product decision.** A5 launch evidence is still pending. B1 pgvector migration, backfill, cosine index, and feature-flagged retrieval were validated on the connected Neon target (8 integration tests passed). It remains opt-in until a live investigation corpus is backfilled and compared before production enablement.
 - Do not re-open A3 unless requested. The project owner explicitly accepted the remaining 30-case curated-real-source corpus as future quality work, not a blocker.
 - The working tree was already dirty before A3. Preserve unrelated changes and do not reset/revert them.
 

@@ -15,6 +15,7 @@ from models.document import Document
 from services.embedding_service import (
     DEFAULT_EMBEDDING_MODEL_NAME,
     EmbeddingService,
+    canonical_embedding_model_name,
     embedding_cache_key,
     get_embedding_service,
     normalize_embedding_text,
@@ -85,6 +86,10 @@ def test_embedding_service_initialization(embedding_service):
     assert embedding_service.model_name in {"all-MiniLM-L6-v2", DEFAULT_EMBEDDING_MODEL_NAME}
     assert embedding_service.dimension == 384
     assert embedding_service.model_loaded is True
+
+
+def test_legacy_minilm_alias_uses_the_canonical_persisted_model_name():
+    assert canonical_embedding_model_name("all-MiniLM-L6-v2") == DEFAULT_EMBEDDING_MODEL_NAME
 
 
 def test_embed_query(embedding_service):

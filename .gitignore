@@ -29,3 +29,4 @@ frontend/build/
 
 # Temporary backend split for incremental commits:
 # Commit 1: keep core app files only
+.neon
