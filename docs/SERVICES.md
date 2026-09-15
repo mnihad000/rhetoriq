@@ -44,9 +44,20 @@ sequenceDiagram
 
 Provider errors are isolated and returned as partial failures. A failed source must not discard successful records from another source.
 
-## Source connector boundary
+## B2 agent research-tool boundary
 
-Production connectors should share:
+B2 strengthens the tools an investigation can use synchronously: broad web search, canonical-page retrieval, internal-corpus recall, and one approved first-party public-record API. The planner selects a tool per evidence gap, and each tool returns normalized documents or discovery receipts with explicit limitations. B2 does not add a scheduled feed worker, public-stream consumer, or separate connector deployment.
+
+The research-tool boundary must preserve:
+
+- query, provider, source-native identifier, and result-rank metadata;
+- canonical URL, publication and collection timestamps, and retrieval receipts;
+- bounded retries, per-provider rate limits, deduplication, and partial failures;
+- source-policy decisions and discovery-versus-evidence status.
+
+## Future scheduled connector boundary
+
+When continuous monitoring is required, scheduled connectors should share:
 
 - capability metadata;
 - query or incremental collection requests;
@@ -86,15 +97,15 @@ The graph supervisor will choose among:
 
 Each adapter must preserve provider and query metadata, use bounded retries, respect source and search-engine policies, and return discovery records rather than treating snippets as complete evidence. Graph runs are traced and evaluated in RhetoriQ-controlled storage; no managed observability SaaS is required.
 
-## RSS connector
+## Later RSS connector
 
 The planned feed worker should use conditional requests, checkpoint GUIDs/canonical URLs, preserve feed metadata, and hand off article URLs to canonical retrieval only when necessary. Feed polling intervals are per-feed configuration, not a hard-coded global 60-second loop.
 
-## Official-source connectors
+## Official-source tools
 
-Congress.gov, Federal Register, agency feeds, and other first-party public records should be their own source class. They replace the old undocumented assumption that a public C-SPAN transcript API can supply all political speech evidence.
+Congress.gov, Federal Register, agency feeds, and other first-party public records should be available to the investigator as a distinct, agent-selectable source class. They replace the old undocumented assumption that a public C-SPAN transcript API can supply all political speech evidence.
 
-## Platform connectors
+## Later platform connectors
 
 - Bluesky should use Jetstream or another documented AT Protocol interface.
 - Reddit must use approved official API access and implement removal/retention requirements.

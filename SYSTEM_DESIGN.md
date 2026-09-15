@@ -17,13 +17,15 @@ RhetoriQ is an evidence-first narrative investigation system. It identifies publ
 ```mermaid
 flowchart TB
     subgraph Collection
-      A[First-party APIs and public datasets]
-      B[RSS, Atom, and event streams]
-      C[Search APIs and isolated browser]
+      Q[User question]
+      A[First-party public-record APIs]
+      B[RSS, Atom, and event streams\nlater monitoring]
+      C[Live search, corpus, and isolated browser]
       D[Canonical-page retrieval]
-      A --> E[Source connectors]
-      B --> E
+      Q --> E[Agent-selected research tools]
+      A --> E
       C --> E
+      B -. later .-> E
       E --> D
       D --> F[Normalized evidence records]
       E --> F
@@ -48,7 +50,8 @@ flowchart TB
 
 | Layer | Responsibility |
 |---|---|
-| Source connectors | Query authorized structured interfaces, checkpoint progress, preserve provider metadata, and emit normalized discovery records. |
+| Agent research tools | Search the live web, query approved primary sources, retrieve canonical pages, preserve receipts, and return normalized discovery or evidence records for a user question. |
+| Scheduled monitoring connectors | Later capability for recurring feeds/streams; checkpoint progress, preserve provider metadata, and emit normalized discovery records. |
 | Evidence retrieval | Fetch canonical pages when necessary, respecting access policy, and record retrieval outcomes. |
 | Processing | Deduplicate, classify, extract phrases and entities, calculate embeddings, and detect signals. |
 | Storage | Preserve documents, receipts, vectors, investigation state, and source relationships. |
@@ -58,7 +61,7 @@ flowchart TB
 
 ## Investigation lifecycle
 
-1. A structured connector detects activity or a user submits a research question.
+1. A user submits a research question. Later, a scheduled monitoring connector may also create a candidate signal.
 2. The planner converts the question into retrieval lanes and uncertainty requirements.
 3. The current retriever follows the planner's retrieval lanes, normalizes canonical evidence where required, and records actions and failures as receipts or evidence gaps.
 4. The planned LangGraph supervisor will select permitted search, browser, or corpus tools based on the next evidence gap.

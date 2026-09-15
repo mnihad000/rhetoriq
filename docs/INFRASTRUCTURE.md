@@ -180,12 +180,13 @@ The recommended sequence is:
 1. containerize and deploy the existing backend/frontend;
 2. add durable PostgreSQL persistence;
 3. implement pgvector corpus retrieval and test the B1 backfill path;
-4. implement and test source connectors with checkpoints;
-5. introduce Kafka contracts and idempotent consumers;
-6. split background processing into independently deployable workers;
-7. add autoscaling from measured CPU, queue lag, and connector backlog;
-8. add GitOps or equivalent automated deployment after manifests exist;
-9. add specialized search/graph stores only when justified by measured requirements.
+4. strengthen agent-led live-web research and one primary-source tool, preserving normalized evidence and retrieval receipts;
+5. add scheduled monitoring connectors with checkpoints only when continuous coverage is required;
+6. introduce Kafka contracts and idempotent consumers;
+7. split background processing into independently deployable workers;
+8. add autoscaling from measured CPU, queue lag, and connector backlog;
+9. add GitOps or equivalent automated deployment after manifests exist;
+10. add specialized search/graph stores only when justified by measured requirements.
 
 Infrastructure as code should describe real resources checked into the repository. Documentation must not include pretend Terraform modules, Kubernetes manifests, costs, or secret names before those artifacts exist.
 

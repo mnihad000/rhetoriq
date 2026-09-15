@@ -6,13 +6,14 @@ This document defines how RhetoriQ selects and retrieves source material. It sep
 
 A publisher, government record, public speech, forum post, or social post is an evidence source. GDELT, a search API, RSS, or an HTML client is an acquisition transport.
 
-The A2 investigator may select from these approved transports per evidence gap:
+The investigator may select from these approved transports per evidence gap:
 
-1. first-party APIs and official bulk datasets;
-2. RSS, Atom, JSON Feed, webhooks, and public event streams;
-3. approved self-operated search adapters for discovery;
-4. an isolated self-operated browser adapter for bounded public-web exploration and JavaScript-rendered pages;
-6. direct canonical-page retrieval for evidence enrichment.
+1. approved self-operated search adapters for live discovery;
+2. first-party APIs and official datasets when they directly answer the question;
+3. an isolated self-operated browser adapter for bounded public-web exploration and JavaScript-rendered pages;
+4. direct canonical-page retrieval for evidence enrichment.
+
+RSS, Atom, JSON Feed, webhooks, and public event streams are planned recurring-monitoring transports. They are not required for an agent-led investigation of a new user question.
 
 The system must never imply that its earliest retrieved record is the true origin. The approved phrase is **first observed in the available dataset**.
 
@@ -25,10 +26,10 @@ The system must never imply that its earliest retrieved record is the true origi
 | Canonical public pages | Implemented | Direct HTTP retrieval | Evidence enrichment after a URL is discovered. |
 | SearXNG search adapter | Implemented | Self-hosted JSON search API | Discovery, corroboration, contradiction, provenance, official, and community lanes. |
 | Browser adapter | Implemented | Isolated local Playwright service | Bounded public navigation and JavaScript-rendered evidence. |
-| RSS/Atom | Planned | Publisher feeds | Incremental publisher monitoring. |
-| Congress.gov | Planned | First-party public API | Bills, hearings, records, votes, members, and official legislative material. |
-| Federal Register | Planned | First-party public API | Rules, notices, proposed rules, and presidential documents. |
-| Bluesky | Planned | Jetstream/public AT Protocol stream | Public social activity and early narrative signals. |
+| RSS/Atom | Planned later | Publisher feeds | Recurring publisher monitoring. |
+| Congress.gov | Planned for B2 selection | First-party public API | Agent-queryable legislative material. |
+| Federal Register | Planned for B2 selection | First-party public API | Agent-queryable rules, notices, and presidential documents. |
+| Bluesky | Planned later | Jetstream/public AT Protocol stream | Recurring public-social monitoring and early narrative signals. |
 | Reddit | Conditional | Official Data API | Community signals only after access and terms review. |
 | YouTube | Conditional | First-party Data API | Video/channel discovery and metadata; transcript access requires separate validation. |
 | NewsAPI | Optional supplement | Commercial API | Discovery only under a suitable production license. |
@@ -86,7 +87,7 @@ The A2 fetcher adds robots enforcement, public-IP validation, redirect revalidat
 - stronger article extraction and structured-data parsing;
 - retention and revalidation policies.
 
-## Next connectors
+## B2 research tools and later monitoring
 
 ### Broad web search and isolated rendering
 
@@ -96,7 +97,7 @@ Search results are discovery receipts, not complete evidence. Canonical pages re
 
 ### RSS and Atom
 
-Feeds are preferred for monitored publishers because they offer stable item identifiers and incremental updates without crawling index pages.
+Feeds are preferred for monitored publishers because they offer stable item identifiers and incremental updates without crawling index pages. This is a later monitoring capability, not a B2 prerequisite.
 
 The connector should:
 
@@ -113,7 +114,7 @@ Do not hard-code an outlet list as authoritative. Feed coverage should be config
 
 Official material should come from first-party sources whenever possible.
 
-Initial targets:
+For B2, select one first-party API as an agent-queryable primary-source lane. Candidate targets are:
 
 - Congress.gov API for legislative records, hearings, members, votes, and Congressional Record material;
 - Federal Register API for rules, notices, proposed rules, and presidential documents;
@@ -124,7 +125,7 @@ Official records are high-value evidence but do not replace independent reportin
 
 ### Bluesky
 
-Jetstream provides JSON-encoded public AT Protocol events and supports collection/repository filtering. A production connector should checkpoint the event cursor, filter to the required record collections, resolve identities carefully, and retain stable URI/CID identifiers.
+Jetstream provides JSON-encoded public AT Protocol events and supports collection/repository filtering. It is deferred until recurring social monitoring is a product requirement and its retention/deletion policy has been approved. A production connector should checkpoint the event cursor, filter to the required record collections, resolve identities carefully, and retain stable URI/CID identifiers.
 
 Public availability does not remove privacy, retention, or responsible-use obligations.
 

@@ -300,7 +300,7 @@ migration remains a separate compatibility and data-migration milestone.
 
 ---
 
-### B2. Source Connector Expansion
+### B2. Agent-Led Web Research and Primary Sources
 
 **Status: Planned**
 
@@ -308,22 +308,23 @@ migration remains a separate compatibility and data-migration milestone.
 
 #### Goals
 
-- Implement a broad web-search provider behind the existing `SearchProvider` boundary.
-- Implement API/feed-first production connectors for RSS/Atom, GDELT, official public records, and selected public event streams.
-- Add Reddit only through approved official API access with documented retention and deletion handling.
-- Retrieve speech and video evidence through first-party public records, metadata APIs, and authorized transcripts rather than assuming a public C-SPAN transcript API.
-- Normalize every source into a shared document contract.
-- Add rate-limit handling, pagination, checkpoints, deduplication, and source-specific tests.
-- Preserve source timestamps, canonical URLs, collection timestamps, and provenance metadata.
+- Make broad, live web discovery available to the investigator through the existing `SearchProvider` boundary.
+- Let the planner choose approved search, canonical-page retrieval, internal-corpus, and one structured primary-source tool according to the evidence gap and remaining budget.
+- Start with a first-party public-record API such as Federal Register or Congress.gov; use it as a queryable research tool, not a background crawler.
+- Persist normalized documents, discovery receipts, canonical-fetch receipts, source timestamps, canonical URLs, collection timestamps, and provenance for reuse by later investigations.
+- Preserve bounded retries, per-source rate limits, deduplication, partial-failure reporting, and visible retrieval limitations.
+- Keep evidence source types separate from acquisition transports; discovery results remain uncitable leads until canonical evidence is retrieved and receipted.
+- Defer scheduled RSS/Atom polling, social/public event streams, Reddit, and the broader connector-worker fleet to a later monitoring milestone after their policy and retention requirements are approved.
 
 #### Dependencies
 
 - B1 durable document storage.
-- Reviewed data-source and legal/terms-of-use constraints.
+- A working self-operated broad-search deployment or an explicitly documented fallback.
+- Reviewed data-source and legal/terms-of-use constraints for the selected primary-source API.
 
 #### Completion condition
 
-Each connector can resume after interruption, emits schema-valid documents, and passes fixture-based tests for pagination, rate limits, duplicates, and malformed source data.
+An investigation can answer a new user question by selecting permitted live-web and primary-source tools, fetching canonical evidence where permitted, and persisting an auditable, schema-valid evidence trail. Tests cover tool selection, source-policy enforcement, malformed/provider-failure handling, deduplication, and the visible fallback when live search is unavailable. Scheduled monitoring connectors are explicitly out of scope.
 
 ---
 
@@ -337,11 +338,11 @@ Each connector can resume after interruption, emits schema-valid documents, and 
 
 - Implement versioned Kafka schemas and topic creation for raw documents, processed documents, detected signals, investigation requests, stage events, and completed reports.
 - Define partition keys, consumer groups, retries, dead-letter topics, and idempotency rules.
-- Adapt source connectors and downstream consumers to event-driven operation.
+- Adapt the B2 retrieval-tool contract and later scheduled connectors to event-driven operation.
 
 #### Dependencies
 
-- B2 normalized connector contract.
+- B2 normalized retrieval and primary-source tool contract.
 - Local Docker-based Kafka environment.
 
 #### Completion condition
@@ -505,7 +506,7 @@ Product and infrastructure work should alternate so the project remains demoable
 | 4 | A4 Frontend completion | Completed |
 | 5 | A5 Deployable MVP foundation, including PostgreSQL persistence | In Progress |
 | 6 | B1 pgvector migration and PostgreSQL hardening | In Progress |
-| 7 | B2 Source connector expansion | Planned |
+| 7 | B2 Agent-led web research and primary sources | Planned |
 | 8 | B3 Kafka contracts and replayable ingestion | Planned |
 | 9 | B4 Flink processing and anomaly detection | Planned |
 | 10 | B5 Elasticsearch and Neo4j | Planned |

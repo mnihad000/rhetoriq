@@ -16,7 +16,7 @@ This document defines the collection, processing, evidence, and product boundari
 
 ### Target production architecture
 
-- Additional source connectors for feeds, search, public records, public event streams, and approved platforms.
+- An agent-led live-web and primary-source research layer, followed later by scheduled connectors for feeds, public event streams, and approved platforms.
 - Durable connector checkpoints and idempotent ingestion.
 - Kafka contracts and replayable processing.
 - Stream processing and durable production stores.
@@ -26,17 +26,19 @@ This document defines the collection, processing, evidence, and product boundari
 
 Kafka, Flink, Kubernetes, PostgreSQL/pgvector, Elasticsearch, and Neo4j should not be described as already implemented until their roadmap phases are complete.
 
-## Core collection rule
+## Core research rule
 
-RhetoriQ is **API/feed-first**.
+RhetoriQ is **agent-led and source-policy-first**. A new user question should
+be answerable through bounded live research; recurring collection is a later
+monitoring capability, not a dependency of the investigation workflow.
 
 Acquisition priority is:
 
-1. First-party APIs and official bulk datasets.
-2. RSS, Atom, JSON Feed, webhooks, or public event streams.
-3. An approved search API for broad discovery.
+1. An approved search API for broad discovery.
+2. A first-party API or official dataset when it directly addresses an evidence gap.
+3. Direct retrieval of a canonical public page for evidence enrichment.
 4. An isolated browser for public, JavaScript-rendered, or interactive sources when it improves evidence coverage.
-5. Direct retrieval of a canonical public page for evidence enrichment.
+5. RSS, Atom, JSON Feed, webhooks, or public event streams for later recurring monitoring.
 
 “Scraper” is not used as the umbrella term. The umbrella is **source connector**. A connector may use an API, feed, stream, file download, or controlled page fetch.
 
@@ -171,15 +173,15 @@ Connectors fail independently. A Reddit authorization failure, dead RSS feed, GD
 
 The current trending detector polls a fixed seed-topic list. Production discovery should add broader query generation and connector-specific incremental collection rather than treating those seeds as complete coverage.
 
-## Planned connector order
+## Delivery order for research tools and connectors
 
-1. Implement the self-hosted LangGraph investigative workflow with receipt-preserving search and browser adapters.
-2. Add RhetoriQ-controlled tracing and offline evaluation.
-3. Add an RSS/Atom connector with ETag, `Last-Modified`, and item-ID checkpoints.
-3. Add first-party public-record connectors such as Congress.gov and Federal Register.
-4. Add Bluesky Jetstream or equivalent public event streams where their terms fit the product.
-5. Add Reddit only through approved official API access, with deletion and retention handling.
-6. Add video or speech metadata through first-party APIs; use official transcripts or licensed caption access rather than assuming a public C-SPAN transcript API.
+1. Strengthen the self-hosted LangGraph investigator's receipt-preserving broad search, canonical fetch, source policy, and visible fallback behavior.
+2. Add one first-party public-record API such as Federal Register or Congress.gov as an agent-selected research tool.
+3. Persist normalized research documents and receipts for later corpus reuse, without requiring a scheduled collector.
+4. Add RSS/Atom monitoring with ETag, `Last-Modified`, and item-ID checkpoints when continuous coverage is a product requirement.
+5. Add Bluesky Jetstream or an equivalent public event stream only after its retention and deletion policies fit the product.
+6. Add Reddit only through approved official API access, with deletion and retention handling.
+7. Add video or speech metadata through first-party APIs; use official transcripts or licensed caption access rather than assuming a public C-SPAN transcript API.
 
 NewsAPI may be evaluated as a supplemental discovery provider, but it is not the default evidence store and must not be described as a production dependency without a suitable paid license and content-use review.
 

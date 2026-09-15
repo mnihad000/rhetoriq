@@ -18,14 +18,14 @@ The product deliberately distinguishes **first observed in the available dataset
 
 Kafka, Flink, Elasticsearch, Neo4j, Kubernetes, and the wider source-connector fleet remain target architecture. B1 pgvector corpus retrieval is implemented behind a disabled-by-default flag and awaits Neon migration/backfill verification. The A5 deployment foundation uses managed Neon PostgreSQL; public launch evidence is tracked separately in [A5 launch evidence](docs/A5_LAUNCH_EVIDENCE.md). See [the roadmap](docs/ROADMAP.md) for exact implementation status.
 
-## Collection strategy
+## Research strategy
 
-RhetoriQ is **API/feed-first**, not scraper-first:
+RhetoriQ is **agent-led and source-policy-first**, not crawler-first:
 
-1. First-party APIs, public datasets, event streams, and RSS/Atom feeds provide structured discovery records.
-2. A broad web-search API discovers relevant URLs outside those monitored sources.
-3. The LangGraph investigator selects structured search or isolated browser research per evidence gap, subject to budgets and source policy.
-4. RhetoriQ retrieves a canonical source page only when needed to create an evidence record.
+1. A user question starts a bounded investigation; the LangGraph investigator selects live broad-web search, internal-corpus recall, canonical-page retrieval, or an approved primary-source API for each evidence gap.
+2. Search results and API records are discovery leads, not automatically evidence.
+3. RhetoriQ retrieves a canonical source page when permitted and needed to create an evidence record, then preserves receipts and limitations.
+4. RSS/Atom polling, public event streams, and other scheduled connectors are a later monitoring capability, not a prerequisite for answering a new question.
 
 A website, post, transcript, or official record is a source. An API, feed, or HTML fetch is the transport used to retrieve it.
 
@@ -46,7 +46,7 @@ flowchart LR
     A --> U[React frontend]
 ```
 
-The target production flow adds durable connector checkpoints, Kafka replay, stream processing, and production data stores without changing the normalized document contract.
+The target production flow later adds durable monitoring connectors, Kafka replay, stream processing, and production data stores without changing the normalized document contract.
 
 ## Repository layout
 
