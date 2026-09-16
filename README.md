@@ -12,11 +12,13 @@ The product deliberately distinguishes **first observed in the available dataset
 - Direct HTTP retrieval of canonical pages for evidence enrichment.
 - A durable LangGraph research runtime with budgets, leases, checkpoints, idempotent actions, replay, SSE progress, and a deterministic publication gate.
 - Self-hosted SearXNG discovery plus GDELT, Hacker News, canonical HTTP, internal-corpus, and an isolated Playwright adapter for local research only.
+- Federal Register first-party research with policy-aware receipts, retries, pagination, deduplication, and visible limitations.
+- Apache Kafka KRaft and Apicurio Registry with six versioned JSON Schema topics, DLQs, transactional outbox, idempotent consumers, controlled replay, and Kafka-only investigation dispatch.
 - In-memory and SQLite-backed development storage, with optional Redis caching, vector search, and agent memory.
 - A React and TypeScript investigation interface with a live graph, research rail, evidence gate, and replay controls.
 - Production container definitions for the Railway API/frontend deployment, committed PostgreSQL migrations, and CI checks for backend, frontend, documentation, and PostgreSQL migration compatibility.
 
-Kafka, Flink, Elasticsearch, Neo4j, Kubernetes, and the wider source-connector fleet remain target architecture. B1 pgvector corpus retrieval is implemented behind a disabled-by-default flag and awaits Neon migration/backfill verification. The A5 deployment foundation uses managed Neon PostgreSQL; public launch evidence is tracked separately in [A5 launch evidence](docs/A5_LAUNCH_EVIDENCE.md). See [the roadmap](docs/ROADMAP.md) for exact implementation status.
+Flink, Elasticsearch, Neo4j, Kubernetes, and the wider recurring-monitoring connector fleet remain target architecture. B1 pgvector corpus retrieval is implemented behind a disabled-by-default flag and awaits production corpus rollout verification. Public launch evidence is tracked separately in [A5 launch evidence](docs/A5_LAUNCH_EVIDENCE.md). See [the roadmap](docs/ROADMAP.md) for exact implementation status.
 
 ## Research strategy
 
@@ -38,15 +40,17 @@ flowchart LR
     G[GDELT DOC 2.0 API] --> I[Ingestion services]
     H[HN Algolia API] --> I
     S[Search and browser tools] --> D[LangGraph investigator]
-    I --> N[Normalized Document records]
+    I --> O[Transactional outbox]
+    O --> K[(Kafka)]
     D --> F[Canonical-page fetcher]
-    F --> N
+    F --> O
+    K --> N[Normalized Document records]
     N --> T[Trending and investigation pipelines]
     T --> A[FastAPI]
     A --> U[React frontend]
 ```
 
-The target production flow later adds durable monitoring connectors, Kafka replay, stream processing, and production data stores without changing the normalized document contract.
+The implemented flow uses durable Kafka replay and PostgreSQL persistence. Later phases add recurring monitoring connectors, stream processing, and specialized search/graph stores without changing the normalized document contract.
 
 ## Repository layout
 
@@ -86,15 +90,15 @@ npm install
 npm run dev
 ```
 
-### A2 research services
+### Full B2/B3 stack
 
-The research-only Compose stack supplies SearXNG and the isolated browser renderer for local development. Browser rendering is deliberately not part of the initial public Railway deployment:
+The root Compose stack supplies PostgreSQL/pgvector, Kafka, Apicurio Registry, SearXNG, topic initialization, the outbox publisher, event workers, API, and frontend:
 
 ```powershell
-Copy-Item infra/research/.env.example infra/research/.env
-docker compose -f infra/research/docker-compose.yml up -d
-$env:RESEARCH_RUNTIME="langgraph"
-$env:DEMO_MODE="false"
+$env:POSTGRES_PASSWORD="<local-secret>"
+$env:SEARXNG_SECRET="<local-secret>"
+docker compose up --build -d
+docker compose ps
 ```
 
 See [Autonomous Research](docs/AUTONOMOUS_RESEARCH.md) for worker mode, model configuration, budgets, replay, and security boundaries.
@@ -117,7 +121,14 @@ Settings are loaded from `backend/.env` when present.
 | `GEMINI_API_KEY` | Optional Gemini model access. |
 | `GROQ_API_KEY` | Optional Groq model access. |
 | `RESEARCH_RUNTIME` | `auto`, `native`, or `langgraph` runtime selection. |
-| `RESEARCH_EXECUTION_MODE` | `embedded` FastAPI execution or separate `worker` process. |
+| `RESEARCH_EXECUTION_MODE` | Deployment label; execution is Kafka-only and defaults to `kafka`. |
+| `KAFKA_BOOTSTRAP_SERVERS` | Kafka bootstrap addresses. |
+| `KAFKA_SCHEMA_REGISTRY_URL` | Apicurio Confluent-compatible API base URL. |
+| `KAFKA_CLIENT_ID` / `KAFKA_CONSUMER_GROUP_PREFIX` | Producer and consumer identity prefixes. |
+| `KAFKA_SECURITY_PROTOCOL` | Kafka transport security protocol. |
+| `KAFKA_SASL_USERNAME` / `KAFKA_SASL_PASSWORD` | Optional SASL credentials; never written to events or logs. |
+| `KAFKA_TOPIC_PREFIX` | Optional environment-specific physical topic prefix. |
+| `KAFKA_RETRY_MAX_ATTEMPTS` / `KAFKA_RETRY_BACKOFF_SECONDS` | Bounded consumer/producer retry policy. |
 | `SEARXNG_BASE_URL` | Self-hosted broad-search endpoint. |
 | `BROWSER_SERVICE_URL` | Isolated browser-rendering endpoint. |
 | `BROWSER_RENDERING_ENABLED` | Keep `false` in the initial public deployment; enables the local browser adapter only when explicitly configured. |
@@ -142,7 +153,8 @@ Future connectors must add their credentials only when implemented and approved.
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Current and target architecture, including collection boundaries. |
 | [DATA_SOURCES.md](docs/DATA_SOURCES.md) | Source hierarchy, provider status, and compliance requirements. |
 | [SERVICES.md](docs/SERVICES.md) | Implemented service boundaries and planned connectors. |
-| [KAFKA.md](docs/KAFKA.md) | Planned replayable event contracts. |
+| [KAFKA.md](docs/KAFKA.md) | Implemented replayable event contracts and operations. |
+| [OPERATIONS.md](docs/OPERATIONS.md) | Kafka/outbox health, failure recovery, replay, retention, and secret runbook. |
 | [INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | Current deployment status and production principles. |
 | [ROADMAP.md](docs/ROADMAP.md) | Delivery status and future phases. |
 | [BACKEND.md](docs/BACKEND.md) | Backend contracts and endpoint reference. |

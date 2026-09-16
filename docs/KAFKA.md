@@ -1,8 +1,8 @@
 # RhetoriQ Kafka Contracts
 
-Kafka is the target production event backbone for RhetoriQ. It is retained because durable replay, back-pressure, failure isolation, and independently scalable processing are central to the production design.
+Kafka is the required event backbone for RhetoriQ ingestion and investigation execution. The implementation uses Apache Kafka 4.3.1 in single-node KRaft mode locally, Apicurio Registry 3.3.0 through its Confluent-compatible API, `confluent-kafka`, and JSON Schema generated from committed Pydantic models in `backend/models/events.py`.
 
-Kafka is not wired into the current local FastAPI runtime yet. This document defines the contracts to implement in roadmap phase B3.
+There is no synchronous production fallback. Accepted source records, research evidence, and investigation requests are written to the transactional outbox and published asynchronously. Broker or registry failure degrades readiness and leaves durable work queued.
 
 ## Design principles
 
@@ -204,14 +204,44 @@ Exactly-once business behavior comes from idempotent application writes, not fro
 
 ## Retention
 
-Retention is set by data class and provider policy:
+Initial topic defaults are configured by `backend/events/topics.py`:
 
-- raw events: enough for operational replay, bounded by provider storage terms;
-- processed evidence: according to the evidence retention policy;
-- signals and investigation events: longer-lived audit trail;
-- dead letters: short, access-controlled retention with operational review.
+- raw documents: 7 days;
+- processed documents: 30 days;
+- signals, investigation requests, and stage events: 90 days;
+- completed investigations: 180 days;
+- all dead-letter topics: 14 days.
 
 User-generated platform content may require deletion synchronization. A Kafka retention policy must never preserve content longer than the applicable provider agreement allows.
+
+## Runtime implementation
+
+- `backend/services/event_store.py`: transactional outbox, scoped consumer ledger, payload-hash verification, retry state, and replay audit jobs.
+- `backend/services/kafka_runtime.py`: Apicurio schema registration/framing, idempotent producer, outbox publisher, broker health, group lag, and DLQ depth.
+- `backend/events/worker.py`: role-scoped consumers, manual offset commits, retry classification, sanitized DLQ publication, and durable idempotency.
+- `backend/events/replay.py`: explicit topic/partition/offset or correlation-filtered replay under an audited replay job ID.
+- `backend/events/schemas/`: committed schemas for all six primary and six DLQ topics.
+
+The document worker consumes raw events, emits processed events, and persists processed documents to the canonical corpus and research audit store. The signal worker schedules only explicitly authorized automatic investigations. The investigation worker uses the existing lease/recovery rules and emits ordered stage events plus one stable completion event. Projection consumers record delivery without rewriting authoritative business state.
+
+## Local operation
+
+Set `POSTGRES_PASSWORD` and `SEARXNG_SECRET`, then start the stack:
+
+```powershell
+docker compose up --build -d
+docker compose ps
+```
+
+`topic-init` creates topics, applies retention, registers every schema subject as `<topic>-value`, and configures `BACKWARD_TRANSITIVE` compatibility. Useful commands:
+
+```powershell
+docker compose logs topic-init outbox-publisher document-worker investigation-worker
+cd backend
+..\.venv\Scripts\python.exe -m events.replay --topic raw.documents.v1 --partition 0 --start-offset 0 --end-offset 10 --dry-run
+```
+
+Replays never commit the normal consumer group’s offsets. Normal handlers and stable domain IDs prevent duplicate investigations, notifications, documents, and completion events.
 
 ## Security
 
@@ -224,4 +254,3 @@ User-generated platform content may require deletion synchronization. A Kafka re
 ## Observability
 
 Track producer error rate, publish latency, consumer lag, event age, retries, dead-letter volume, checkpoint age, duplicate rate, and end-to-end collection-to-investigation latency. Metrics should be labeled by connector/provider without putting high-cardinality URLs or document IDs in metric labels.
-

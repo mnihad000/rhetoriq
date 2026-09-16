@@ -65,4 +65,4 @@ Do not claim permanent production scale, continuous 100K+ daily-document process
 
 ## Current boundary
 
-This is the approved deployment strategy, not an implementation claim. The current repository does not yet contain the Track B Kafka, Flink, PostgreSQL/pgvector, Elasticsearch, Neo4j, Kubernetes, Terraform, Argo CD, Prometheus, or Grafana runtime implementations. Build and document those components phase by phase before using them in the AWS demonstration.
+This is the approved deployment strategy, not an implementation claim. The repository contains PostgreSQL/pgvector and the B3 Kafka/Apicurio runtime, but it does not yet contain Flink, Elasticsearch, Neo4j, Kubernetes, Terraform, Argo CD, Prometheus, or Grafana runtime implementations. Build and document those remaining components phase by phase before using them in the AWS demonstration.

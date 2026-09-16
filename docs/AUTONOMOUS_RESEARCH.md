@@ -7,9 +7,9 @@ A2 is RhetoriQ's durable, auditable internet-research runtime. It uses LangGraph
 ```mermaid
 flowchart LR
     UI[Research console] <-->|SSE + REST| API[FastAPI]
-    API --> Q[(SQLite run queue and audit)]
-    API --> LG[Embedded LangGraph worker]
-    W[Separate worker] --> Q
+    API --> O[(Transactional outbox)]
+    O --> K[(Kafka)]
+    K --> W[Investigation consumer]
     W --> LG
     LG --> CP[(Separate checkpoint SQLite)]
     LG --> SX[SearXNG]
@@ -25,28 +25,13 @@ The graph explicitly initializes, assesses evidence, selects and validates one s
 
 ## Local startup
 
-Install the backend dependencies, then start the research-only dependencies:
+Install the backend dependencies, configure local secrets, then start the full event stack:
 
 ```powershell
-Copy-Item infra/research/.env.example infra/research/.env
-docker compose -f infra/research/docker-compose.yml up -d
-```
-
-For embedded execution:
-
-```powershell
-$env:DEMO_MODE="false"
-$env:RESEARCH_RUNTIME="langgraph"
-$env:RESEARCH_EXECUTION_MODE="embedded"
-cd backend
-..\.venv\Scripts\python.exe -m uvicorn main:app --reload
-```
-
-For separate worker execution, set `RESEARCH_EXECUTION_MODE=worker`, run FastAPI, and launch this in another terminal:
-
-```powershell
-cd backend
-..\.venv\Scripts\python.exe -m research_worker
+$env:POSTGRES_PASSWORD="<local-secret>"
+$env:SEARXNG_SECRET="<local-secret>"
+docker compose up --build -d
+docker compose ps
 ```
 
 Check `GET /api/research/health` before a live demo. A hosted model requires a Gemini or Groq key. Ollama is supported through `OLLAMA_BASE_URL` and `OLLAMA_MODEL`; it consumes model/token budgets but contributes zero hosted spend.
@@ -55,7 +40,7 @@ The built-in price registry recognizes `gemini-2.5-flash` and Groq `openai/gpt-o
 
 ## Durability and replay
 
-The API persists `queued` before returning. A worker claims it using a short SQLite transaction and a renewable lease. Every graph action receives a stable idempotency key derived from its run, action position, and validated decision. On recovery, completed actions are reconstructed from persisted receipts and are not repeated.
+The API persists `queued` and `investigations.requested.v1` in one transaction before returning HTTP 202. The Kafka worker claims the run using a short database transaction and a renewable lease. Every graph action receives a stable idempotency key derived from its run, action position, and validated decision. On recovery, completed actions are reconstructed from persisted receipts and are not repeated.
 
 LangGraph checkpoints live in `RESEARCH_CHECKPOINT_DB_PATH`; public audit records live alongside the investigation database. A recorded replay creates a child run, disables new network/model decisions, copies recorded actions and normalized documents, recomputes deterministic artifacts and the gate, and stores an equivalence comparison.
 
@@ -83,4 +68,4 @@ cd backend
 ..\.venv\Scripts\python.exe -m pytest tests
 ```
 
-Set `RESEARCH_RUNTIME=native` to roll back to the established supervised runner without changing stored investigation contracts. A live portfolio recording should still demonstrate SearXNG/browser/model health, multi-tool execution, intentional interruption/resume, a published case, and a withheld case.
+`RESEARCH_RUNTIME=native` may select the established supervised research engine inside the Kafka investigation worker; it does not restore synchronous API execution. A live portfolio recording should demonstrate Kafka/registry and provider health, multi-tool execution, intentional interruption/resume, a published case, and a withheld case.

@@ -7,26 +7,23 @@ the production topology planned in the roadmap.
 
 The repository currently supports local execution of:
 
-- one FastAPI backend process;
+- FastAPI, an outbox publisher, and four role-scoped Kafka consumers;
 - one Vite/React frontend process;
-- SQLite and in-process development stores;
+- PostgreSQL/pgvector plus SQLite test/development repositories;
 - optional Redis for cache, phrase tracking, vectors, and agent memory.
 - an optional research-only Compose stack with localhost-bound SearXNG and a constrained Playwright renderer;
-- embedded research execution or a separately launched leased research worker.
+- Apache Kafka KRaft, Apicurio Registry, topic initialization, persistent broker storage, and Kafka-only leased research execution;
 - production API and frontend containers, with committed PostgreSQL migrations and CI coverage for PostgreSQL migration compatibility.
 
-The initial public deployment uses Railway for the API and frontend, Neon for
-managed PostgreSQL, and private Railway SearXNG. It deliberately has no
-browser-renderer service. The repository does not currently contain deployable
-Kafka, Flink, Kubernetes, Terraform, or ArgoCD implementations. Those remain
-production roadmap work and should not appear in setup instructions as
-completed resources.
+A managed deployment uses the public API/frontend plus private Kafka, Apicurio, outbox/worker services, PostgreSQL, and SearXNG. Browser rendering remains optional. The repository does not currently contain deployable Flink, Kubernetes, Terraform, or ArgoCD implementations.
 
 ## Initial public boundary
 
 ```text
-public browser -> Railway frontend -> Railway API -> Neon PostgreSQL
-                                      -> private Railway SearXNG
+public browser -> frontend -> API -> PostgreSQL
+                               \-> transactional outbox -> Kafka -> workers
+                                                     \-> Apicurio Registry
+                               \-> private SearXNG / Federal Register
 ```
 
 Only the frontend and API receive public domains. `PUBLIC_API_BASE_URL` is
@@ -35,9 +32,9 @@ into the API from Railway secret/reference configuration and retains Neon's
 TLS setting. The API container owns startup migrations; no separate migration
 service is required. `BROWSER_RENDERING_ENABLED=false` is the public default.
 
-## Target production topology
+## Scaled production topology
 
-Kafka remains the central asynchronous event backbone.
+Kafka is the central asynchronous event backbone.
 
 ```mermaid
 flowchart TB

@@ -1,12 +1,6 @@
-# Railway + Neon Deployment
+# Deployment
 
-RhetoriQ's initial public deployment is a non-demo research release built from
-the repository's API and frontend containers. The intended topology is public
-Railway `api` and `frontend` services, managed Neon PostgreSQL, and a private
-SearXNG service. Browser rendering/Playwright is intentionally excluded from
-this release. The deployment foundation is committed; public launch evidence
-is tracked in [A5_LAUNCH_EVIDENCE.md](A5_LAUNCH_EVIDENCE.md), and A5 remains in
-progress until that evidence is recorded.
+RhetoriQ requires the API/frontend, PostgreSQL/pgvector, private SearXNG, Apache Kafka, Apicurio Registry, topic initializer, outbox publisher, and role-scoped event workers. Browser rendering/Playwright remains optional. The root Compose file is the local production rehearsal. A managed deployment must provide equivalent private Kafka, registry, and worker services; deploying only the earlier API/frontend/Neon topology is no longer sufficient for investigation execution.
 
 ## Local production rehearsal
 
@@ -18,8 +12,8 @@ docker compose up --build
 ```
 
 Open `http://localhost:4173`, verify `http://localhost:8000/health`, and run a
-live investigation. PostgreSQL data is stored in the named `postgres-data`
-volume. Stop services with `docker compose down`; do not use `-v` unless you
+live investigation. PostgreSQL data is stored in `postgres-data` and broker state in `kafka-data`.
+Stop services with `docker compose down`; do not use `-v` unless you
 intend to discard local database data.
 
 The backend container runs committed migrations before it starts FastAPI.
@@ -33,7 +27,12 @@ services below; provision Neon separately:
 |---|---|---|---|
 | `Neon` | managed external database | Neon PostgreSQL | durable application state, LangGraph checkpoints, and future pgvector corpus |
 | `searxng` | private | SearXNG image/config | web discovery only |
-| `api` | public | repository `backend/` directory | FastAPI and embedded research execution |
+| `broker` | private | Apache Kafka 4.3.1 | KRaft event backbone |
+| `schema-registry` | private | Apicurio Registry 3.3.0 | Confluent-compatible JSON Schema registry |
+| `topic-init` | private one-shot | repository `backend/` directory | Topics, retention, schemas, and compatibility |
+| `outbox-publisher` | private | repository `backend/` directory | Publish committed outbox records |
+| event workers | private | repository `backend/` directory | Documents, signals, investigations, and projections |
+| `api` | public | repository `backend/` directory | FastAPI, durable reads, and outbox writes |
 | `frontend` | public | repository `frontend/` directory | static React application served by Nginx |
 
 Do not create a Railway Postgres service or a browser-renderer service. Only
@@ -51,8 +50,15 @@ DATABASE_URL=<Neon connection string, including sslmode=require>
 DEPLOYMENT_ENV=production
 DEMO_MODE=false
 RESEARCH_RUNTIME=langgraph
-RESEARCH_EXECUTION_MODE=embedded
+RESEARCH_EXECUTION_MODE=kafka
 SEARXNG_BASE_URL=http://${{searxng.RAILWAY_PRIVATE_DOMAIN}}:8080
+KAFKA_BOOTSTRAP_SERVERS=<private Kafka bootstrap addresses>
+KAFKA_SCHEMA_REGISTRY_URL=<private Apicurio URL>/apis/ccompat/v7
+KAFKA_CLIENT_ID=rhetoriq-api
+KAFKA_CONSUMER_GROUP_PREFIX=rhetoriq
+KAFKA_SECURITY_PROTOCOL=<PLAINTEXT or managed TLS/SASL protocol>
+KAFKA_SASL_USERNAME=<secret when required>
+KAFKA_SASL_PASSWORD=<secret when required>
 BROWSER_RENDERING_ENABLED=false
 ENABLE_POSTGRES_VECTOR_SEARCH=false
 POSTGRES_VECTOR_SEARCH_TOP_K=8
@@ -121,9 +127,7 @@ regression; the additive corpus rows may remain for diagnosis.
 ## Launch checks
 
 1. Open `https://<api-domain>/health`; it must report `demo_mode: false`.
-2. Open `https://<api-domain>/api/research/health`; SearXNG, checkpointer, and
-   embedded worker must be ready. The checkpointer probe tests database
-   connectivity. Browser rendering is intentionally absent.
+2. Open `https://<api-domain>/api/research/health`; SearXNG, checkpointer, Kafka, registry, outbox, and all consumer groups must be ready. Lag and DLQ counts must be numeric. Browser rendering may be intentionally absent.
 3. Open the frontend, start a short investigation, and confirm the SSE
    progress rail updates.
 4. Redeploy the API and confirm the completed investigation and research trail
@@ -135,11 +139,7 @@ regression; the additive corpus rows may remain for diagnosis.
 
 ## Operational limits
 
-Initial production is deliberately a single API instance because it executes
-research in-process. PostgreSQL makes the state safe for a future dedicated
-worker, but the worker split should be introduced and tested separately. The
-existing fetch/domain/model budgets remain active and must be kept within the
-chosen provider quotas. The API also limits each client to 120 requests per
+Research runs execute in Kafka consumers, so API replicas do not execute jobs or invoke a synchronous fallback. The existing fetch/domain/model budgets remain active and must be kept within the chosen provider quotas. The API also limits each client to 120 requests per
 minute and five investigation starts per hour by default. These limits are
 in-process and are appropriate only while the API remains a single instance;
 move the counters to shared storage before increasing the API replica count.

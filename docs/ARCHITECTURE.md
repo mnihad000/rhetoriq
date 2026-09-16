@@ -1,30 +1,29 @@
 # RhetoriQ Architecture
 
-This document defines the collection, processing, evidence, and product boundaries for RhetoriQ. It distinguishes the code that exists today from the distributed production architecture planned in the roadmap.
+This document defines the collection, processing, evidence, and product boundaries for RhetoriQ. B2 research acquisition and the B3 Kafka backbone are implemented; Flink, Elasticsearch, Neo4j, Kubernetes, and managed-cloud operations remain later phases.
 
 ## Architecture status
 
 ### Implemented in this repository
 
 - FastAPI application and React frontend.
-- GDELT DOC 2.0 and Hacker News/Algolia ingestion.
+- GDELT DOC 2.0, Hacker News/Algolia ingestion, SearXNG discovery, and Federal Register primary-source retrieval.
 - A normalized `Document` model and document normalizer.
 - Direct HTTP page retrieval with timeout, content-type validation, redirect handling, and optional caching.
-- An abstract `SearchProvider` boundary; live broad-web search is intentionally unconfigured.
+- A pluggable `SearchProvider` boundary with SearXNG and explicit internal-corpus fallback diagnostics.
 - Trending detection, retrieval, timeline, graph, source-diversity, mutation, receipts, debate, and report services.
-- SQLite and in-process development persistence, plus optional Redis-backed capabilities.
+- PostgreSQL/pgvector and SQLite repository support, plus optional Redis-backed capabilities.
+- Apache Kafka KRaft, Apicurio Registry, six versioned topics and DLQs, transactional outbox, idempotent consumers, controlled replay, and Kafka-only investigation execution.
 
 ### Target production architecture
 
-- An agent-led live-web and primary-source research layer, followed later by scheduled connectors for feeds, public event streams, and approved platforms.
 - Durable connector checkpoints and idempotent ingestion.
-- Kafka contracts and replayable processing.
 - Stream processing and durable production stores.
 - Independently scalable connector workers and processing services.
 - Production secrets, observability, and compliance controls.
 - A self-hosted LangGraph investigative workflow that chooses approved browser and search tools, with RhetoriQ-controlled tracing and evaluation.
 
-Kafka, Flink, Kubernetes, PostgreSQL/pgvector, Elasticsearch, and Neo4j should not be described as already implemented until their roadmap phases are complete.
+Flink, Kubernetes, Elasticsearch, and Neo4j should not be described as implemented until their roadmap phases are complete.
 
 ## Core research rule
 
@@ -44,7 +43,7 @@ Acquisition priority is:
 
 ## High-level flow
 
-Kafka remains the production event backbone. The first diagram shows the current development runtime; the second shows the target production topology.
+Kafka is the production event backbone. The diagram shows the implemented B2/B3 flow; dashed sources remain future monitoring connectors.
 
 ```mermaid
 flowchart TD
@@ -53,14 +52,15 @@ flowchart TD
       H[Hacker News via Algolia]
       R[RSS and Atom feeds]
       W[Broad web-search API]
-      O[Official public-record APIs]
+      O[Federal Register API]
       P[Approved platform APIs and public streams]
     end
 
     subgraph Collection[Collection layer]
       C[Source connectors]
       F[Canonical-page fetcher]
-      N[Normalizer and provenance recorder]
+      K[(Kafka and Apicurio)]
+      N[Document worker]
     end
 
     subgraph Processing[Processing layer]
@@ -70,7 +70,7 @@ flowchart TD
     end
 
     subgraph Product[Product layer]
-      S[(Development persistence and optional Redis)]
+      S[(PostgreSQL / pgvector and optional Redis)]
       A[FastAPI]
       U[React frontend]
     end
@@ -78,12 +78,13 @@ flowchart TD
     G --> C
     H --> C
     R -. planned .-> C
-    W -. planned .-> C
-    O -. planned .-> C
+    W --> C
+    O --> C
     P -. planned .-> C
-    C --> N
+    C --> K
     C -->|candidate URL requires evidence| F
-    F --> N
+    F --> K
+    K --> N
     N --> D
     D --> T
     D --> V
@@ -93,7 +94,7 @@ flowchart TD
     A --> U
 ```
 
-### Target production topology
+### Scaled production topology
 
 ```mermaid
 flowchart LR
@@ -205,9 +206,9 @@ After normalization, deterministic services perform:
 
 The system must preserve caveats from collection through synthesis. Provider coverage, failed fetches, missing official sources, uncertain dates, and duplicate syndication all affect confidence.
 
-## Target Kafka event architecture
+## Kafka event architecture
 
-Kafka is the planned durable production boundary, not the definition of a source connector:
+Kafka is the implemented durable production boundary, not the definition of a source connector:
 
 ```mermaid
 flowchart LR
@@ -223,7 +224,7 @@ flowchart LR
 
 A single versioned raw-document topic is preferred unless volume, retention, security, or ordering requirements justify source-specific topics. The event includes `provider`, `transport`, and `source_type`, so downstream consumers do not depend on connector deployment names.
 
-See [KAFKA.md](KAFKA.md) for the planned event contracts.
+See [KAFKA.md](KAFKA.md) for the implemented event contracts, retention, workers, DLQs, and replay commands.
 
 ## Storage evolution
 
@@ -262,5 +263,5 @@ No connector may bypass authentication, paywalls, technical access controls, or 
 | Evidence enrichment | Canonical HTTP retrieval | Preserves the source page behind aggregator metadata when permitted. |
 | Browser automation | Self-operated browser adapter selected by the investigator | Covers public rendered and interactive pages without making browser use mandatory. |
 | Agent observability | RhetoriQ-controlled traces and evaluations | Keeps investigation telemetry under project control without a managed-SaaS dependency. |
-| Production messaging | Versioned Kafka events, planned | Enables replay and independent scaling without leaking deployment names into schemas. |
+| Production messaging | Apache Kafka KRaft plus versioned JSON Schema events | Enables replay and independent scaling without leaking deployment names into schemas. |
 | Evidence language | “First observed in our dataset” | Coverage cannot prove true origin. |

@@ -1,10 +1,6 @@
 # RhetoriQ Testing
 
-The current MVP verification baseline is backend tests, Python compilation, the
-frontend production build, and the PostgreSQL migration check used by CI.
-Kafka, Flink, Elasticsearch, Neo4j, container integration, and browser
-end-to-end tests are not local prerequisites. Browser rendering is not part of
-the initial public deployment.
+The verification baseline is backend tests, Python compilation, schema snapshots, secret scanning, PostgreSQL migration tests, Kafka/Apicurio integration, frontend tests/build, Compose validation, and live B2 provider canaries. Flink, Elasticsearch, Neo4j, Kubernetes, and browser rendering remain outside B2/B3.
 
 ## Backend tests
 
@@ -45,6 +41,47 @@ cd frontend
 npm run build
 ```
 
+Frontend component tests:
+
+```powershell
+cd frontend
+npm test
+```
+
+## B2 provider verification
+
+`backend/tests/test_b2_research_tools.py` covers provider fixtures, malformed responses, retries, pagination, deduplication, source policy, canonical provenance, and visible fallback behavior. A live Federal Register probe can be run with:
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -c "from services.federal_register import FederalRegisterClient; from models.investigation import InvestigationPlanTimeWindow; print(FederalRegisterClient().search('public records', InvestigationPlanTimeWindow(label='recent'), limit=1).diagnostics)"
+```
+
+The SearXNG live canary requires the local Compose stack or a configured private SearXNG URL. A provider outage is a passing degradation case only when the returned diagnostics visibly identify the internal-corpus fallback.
+
+## B3 contract and integration verification
+
+Unit/contract coverage is in `backend/tests/test_b3_event_backbone.py`. It validates all schemas, outbox durability, raw-to-processed handling, payload-hash mismatch rejection, stage/completion event behavior, signal replay idempotency, compatibility configuration, permanent-failure classification, and redaction.
+
+Generate committed schema snapshots:
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m events.export_schemas
+```
+
+Validate and start the integration stack:
+
+```powershell
+$env:POSTGRES_PASSWORD="<local-secret>"
+$env:SEARXNG_SECRET="<local-secret>"
+docker compose config
+docker compose up --build -d
+docker compose ps
+```
+
+Then verify topic registration/compatibility, a raw-to-processed document, a queued investigation through ordered stage/completion events, duplicate delivery, every DLQ, restart recovery, and controlled replay. `GET /api/research/health` must show ready Kafka/registry/consumer components with numeric lag and DLQ counts.
+
 ## Documentation checks
 
 Before merging documentation changes, verify that project-authored Markdown has no conflict markers or mojibake and that all relative Markdown links resolve within the repository. The check may be run with the PowerShell command in the A1 completion record in [ROADMAP.md](ROADMAP.md).
@@ -64,6 +101,6 @@ cd backend
 
 Use `--write` after an intentional fixture or evaluator change. The committed [A2 scorecard](evaluation/A2_SCORECARD.md) must meet every contract threshold. It measures orchestration and publication discipline; A3 remains responsible for broader semantic investigation quality.
 
-## Future test layers
+## Remaining future test layers
 
-As Track B is implemented, add tests with the feature rather than documenting them as existing coverage: migration tests for PostgreSQL, fixture tests for source connectors, contract/replay tests for Kafka and Flink, and integration tests for specialized stores.
+B4 and later add deterministic Flink replay, specialized-store consistency, Kubernetes deployment, load, failure-injection, and restore tests with those features.

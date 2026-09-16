@@ -1,10 +1,21 @@
-# RhetoriQ Handoff - A5 Launch Closeout and B1 Next
+# RhetoriQ Handoff - B2/B3 Completion
 
 ## Current status
 
-- **A1, A2, A3, and A4 are complete by product decision.** A5 launch evidence is still pending. B1 pgvector migration, backfill, cosine index, and feature-flagged retrieval were validated on the connected Neon target (8 integration tests passed). It remains opt-in until a live investigation corpus is backfilled and compared before production enablement.
+- **B2 is complete.** SearXNG broad discovery, canonical retrieval, Federal Register primary-source research, provenance receipts, provider policy, retries, pagination, deduplication, rate limiting, and explicit fallback diagnostics are implemented.
+- **B3 is implemented with an immediate Kafka cutover.** Six primary topics and six DLQs, committed JSON Schemas, Apicurio compatibility, KRaft Compose, transactional outbox, consumer ledger, retries/DLQs, replay, Kafka-only investigation dispatch, health/lag metrics, ordered stage events, and stable completion events are present. There is no synchronous production fallback.
+- **A1, A2, A3, and A4 remain complete by product decision.** A5 public launch evidence is still pending. B1 pgvector remains opt-in until a live investigation corpus is backfilled and compared before production enablement.
 - Do not re-open A3 unless requested. The project owner explicitly accepted the remaining 30-case curated-real-source corpus as future quality work, not a blocker.
 - The working tree was already dirty before A3. Preserve unrelated changes and do not reset/revert them.
+
+## B2/B3 verification and host note
+
+- Backend verification: 221 passing tests and 17 optional-runtime skips before the final documentation-only closeout; the focused B3 contract suite later passed 10/10.
+- Frontend: 4 tests passed and the production build completed successfully.
+- Compose configuration renders successfully with required local secrets supplied.
+- Live Federal Register canary: two current primary-source records, valid receipts, one page, no warning.
+- Docker Desktop cannot start its Linux engine until the workstation is restarted. Docker reports `HCS_E_HYPERV_NOT_INSTALLED`; `wsl --install --no-distribution` completed successfully, so restart Windows and rerun the Compose integration/canary sequence in `docs/TESTING.md`. If the error persists, enable firmware virtualization.
+- `backend/test_redis_connection.py` no longer contains a credential and reads `REDIS_URL` only from the environment. The previously exposed external Redis credential must still be rotated at its provider; source-code removal cannot revoke it.
 
 ## A3 decisions and implementation
 

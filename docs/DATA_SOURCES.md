@@ -27,8 +27,8 @@ The system must never imply that its earliest retrieved record is the true origi
 | SearXNG search adapter | Implemented | Self-hosted JSON search API | Discovery, corroboration, contradiction, provenance, official, and community lanes. |
 | Browser adapter | Implemented | Isolated local Playwright service | Bounded public navigation and JavaScript-rendered evidence. |
 | RSS/Atom | Planned later | Publisher feeds | Recurring publisher monitoring. |
-| Congress.gov | Planned for B2 selection | First-party public API | Agent-queryable legislative material. |
-| Federal Register | Planned for B2 selection | First-party public API | Agent-queryable rules, notices, and presidential documents. |
+| Congress.gov | Candidate for later expansion | First-party public API | Legislative material after a separate policy review. |
+| Federal Register | Implemented | First-party public API | Agent-queryable rules, notices, proposed rules, and presidential documents. |
 | Bluesky | Planned later | Jetstream/public AT Protocol stream | Recurring public-social monitoring and early narrative signals. |
 | Reddit | Conditional | Official Data API | Community signals only after access and terms review. |
 | YouTube | Conditional | First-party Data API | Video/channel discovery and metadata; transcript access requires separate validation. |
@@ -95,6 +95,16 @@ The LangGraph investigator chooses SearXNG, the isolated browser adapter, or int
 
 Search results are discovery receipts, not complete evidence. Canonical pages remain the preferred evidence record. Browser-derived content is normalized through the same page and receipt pipeline; page text is untrusted content, never tool instruction.
 
+The approved broad-search provider is a self-operated SearXNG deployment. Its results may be retained for at most the raw-event default of 7 days unless the underlying provider or publisher policy requires less. Discovery snippets are not citable evidence and are promoted only after canonical retrieval succeeds. An unavailable or malformed search provider produces `SearchProviderUnavailable` with visible internal-corpus fallback diagnostics; it is never silently replaced by a model-native search path.
+
+### Federal Register primary-source lane
+
+Implementation: `backend/services/federal_register.py`
+
+Federal Register is approved as the B2 first-party public-record API. The client preserves document number, query and page context, canonical HTML/PDF links, agencies, citation/docket metadata, publication and collection timestamps, retrieval diagnostics, and limitations. It applies bounded retries, pagination, deduplication, and provider rate limiting. API metadata and abstracts are citable as primary-source records, while the receipt warns that FederalRegister.gov is an informational rendition and links legal reliance to the official GovInfo PDF.
+
+Retention is limited to the processed-document default of 30 days in Kafka and the project’s public-record corpus policy in PostgreSQL. A provider-specific requirement may shorten this period but cannot extend it. The policy decision is `allow`, based on first-party public-record access without authentication; credentials, authorization headers, and unrelated response data are never stored in receipts or events.
+
 ### RSS and Atom
 
 Feeds are preferred for monitored publishers because they offer stable item identifiers and incremental updates without crawling index pages. This is a later monitoring capability, not a B2 prerequisite.
@@ -114,7 +124,7 @@ Do not hard-code an outlet list as authoritative. Feed coverage should be config
 
 Official material should come from first-party sources whenever possible.
 
-For B2, select one first-party API as an agent-queryable primary-source lane. Candidate targets are:
+Federal Register is the selected B2 first-party API. Additional candidates for later expansion are:
 
 - Congress.gov API for legislative records, hearings, members, votes, and Congressional Record material;
 - Federal Register API for rules, notices, proposed rules, and presidential documents;

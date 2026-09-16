@@ -54,9 +54,7 @@ Invoke-WebRequest "$api/api/research/health" -UseBasicParsing
 ```
 
 - [ ] `GET /health` returns HTTP 200 and reports `demo_mode: false`.
-- [ ] `GET /api/research/health` returns HTTP 200 with SearXNG,
-  checkpointer, and embedded worker ready. The checkpointer probe confirms
-  connectivity to the configured Neon database.
+- [ ] `GET /api/research/health` returns HTTP 200 with SearXNG, checkpointer, Kafka, Apicurio, outbox, and every consumer group ready. Lag and DLQ counts are numeric; the checkpointer probe confirms connectivity to PostgreSQL.
 - [ ] The research health response confirms browser rendering is unavailable by
   configuration, rather than depending on a deployed browser service.
 

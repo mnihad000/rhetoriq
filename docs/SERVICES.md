@@ -4,20 +4,22 @@ This document describes the service boundaries that exist in the repository and 
 
 ## Current runtime
 
-The current backend runs as one FastAPI process with modular agents and services. In non-demo mode, an in-process background thread periodically refreshes trending data. These modules can later be separated into workers without changing their core contracts.
+The application is split into the FastAPI service, transactional outbox publisher, four role-scoped Kafka consumer services, PostgreSQL/pgvector, Apache Kafka, Apicurio Registry, SearXNG, and the frontend. The API never runs accepted ingestion or investigation jobs synchronously. A small in-process trending refresh remains separate from the B3 event backbone.
 
 | Area | Location | Responsibility |
 |---|---|---|
 | API | `backend/main.py`, `backend/api/` | HTTP routes, validation, and application startup. |
 | GDELT connector | `backend/services/gdelt.py` | Query GDELT DOC 2.0 and normalize article metadata. |
 | HN connector | `backend/services/hn_ingestion.py` | Query the Algolia HN API for stories. |
-| Ingestion coordinator | `backend/services/ingestion.py` | Run current connectors, persist partial successes, and report errors. |
-| Search provider boundary | `backend/services/search_provider.py` | Abstract discovery and enrichment search; currently unconfigured. |
+| Ingestion coordinator | `backend/services/ingestion.py` | Run current connectors and atomically stage raw events through the outbox. |
+| Search provider boundary | `backend/services/search_provider.py` | SearXNG discovery with explicit unavailable/fallback diagnostics. |
+| Federal Register client | `backend/services/federal_register.py` | First-party public-record retrieval, receipts, policy, retries, and pagination. |
 | Discovery agent | `backend/agents/discovery_agent.py` | Generate queries, deduplicate candidates, fetch pages, and normalize evidence. |
 | Page fetcher | `backend/services/page_fetcher.py` | Retrieve canonical HTML with redirect, timeout, content-type, and cache handling. |
 | Document normalizer | `backend/services/document_normalizer.py` | Map HTML and provider metadata into the shared `Document` model. |
 | Trending pipeline | `backend/services/trending_*.py` | Discover, rank, cache, and serve live narrative topics. |
-| Investigation pipeline | `backend/agents/`, `backend/services/research_loop_runner.py` | Plan retrieval lanes and build evidence-limited artifacts. |
+| Event contracts/runtime | `backend/models/events.py`, `backend/events/`, `backend/services/event_*.py` | Schemas, topics, outbox, consumers, retries, DLQs, replay, and health. |
+| Investigation pipeline | `backend/agents/`, `backend/services/autonomous_research.py` | Consume queued requests and build evidence-limited artifacts under durable leases. |
 | Persistence | repository, store, cache, and Redis modules | Development documents, investigations, cache, vectors, and memory. |
 | Frontend | `frontend/` | Investigation workspace and narrative views. |
 
@@ -28,25 +30,28 @@ sequenceDiagram
     participant API
     participant Coordinator
     participant Connector
+    participant Outbox
+    participant Kafka
+    participant Worker
     participant Store
-    participant Investigator
-    participant Fetcher
 
     API->>Coordinator: ingest(query, time window)
     Coordinator->>Connector: GDELT and HN queries
-    Connector-->>Coordinator: normalized Documents or provider error
-    Coordinator->>Store: save successful documents
-    API->>Investigator: run investigation
-    Investigator->>Fetcher: fetch discovered canonical URLs
-    Fetcher-->>Investigator: RawPage or FetchFailure
-    Investigator->>Store: save normalized evidence and artifacts
+    Connector-->>Coordinator: acquisition records or provider error
+    Coordinator->>Outbox: raw.documents.v1
+    Outbox->>Kafka: publish after commit
+    Kafka->>Worker: normalize and persist
+    Worker->>Store: canonical Document and research receipt
+    API->>Outbox: investigations.requested.v1
+    Kafka->>Worker: execute leased run once
+    Worker->>Outbox: ordered stage and completion events
 ```
 
 Provider errors are isolated and returned as partial failures. A failed source must not discard successful records from another source.
 
 ## B2 agent research-tool boundary
 
-B2 strengthens the tools an investigation can use synchronously: broad web search, canonical-page retrieval, internal-corpus recall, and one approved first-party public-record API. The planner selects a tool per evidence gap, and each tool returns normalized documents or discovery receipts with explicit limitations. B2 does not add a scheduled feed worker, public-stream consumer, or separate connector deployment.
+B2 provides broad web search, canonical-page retrieval, internal-corpus recall, and the Federal Register first-party public-record API. The planner selects a tool per evidence gap. Tools return transport-neutral acquisition records and receipts; the Kafka document pipeline owns normalization and persistence. Non-storing source searches remain synchronous reads, but storing research evidence does not bypass the event backbone.
 
 The research-tool boundary must preserve:
 
@@ -70,24 +75,25 @@ When continuous monitoring is required, scheduled connectors should share:
 
 A connector name identifies the provider (`gdelt`, `hn_algolia`, `rss`, `congress`); it must not determine the evidence source type. A GDELT result, for example, can represent national news, local news, commentary, or a blog.
 
-## Planned workers
+## Kafka workers
 
-These are roadmap targets, not current deployable directories:
+These workers are deployable in `compose.yml`:
 
 | Worker | Input | Output | Notes |
 |---|---|---|---|
 | Connector workers | APIs, feeds, streams, approved URLs | `raw.documents.v1` | Independently checkpointed and scalable. |
 | Normalization worker | Raw document events | `documents.processed.v1` | Validates, deduplicates, classifies, and enriches. |
-| Signal worker | Processed documents | `signals.detected.v1` | Maintains baselines and emits evidence-backed spikes. |
+| Signal worker | `signals.detected.v1` | Authorized investigation requests | Idempotently schedules only signals with `auto_investigate=true`. |
 | Persistence workers | Processed events and artifacts | Durable stores/indexes | Idempotent writes keyed by event/document ID. |
 | Investigation worker | User requests or detected signals | Stage events and completed reports | Executes supervised research loops. |
-| API service | Durable stores and events | REST/WebSocket responses | Does not directly poll source providers. |
+| Projection worker | Stage and completion events | Consumer delivery ledger | Projects/acknowledges durable audit events without duplicating authoritative state. |
+| API service | Durable stores and outbox | REST/SSE responses | Returns HTTP 202 for stored ingestion and investigation execution. |
 
 The production deployment may group low-volume connectors into one worker or isolate high-volume/regulated connectors. Deployment topology should follow scaling and compliance needs, not a rule that every source requires its own microservice.
 
-## Planned autonomous research runtime
+## Autonomous research runtime
 
-The next major runtime is a LangGraph workflow, documented in [AGENTS.md](AGENTS.md). It will replace the fixed retrieval orchestration while retaining the existing normalization, retrieval, receipts, confidence, and workspace services.
+The LangGraph workflow is implemented and is launched exclusively by the `investigations.requested.v1` consumer. It retains normalization, retrieval, receipts, confidence, durable stage mutations, leases, recovery, and workspace services.
 
 The graph supervisor will choose among:
 
@@ -139,11 +145,20 @@ cd frontend
 npm run build
 ```
 
-Kafka, Flink, connector worker processes, and production databases should not be included in local startup instructions until their implementations and manifests exist.
+Full local stack:
+
+```powershell
+$env:POSTGRES_PASSWORD="<local-secret>"
+$env:SEARXNG_SECRET="<local-secret>"
+docker compose up --build -d
+docker compose ps
+```
+
+Kafka, Apicurio, topic initialization, the outbox publisher, all event workers, PostgreSQL, SearXNG, API, and frontend are defined in the root Compose file. Flink, Elasticsearch, Neo4j, and Kubernetes remain later milestones.
 
 ## Health and observability
 
-Current health endpoints cover the API, embeddings, and optional Redis capabilities. Production connector health should add:
+`GET /api/research/health` covers API dependencies plus Kafka broker/registry availability, outbox backlog, publish/consume retry counts, consumer-group state and lag, and per-topic DLQ depth. Provider health includes explicit fallback information. Future recurring connectors should also add:
 
 - last attempted and successful collection time;
 - current checkpoint or cursor age;
@@ -151,5 +166,4 @@ Current health endpoints cover the API, embeddings, and optional Redis capabilit
 - retry and rate-limit counts;
 - quota remaining when exposed by the provider;
 - canonical-fetch success by domain;
-- deletion-sync lag where applicable;
-- Kafka producer lag and dead-letter counts after event-driven ingestion is implemented.
+- deletion-sync lag where provider policy requires it.

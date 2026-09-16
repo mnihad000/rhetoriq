@@ -5,7 +5,7 @@ RhetoriQ already has a working, tested MVP. This roadmap separates that product 
 The two tracks are intentionally developed together:
 
 - The **Product and Agent Track** turns the current MVP into a polished, deployable resume project.
-- The **Production Architecture Track** evolves the MVP toward Kafka, Flink, specialized databases, Kubernetes, and cloud infrastructure.
+- The **Production Architecture Track** now includes PostgreSQL/pgvector, B2 research acquisition, and the B3 Kafka backbone; it continues toward Flink, specialized databases, Kubernetes, and cloud operations.
 
 Status labels used throughout this document:
 
@@ -87,7 +87,7 @@ The current repository is a functional narrative-investigation MVP, not an empty
 
 The A2 runtime supports SearXNG discovery, but its availability on the reported public deployment is not yet verified in the A5 evidence record. The initial production topology excludes browser rendering; JavaScript-only sources remain a recorded retrieval limitation. The planner and retriever determine queries, follow-up searches, and retrieval lanes through the `SearchProvider` abstraction.
 
-The current MVP includes LangGraph, production containers, and a PostgreSQL persistence path. It does **not** claim that React Query, Sigma.js, WebSockets, Kafka, Flink, Elasticsearch, Neo4j, Kubernetes, Terraform, ArgoCD, Prometheus, or Grafana are implemented. The pgvector corpus path is opt-in and awaits Neon rollout verification.
+The current repository includes LangGraph, production containers, PostgreSQL/pgvector, and the B3 Kafka/Apicurio event backbone. It does **not** claim that React Query, Sigma.js, WebSockets, Flink, Elasticsearch, Neo4j, Kubernetes, Terraform, ArgoCD, Prometheus, or Grafana are implemented. The pgvector corpus path is opt-in and awaits production corpus rollout verification.
 
 ---
 
@@ -145,7 +145,7 @@ A live investigation can start from a user question, autonomously choose permitt
 
 #### Implementation record (2026-07-31)
 
-The repository now contains the LangGraph state graph, separate SQLite checkpointer, leased embedded/worker scheduler, idempotent action recovery, SearXNG/GDELT/Hacker News/canonical/browser/internal adapters, shared public-network policy, deterministic publication gate, recorded replay, audit APIs, SSE stream, interactive React Flow console, isolated research Compose stack, and the versioned 14-fixture A2 scorecard.
+The repository now contains the LangGraph state graph, durable checkpointer, Kafka-backed leased scheduler, idempotent action recovery, SearXNG/GDELT/Hacker News/canonical/browser/internal adapters, shared public-network policy, deterministic publication gate, recorded replay, audit APIs, SSE stream, interactive React Flow console, and the versioned 14-fixture A2 scorecard.
 
 The phase is **Completed**. The implementation passes the full backend regression suite, frontend production build, dependency and compilation checks, Compose configuration validation, deterministic graph/recovery/replay tests, and every threshold in the committed 14-fixture A2 scorecard. Live provider demonstrations remain repeatable portfolio evidence rather than a blocker to the completed implementation phase.
 
@@ -302,7 +302,7 @@ migration remains a separate compatibility and data-migration milestone.
 
 ### B2. Agent-Led Web Research and Primary Sources
 
-**Status: Planned**
+**Status: Completed (2026-09-16)**
 
 **Estimate: 3–5 weeks**
 
@@ -326,11 +326,15 @@ migration remains a separate compatibility and data-migration milestone.
 
 An investigation can answer a new user question by selecting permitted live-web and primary-source tools, fetching canonical evidence where permitted, and persisting an auditable, schema-valid evidence trail. Tests cover tool selection, source-policy enforcement, malformed/provider-failure handling, deduplication, and the visible fallback when live search is unavailable. Scheduled monitoring connectors are explicitly out of scope.
 
+#### Implementation record (2026-09-16)
+
+The broad-search boundary now has an explicit SearXNG implementation and an explicit `SearchProviderUnavailable` result with internal-corpus fallback diagnostics. Canonical retrieval and the Federal Register first-party client preserve provider/native IDs, queries and cursors, canonical URLs, publication and collection timestamps, policy decisions, retrieval outcomes, evidence status, receipts, and limitations. Provider HTTP behavior includes bounded retries, jittered backoff, pagination, deduplication, and rate limiting. Retrieval tools produce transport-neutral acquisition records; Kafka normalization owns durable document persistence. Fixture coverage includes malformed responses, retries, pagination, policy enforcement, canonical provenance, and visible fallback behavior. A live Federal Register canary returned two schema-valid primary-source receipts on 2026-09-16.
+
 ---
 
 ### B3. Kafka Contracts and Replayable Ingestion
 
-**Status: Planned**
+**Status: Implemented (2026-09-16; local Compose evidence pending Windows restart)**
 
 **Estimate: 2–3 weeks**
 
@@ -348,6 +352,12 @@ An investigation can answer a new user question by selecting permitted live-web 
 #### Completion condition
 
 A source event can be produced, consumed, replayed, and processed idempotently; incompatible schemas are rejected; and failed messages reach a dead-letter topic with diagnostic context.
+
+#### Implementation record (2026-09-16)
+
+The repository now implements the six versioned JSON Schema contracts and one `.dlq.v1` topic per consumed topic, committed Pydantic-generated schemas, Apicurio Confluent-compatible registration with `BACKWARD_TRANSITIVE` compatibility, Apache Kafka KRaft Compose services, transactional outbox and consumer ledgers, idempotent producers and consumers, bounded retry/DLQ behavior, audited controlled replay, Kafka-only investigation dispatch, ordered stage events, and exactly-one completion-event IDs. Ingestion and investigation run APIs return HTTP 202 after atomically queuing durable outbox work; no synchronous production fallback remains. Health reports broker/registry state, outbox backlog, retry counters, consumer-group state and lag, and DLQ depth.
+
+The implementation and non-container verification gates are complete. On this workstation, `wsl --install --no-distribution` successfully enabled the required Windows component, but Docker Desktop still reports `HCS_E_HYPERV_NOT_INSTALLED` until Windows is restarted (or firmware virtualization is enabled if the error persists). The Compose end-to-end evidence and local SearXNG canary must be captured after that host restart; this is an environment verification item, not an application fallback.
 
 ---
 
@@ -506,8 +516,8 @@ Product and infrastructure work should alternate so the project remains demoable
 | 4 | A4 Frontend completion | Completed |
 | 5 | A5 Deployable MVP foundation, including PostgreSQL persistence | In Progress |
 | 6 | B1 pgvector migration and PostgreSQL hardening | In Progress |
-| 7 | B2 Agent-led web research and primary sources | Planned |
-| 8 | B3 Kafka contracts and replayable ingestion | Planned |
+| 7 | B2 Agent-led web research and primary sources | Completed |
+| 8 | B3 Kafka contracts and replayable ingestion | Implemented; Compose evidence pending host restart |
 | 9 | B4 Flink processing and anomaly detection | Planned |
 | 10 | B5 Elasticsearch and Neo4j | Planned |
 | 11 | B6 Kubernetes local deployment | Planned |

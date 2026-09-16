@@ -36,7 +36,7 @@ Investigation routes support retrieval, supervised runs, source-diversity, timel
 - `DEMO_MODE=true` is the default. It serves the demo-friendly experience and disables automatic background trending refreshes.
 - With `DEMO_MODE=false`, the backend warms and periodically refreshes the trending feed. GDELT and Hacker News ingestion are the implemented live discovery paths.
 - `RESEARCH_RUNTIME=langgraph` enables the durable A2 runtime. In local SQLite mode, checkpoints use a separate SQLite database; with `DATABASE_URL`, checkpoints and sanitized research records persist in PostgreSQL.
-- `RESEARCH_EXECUTION_MODE=embedded` uses a bounded executor in FastAPI. `worker` leaves queued work for `python -m research_worker`, which claims runs with renewable database leases.
+- Investigation execution is Kafka-only. The API atomically creates a queued run and `investigations.requested.v1` outbox event; the investigation consumer claims it with a renewable database lease. `python -m research_worker` is a legacy command name that launches that Kafka consumer, not a database-scanning fallback.
 - With `DEPLOYMENT_ENV=production`, `DATABASE_URL` is required. The API image runs committed migrations before starting FastAPI; the migration runner records applied versions in `schema_migrations` and is safe to invoke again.
 - Neon is the managed PostgreSQL target for the initial Railway deployment. Preserve Neon's TLS query parameter, normally `sslmode=require`, and keep the URL in Railway secret configuration.
 - The additive B1 semantic corpus uses the existing 384-dimensional `sentence-transformers/all-MiniLM-L6-v2` model and is selected by `ENABLE_POSTGRES_VECTOR_SEARCH`. Keep that flag `false` until the Neon migration and resumable backfill are verified; the existing retrieval path remains the fallback when it is false or unavailable.
@@ -62,7 +62,10 @@ Settings load from `backend/.env` when present. No `.env` file is required for t
 | `HN_SEARCH_URL`, `HN_DEFAULT_RESULTS` | configured defaults | Hacker News Algolia endpoint and result cap. |
 | `FETCH_TIMEOUT_SECONDS` | `20` | Canonical-page retrieval timeout. |
 | `RESEARCH_RUNTIME` | `auto` | `auto`, `native`, or `langgraph`. |
-| `RESEARCH_EXECUTION_MODE` | `embedded` | Embedded executor or separate worker. |
+| `RESEARCH_EXECUTION_MODE` | `kafka` | Deployment label; accepted runs always use Kafka. |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka bootstrap addresses. |
+| `KAFKA_SCHEMA_REGISTRY_URL` | `http://localhost:8081/apis/ccompat/v7` | Apicurio Confluent-compatible API. |
+| `KAFKA_SECURITY_PROTOCOL` | `PLAINTEXT` | Kafka security protocol; SASL/TLS credentials are optional environment secrets. |
 | `RESEARCH_CHECKPOINT_DB_PATH` | `langgraph.sqlite3` | Separate LangGraph checkpoint database. |
 | `SEARXNG_BASE_URL` | `http://127.0.0.1:8080` | Broad discovery service. |
 | `BROWSER_SERVICE_URL` | `http://127.0.0.1:8010` | Isolated renderer service. |
@@ -71,8 +74,8 @@ Do not put credentials in source control. See [Troubleshooting](TROUBLESHOOTING.
 
 ## Not yet implemented
 
-The current API has no authentication requirement, WebSocket stream, Kafka
-consumer, Elasticsearch client, or Neo4j client. Research progress is one-way
+The current API has no authentication requirement, WebSocket stream,
+Elasticsearch client, or Neo4j client. Research progress is one-way
 SSE with polling fallback. PostgreSQL persistence is supported for the A5
 deployment. B1 semantic pgvector corpus retrieval is available behind its
 feature flag but requires migration/backfill verification before production
