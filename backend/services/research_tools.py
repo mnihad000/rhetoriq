@@ -14,10 +14,12 @@ from models.document import Document
 from models.investigation import FetchFailure, InvestigationPlan, RawPage, SearchResult
 from models.research import ResearchActionDecision
 from services.document_normalizer import DocumentNormalizer
+from services.federal_register import FederalRegisterClient, FederalRegisterUnavailable
 from services.gdelt import GDELTIngestion
 from services.hn_ingestion import HNIngestion
 from services.ingestion import get_merged_documents
-from services.search_provider import SearxngSearchProvider
+from services.provider_http import retry_after_seconds
+from services.search_provider import SearchProvider, SearchProviderUnavailable, build_search_provider
 from services.url_policy import PublicUrlPolicy
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ class ToolOutcome:
     receipts: list[tuple[str, dict]] = field(default_factory=list)
     warning: str | None = None
     retryable: bool = False
+    retry_after_seconds: float | None = None
 
 
 class SafePageFetcher:
@@ -88,6 +91,7 @@ class SafePageFetcher:
             return FetchFailure(
                 url=url, error_type="http_status", message=str(exc), status_code=exc.response.status_code,
                 retryable=exc.response.status_code == 429 or exc.response.status_code >= 500,
+                retry_after_seconds=retry_after_seconds(exc.response.headers.get("Retry-After")),
             )
         except httpx.HTTPError as exc:
             return FetchFailure(url=url, error_type="http_error", message=str(exc), retryable=True)
@@ -128,12 +132,19 @@ class BrowserServiceClient:
 
 
 class ResearchToolRegistry:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        search_provider: SearchProvider | None = None,
+        federal_register: FederalRegisterClient | None = None,
+        fetcher: SafePageFetcher | None = None,
+    ) -> None:
         self.settings = get_settings()
-        self.search = SearxngSearchProvider()
+        self.search = search_provider or build_search_provider()
+        self.federal_register = federal_register or FederalRegisterClient()
         self.gdelt = GDELTIngestion()
         self.hn = HNIngestion()
-        self.fetcher = SafePageFetcher()
+        self.fetcher = fetcher or SafePageFetcher()
         self.browser = BrowserServiceClient()
         self.normalizer = DocumentNormalizer()
         self._internal_search_warning: str | None = None
@@ -150,22 +161,69 @@ class ResearchToolRegistry:
                 warning="Browser rendering is disabled for this deployment; use accessible canonical sources.",
             )
         if decision.action_type == "web_search":
-            results = self.search.search(
-                decision.query or plan.query_text,
-                plan.time_window,
-                decision.requested_source_classes or plan.target_source_types,
-                self.settings.RESEARCH_SEARCH_RESULTS_PER_ACTION,
-            )
-            diagnostics = self.search.last_diagnostics
-            partial = bool(diagnostics.get("unresponsive_engines"))
+            query = decision.query or plan.query_text
+            try:
+                results = self.search.search(
+                    query,
+                    plan.time_window,
+                    decision.requested_source_classes or plan.target_source_types,
+                    self.settings.RESEARCH_SEARCH_RESULTS_PER_ACTION,
+                )
+                diagnostics = self.search.health()
+            except SearchProviderUnavailable as exc:
+                diagnostics = {
+                    **exc.diagnostics,
+                    "fallback": "internal_corpus",
+                    "visible_limitation": (
+                        "Live broad-web discovery was unavailable; internal-corpus recall can continue, "
+                        "but it cannot establish current web coverage."
+                    ),
+                }
+                return ToolOutcome(
+                    provider=self.search.name,
+                    receipts=[("provider_status", diagnostics)],
+                    warning=(
+                        "live_web_search_unavailable: internal corpus fallback remains available; "
+                        "current broad-web coverage is limited."
+                    ),
+                    retryable=False,
+                )
+            partial = diagnostics.get("outcome") == "partial"
             return ToolOutcome(
-                provider="searxng",
+                provider=self.search.name,
                 candidates=results,
                 receipts=[
-                    *[("discovery", item.model_dump(mode="json")) for item in results],
+                    *[("discovery", _discovery_receipt(item)) for item in results],
                     ("provider_status", diagnostics),
                 ],
-                warning="SearXNG returned partial engine failures." if partial else None,
+                warning="Broad-web search returned partial or malformed-engine results." if partial else None,
+            )
+        if decision.action_type == "federal_register_search":
+            query = decision.query or plan.query_text
+            try:
+                batch = self.federal_register.search(
+                    query,
+                    plan.time_window,
+                    limit=self.settings.RESEARCH_SEARCH_RESULTS_PER_ACTION,
+                )
+            except FederalRegisterUnavailable as exc:
+                return ToolOutcome(
+                    provider="federal_register",
+                    receipts=[("provider_status", exc.diagnostics)],
+                    warning=(
+                        "federal_register_unavailable: the first-party public-record lane failed; "
+                        "official-source coverage is limited."
+                    ),
+                    retryable=False,
+                )
+            return ToolOutcome(
+                provider="federal_register",
+                documents=batch.documents,
+                receipts=[
+                    *[("primary_source", receipt) for receipt in batch.receipts],
+                    ("provider_status", batch.diagnostics),
+                ],
+                warning=batch.warning,
             )
         if decision.action_type == "gdelt_search":
             end = datetime.now(timezone.utc)
@@ -174,9 +232,7 @@ class ResearchToolRegistry:
                 decision.query or plan.query_text, start, end,
                 max_records=self.settings.RESEARCH_SEARCH_RESULTS_PER_ACTION,
             )
-            return ToolOutcome(
-                provider="gdelt",
-                candidates=[
+            gdelt_candidates = [
                     SearchResult(
                         query=decision.query or plan.query_text,
                         title=item.title,
@@ -189,12 +245,18 @@ class ResearchToolRegistry:
                             "published_at": item.published_at.isoformat() if item.published_at else None,
                             "source_native_metadata": item.metadata or {},
                             "requires_canonical_revalidation": True,
+                            "canonical_url": item.url,
+                            "collected_at": item.collected_at.isoformat() if item.collected_at else datetime.now(timezone.utc).isoformat(),
+                            "evidence_status": "discovery_only",
                         },
                     )
                     for index, item in enumerate(documents, start=1)
                     if item.url
-                ],
-                receipts=[("discovery", {"query": decision.query, "url": item.url, "title": item.title, "provider": "gdelt"}) for item in documents],
+                ]
+            return ToolOutcome(
+                provider="gdelt",
+                candidates=gdelt_candidates,
+                receipts=[("discovery", _discovery_receipt(item)) for item in gdelt_candidates],
             )
         if decision.action_type == "hacker_news_search":
             end = datetime.now(timezone.utc)
@@ -203,9 +265,7 @@ class ResearchToolRegistry:
                 decision.query or plan.query_text, start, end,
                 num_results=self.settings.RESEARCH_SEARCH_RESULTS_PER_ACTION,
             )
-            return ToolOutcome(
-                provider="hacker_news",
-                candidates=[
+            hn_candidates = [
                     SearchResult(
                         query=decision.query or plan.query_text,
                         title=item.title,
@@ -218,12 +278,18 @@ class ResearchToolRegistry:
                             "published_at": item.published_at.isoformat() if item.published_at else None,
                             "source_native_metadata": item.metadata or {},
                             "requires_canonical_revalidation": True,
+                            "canonical_url": item.url,
+                            "collected_at": item.collected_at.isoformat() if item.collected_at else datetime.now(timezone.utc).isoformat(),
+                            "evidence_status": "discovery_only",
                         },
                     )
                     for index, item in enumerate(documents, start=1)
                     if item.url
-                ],
-                receipts=[("discovery", {"query": decision.query, "url": item.url, "title": item.title, "provider": "hacker_news"}) for item in documents],
+                ]
+            return ToolOutcome(
+                provider="hacker_news",
+                candidates=hn_candidates,
+                receipts=[("discovery", _discovery_receipt(item)) for item in hn_candidates],
             )
         if decision.action_type == "internal_search":
             documents = self._internal_search(decision.query or plan.query_text)
@@ -262,26 +328,81 @@ class ResearchToolRegistry:
                 return ToolOutcome(provider="policy", warning="Selected discovery candidate no longer exists.")
             fetched = self.browser.fetch(result.url) if decision.action_type == "browser_fetch" else self.fetcher.fetch(result.url)
             if isinstance(fetched, FetchFailure):
+                policy_decision = "block" if fetched.error_type == "policy_blocked" else "allow_attempt"
                 return ToolOutcome(
                     provider="browser" if decision.action_type == "browser_fetch" else "canonical",
-                    receipts=[("retrieval_failure", fetched.model_dump(mode="json"))],
+                    receipts=[("retrieval_failure", {
+                        "query": result.query,
+                        "provider": result.provider,
+                        "source_native_id": (result.metadata or {}).get("source_native_id")
+                        or (result.metadata or {}).get("source_document_id"),
+                        "rank": result.rank,
+                        "canonical_url": result.url,
+                        "publication_timestamp": (result.metadata or {}).get("published_at")
+                        or (result.metadata or {}).get("published_date"),
+                        "collection_timestamp": datetime.now(timezone.utc).isoformat(),
+                        "source_policy": {
+                            "decision": policy_decision,
+                            "basis": fetched.message if fetched.error_type == "policy_blocked" else "public_url_policy_passed",
+                            "citable": False,
+                        },
+                        "fetch_outcome": fetched.model_dump(mode="json"),
+                        "evidence_status": "discovery_only",
+                        "limitations": [f"Canonical retrieval failed: {fetched.error_type}."],
+                    })],
                     warning=f"{fetched.error_type}: {fetched.message}",
                     retryable=fetched.retryable,
+                    retry_after_seconds=fetched.retry_after_seconds,
                 )
             document = self.normalizer.normalize(fetched, plan, result)
+            source_policy = {
+                "decision": "allow",
+                "basis": "public_url_and_robots_checks_passed",
+                "public_access_only": True,
+                "citable": True,
+            }
+            fetch_outcome = {
+                "status": "success",
+                "http_status": fetched.status_code,
+                "final_url": fetched.final_url,
+            }
             document.metadata = {
                 **(document.metadata or {}),
                 "research_retrieval_lane": decision.retrieval_lane,
                 "research_action_summary": decision.action_summary,
                 "retrieval_transport": decision.action_type,
+                "source_native_id": (result.metadata or {}).get("source_native_id")
+                or (result.metadata or {}).get("source_document_id"),
+                "canonical_url": fetched.final_url,
+                "publication_timestamp": (
+                    document.published_at.isoformat() if document.published_at else (result.metadata or {}).get("published_at")
+                ),
+                "collection_timestamp": fetched.fetched_at.isoformat(),
+                "source_policy": source_policy,
+                "fetch_outcome": fetch_outcome,
+                "evidence_status": "canonical_evidence",
+                "acquisition_receipt_valid": True,
             }
             return ToolOutcome(
                 provider="browser" if decision.action_type == "browser_fetch" else "canonical",
                 documents=[document],
                 receipts=[("retrieval", {
-                    "url": fetched.url, "final_url": fetched.final_url, "status_code": fetched.status_code,
-                    "content_type": fetched.content_type, "fetched_at": fetched.fetched_at.isoformat(),
-                    "document_id": document.id, "parser_version": self.settings.DOCUMENT_PARSER_VERSION,
+                    "query": result.query,
+                    "provider": result.provider,
+                    "source_native_id": (result.metadata or {}).get("source_native_id")
+                    or (result.metadata or {}).get("source_document_id"),
+                    "rank": result.rank,
+                    "url": fetched.url,
+                    "canonical_url": fetched.final_url,
+                    "publication_timestamp": document.published_at.isoformat() if document.published_at else None,
+                    "collection_timestamp": fetched.fetched_at.isoformat(),
+                    "content_type": fetched.content_type,
+                    "document_id": document.id,
+                    "parser_version": self.settings.DOCUMENT_PARSER_VERSION,
+                    "source_policy": source_policy,
+                    "fetch_outcome": fetch_outcome,
+                    "evidence_status": "canonical_evidence",
+                    "limitations": [],
                 })],
             )
         return ToolOutcome(provider="assessment")
@@ -357,3 +478,23 @@ class ResearchToolRegistry:
 
 def candidate_id(result: SearchResult) -> str:
     return ResearchToolRegistry._candidate_id(result)
+
+
+def _discovery_receipt(result: SearchResult) -> dict:
+    payload = result.model_dump(mode="json")
+    metadata = payload.get("metadata") or {}
+    return {
+        **payload,
+        "source_native_id": metadata.get("source_native_id") or metadata.get("source_document_id"),
+        "canonical_url": metadata.get("canonical_url") or result.url,
+        "publication_timestamp": metadata.get("published_at") or metadata.get("published_date"),
+        "collection_timestamp": metadata.get("collected_at") or datetime.now(timezone.utc).isoformat(),
+        "source_policy": metadata.get("source_policy") or {
+            "decision": "allow_discovery",
+            "basis": "approved_discovery_provider",
+            "citable": False,
+        },
+        "fetch_outcome": {"status": "not_fetched"},
+        "evidence_status": "discovery_only",
+        "limitations": ["Discovery metadata and snippets are not citable canonical evidence."],
+    }

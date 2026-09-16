@@ -1,0 +1,186 @@
+{
+  "$defs": {
+    "InvestigationPlanTimeWindow": {
+      "properties": {
+        "end": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End"
+        },
+        "label": {
+          "default": "unknown",
+          "enum": [
+            "today",
+            "this_week",
+            "this_month",
+            "recent",
+            "all_time",
+            "custom",
+            "unknown"
+          ],
+          "title": "Label",
+          "type": "string"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start"
+        }
+      },
+      "title": "InvestigationPlanTimeWindow",
+      "type": "object"
+    },
+    "InvestigationRequestedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "authorization_context": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Authorization Context",
+          "type": "object"
+        },
+        "force_refresh": {
+          "default": false,
+          "title": "Force Refresh",
+          "type": "boolean"
+        },
+        "investigation_id": {
+          "title": "Investigation Id",
+          "type": "string"
+        },
+        "query_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Query Text"
+        },
+        "requested_outputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requested Outputs",
+          "type": "array"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "signal_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signal Id"
+        },
+        "source_classes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Classes",
+          "type": "array"
+        },
+        "time_window": {
+          "$ref": "#/$defs/InvestigationPlanTimeWindow"
+        }
+      },
+      "required": [
+        "investigation_id",
+        "run_id"
+      ],
+      "title": "InvestigationRequestedPayload",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "causation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Causation Id"
+    },
+    "correlation_id": {
+      "title": "Correlation Id",
+      "type": "string"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "title": "Event Type",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "partition_key": {
+      "title": "Partition Key",
+      "type": "string"
+    },
+    "payload": {
+      "$ref": "#/$defs/InvestigationRequestedPayload"
+    },
+    "produced_at": {
+      "format": "date-time",
+      "title": "Produced At",
+      "type": "string"
+    },
+    "producer": {
+      "title": "Producer",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "produced_at",
+    "producer",
+    "correlation_id",
+    "partition_key",
+    "payload"
+  ],
+  "title": "InvestigationRequestedEvent",
+  "type": "object"
+}

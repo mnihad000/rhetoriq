@@ -12,6 +12,7 @@ from config import get_settings
 from demo_data import ALL_DOCUMENTS
 from models.research import ReplayResponse, ResearchTrailResponse
 from services.autonomous_research import get_research_manager, get_research_repository
+from services.event_store import EventStore
 
 router = APIRouter(prefix="/api")
 
@@ -20,6 +21,18 @@ router = APIRouter(prefix="/api")
 def research_health() -> dict:
     settings = get_settings()
     components: dict[str, dict] = {}
+    event_store = EventStore(settings.persistence_target)
+    components["outbox"] = event_store.health()
+    try:
+        from services.kafka_runtime import KafkaEventPublisher, SchemaRegistry, kafka_consumer_health
+        components["kafka"] = KafkaEventPublisher().health()
+        components["schema_registry"] = SchemaRegistry().health()
+        components["event_consumers"] = kafka_consumer_health(settings)
+    except Exception as exc:
+        unavailable = {"status": "unavailable", "detail": str(exc)[:180]}
+        components["kafka"] = unavailable
+        components["schema_registry"] = unavailable
+        components["event_consumers"] = unavailable
     try:
         import langgraph
         components["langgraph"] = {"status": "ready"}
@@ -37,16 +50,42 @@ def research_health() -> dict:
         components["checkpointer"] = {"status": "ready"}
     except Exception as exc:
         components["checkpointer"] = {"status": "error", "detail": str(exc)}
-    service_urls = {"searxng": f"{settings.SEARXNG_BASE_URL.rstrip('/')}/search?q=rhetoriq&format=json"}
+    service_urls = {
+        "searxng": f"{settings.SEARXNG_BASE_URL.rstrip('/')}/search?q=rhetoriq&format=json",
+        "federal_register": (
+            f"{settings.FEDERAL_REGISTER_BASE_URL.rstrip('/')}/documents.json?"
+            "conditions%5Bterm%5D=public%20records&per_page=1"
+        ),
+    }
     if settings.BROWSER_RENDERING_ENABLED and settings.BROWSER_SERVICE_URL:
         service_urls["browser"] = f"{settings.BROWSER_SERVICE_URL.rstrip('/')}/health"
     for name, url in service_urls.items():
         try:
             headers = {"X-RhetoriQ-Browser-Token": settings.BROWSER_SERVICE_TOKEN} if name == "browser" and settings.BROWSER_SERVICE_TOKEN else {}
             response = httpx.get(url, headers=headers, timeout=2)
-            components[name] = {"status": "ready" if response.is_success else "unavailable", "http_status": response.status_code}
+            status = "ready" if response.is_success else "unavailable"
+            detail = None
+            if response.is_success and name in {"searxng", "federal_register"}:
+                try:
+                    payload = response.json()
+                    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+                        status = "unavailable"
+                        detail = "Provider returned a malformed response."
+                except ValueError:
+                    status = "unavailable"
+                    detail = "Provider returned malformed JSON."
+            components[name] = {
+                "status": status,
+                "http_status": response.status_code,
+                "detail": detail,
+                "fallback": "internal_corpus" if name == "searxng" else "broad_web_search",
+            }
         except Exception as exc:
-            components[name] = {"status": "unavailable", "detail": str(exc)[:180]}
+            components[name] = {
+                "status": "unavailable",
+                "detail": str(exc)[:180],
+                "fallback": "internal_corpus" if name == "searxng" else "broad_web_search",
+            }
     models = []
     if settings.GEMINI_API_KEY:
         models.append({"provider": "gemini", "model": settings.GEMINI_MODEL})
@@ -59,31 +98,35 @@ def research_health() -> dict:
     except Exception:
         pass
     components["models"] = {"status": "ready" if models else "fallback_only", "configured": models}
-    audit = get_research_repository()
-    workers = audit.recent_workers(max_age_seconds=settings.RESEARCH_LEASE_SECONDS)
-    if settings.RESEARCH_EXECUTION_MODE == "embedded":
-        components["worker"] = {"status": "ready", "mode": "embedded", "workers": workers}
-    else:
-        live_workers = [item for item in workers if item["mode"] == "worker"]
-        components["worker"] = {
-            "status": "ready" if live_workers else "unavailable",
-            "mode": "worker",
-            "workers": live_workers,
-        }
+    investigation_group = next(
+        (
+            group for group in components["event_consumers"].get("groups", [])
+            if group.get("role") == "investigations"
+        ),
+        None,
+    )
+    components["worker"] = {
+        "status": "ready" if investigation_group and investigation_group["state"] == "stable" else "unavailable",
+        "mode": "kafka",
+        "group": investigation_group,
+    }
     components["internal_retrieval"] = {
         "status": "ready",
         "normalized_document_count": len(ALL_DOCUMENTS),
         "vector_search_configured": settings.ENABLE_VECTOR_SEARCH,
     }
-    required = ["langgraph", "checkpointer", "worker", "internal_retrieval"]
-    if settings.RESEARCH_RUNTIME == "langgraph" and not settings.DEMO_MODE:
-        required.append("searxng")
+    required = [
+        "langgraph", "checkpointer", "worker", "internal_retrieval",
+        "outbox", "kafka", "schema_registry", "event_consumers",
+    ]
+    if settings.RESEARCH_RUNTIME in {"auto", "langgraph"} and not settings.DEMO_MODE:
+        required.extend(["searxng", "federal_register"])
         if settings.BROWSER_RENDERING_ENABLED:
             required.append("browser")
     return {
         "status": "ready" if all(components[name]["status"] == "ready" for name in required) else "degraded",
         "runtime": settings.RESEARCH_RUNTIME,
-        "execution_mode": settings.RESEARCH_EXECUTION_MODE,
+        "execution_mode": "kafka",
         "components": components,
     }
 

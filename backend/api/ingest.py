@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, field_validator
+from fastapi import APIRouter, HTTPException, Query, Response, status
+from pydantic import BaseModel, Field, field_validator
 
 from models.document import Document
 from services.document_store import live_store
@@ -43,6 +43,16 @@ class GDELTSearchResponse(BaseModel):
     first_observed_in_dataset: dict | None
 
 
+class IngestionSubmission(BaseModel):
+    collection_id: str
+    accepted_at: datetime
+    status: str
+    event_ids: list[str]
+    accepted_count: int
+    query: str
+    errors: list[str] = Field(default_factory=list)
+
+
 def _parse_date(date_str: str) -> datetime:
     try:
         return datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -50,8 +60,8 @@ def _parse_date(date_str: str) -> datetime:
         raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD format") from exc
 
 
-@router.post("/ingest")
-def ingest(request: IngestRequest) -> dict:
+@router.post("/ingest", response_model=IngestionSubmission, status_code=status.HTTP_202_ACCEPTED)
+def ingest(request: IngestRequest) -> IngestionSubmission:
     """
     Fetch real articles from GDELT + Hacker News for the given query and date range.
     Results are saved to the live DocumentStore and immediately available
@@ -69,17 +79,19 @@ def ingest(request: IngestRequest) -> dict:
     if end_dt <= start_dt:
         raise HTTPException(status_code=400, detail="end_date must be after start_date")
 
-    return _coordinator.ingest(
+    result = _coordinator.ingest(
         query=request.query,
         start_dt=start_dt,
         end_dt=end_dt,
         include_hn=request.include_hn,
         hn_num_results=request.hn_num_results,
     )
+    return IngestionSubmission.model_validate(result)
 
 
-@router.get("/gdelt/search", response_model=GDELTSearchResponse)
+@router.get("/gdelt/search", response_model=GDELTSearchResponse | IngestionSubmission)
 def gdelt_search(
+    response: Response,
     query: str = Query(..., min_length=2),
     start_date: str = Query(..., description="YYYY-MM-DD"),
     end_date: str = Query(..., description="YYYY-MM-DD"),
@@ -115,8 +127,24 @@ def gdelt_search(
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"GDELT request failed: {exc}") from exc
 
-    if store and documents:
-        live_store.save_batch(documents)
+    if store:
+        from uuid import uuid4
+        collection_id = f"collection_{uuid4().hex}"
+        event_ids = _coordinator.stage_documents(
+            documents,
+            producer="gdelt-search-api",
+            correlation_id=collection_id,
+        )
+        response.status_code = status.HTTP_202_ACCEPTED
+        return IngestionSubmission(
+            collection_id=collection_id,
+            accepted_at=datetime.now(timezone.utc),
+            status="queued",
+            event_ids=event_ids,
+            accepted_count=len(event_ids),
+            query=query,
+            errors=[],
+        )
 
     return GDELTSearchResponse(
         query=query,

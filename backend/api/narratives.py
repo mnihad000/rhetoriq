@@ -1,15 +1,11 @@
 import html
 import logging
 import re
-import threading
 from fastapi import APIRouter, HTTPException, Query
 from urllib.parse import urlparse
 from uuid import uuid4
 
 logger = logging.getLogger(__name__)
-
-# Tracks investigation IDs currently running in background threads
-_running_investigations: set[str] = set()
 
 from agents.receipts_agent import build_receipts as build_receipts_agent
 from agents.claim_counterpoint_agent import build_claim_counterpoints
@@ -66,9 +62,7 @@ from services.investigation_repository import InvestigationRepository
 from services.page_fetcher import get_page_fetcher
 from services.search_provider import CachedSearchProvider, build_search_provider
 from services.trending_cache import TrendingRedisCache
-from services.research_loop_runner import InvestigationRunner
 from services.autonomous_research import (
-    autonomous_runtime_enabled,
     get_research_manager,
     get_research_repository,
 )
@@ -440,13 +434,6 @@ def _build_retriever_agent() -> RetrieverAgent:
         repository=_investigation_repo,
         search_provider=provider,
         page_fetcher=get_page_fetcher(cache=cache),
-    )
-
-
-def _build_investigation_runner() -> InvestigationRunner:
-    return InvestigationRunner(
-        repository=_investigation_repo,
-        retriever=_build_retriever_agent(),
     )
 
 
@@ -848,6 +835,7 @@ def retrieve(investigation_id: str, request: RetrieveRequest) -> RetrievalResult
 @router.post(
     "/investigations/{investigation_id}/run",
     response_model=InvestigationWorkspace,
+    status_code=202,
 )
 def run_investigation(
     investigation_id: str,
@@ -864,49 +852,15 @@ def run_investigation(
     if workspace is None:
         raise HTTPException(status_code=404, detail=f"Investigation workspace for '{investigation_id}' not found.")
 
-    research_manager = get_research_manager()
-    same_repository = getattr(research_manager.repository, "_db_path", None) == getattr(_investigation_repo, "_db_path", None)
-    if autonomous_runtime_enabled() and same_repository:
-        run = research_manager.start(investigation_id, force_refresh=request.force_refresh)
-        if _investigation_cache:
-            _investigation_cache.invalidate(investigation_id)
-        return workspace.model_copy(update={"research_run": run})
+    run = get_research_manager().start(investigation_id, force_refresh=request.force_refresh)
+    if _investigation_cache:
+        _investigation_cache.invalidate(investigation_id)
+    return workspace.model_copy(update={"research_run": run})
 
-    # Already complete — return cached result
-    if workspace.research_loop and not request.force_refresh:
-        return workspace
 
-    # Already running in background — return current state so frontend can keep polling
-    if investigation_id in _running_investigations and not request.force_refresh:
-        return workspace
 
-    # Launch research loop in a background thread so this endpoint returns immediately.
-    # The frontend polls GET /api/investigations/{id} every few seconds for updates.
-    def _run_bg() -> None:
-        _running_investigations.add(investigation_id)
-        try:
-            _build_investigation_runner().run(
-                investigation_id=investigation_id,
-                plan=plan,
-                force_refresh=request.force_refresh,
-            )
-            if _investigation_cache:
-                _investigation_cache.invalidate(investigation_id)
-            logger.info("Research loop completed for %s", investigation_id)
-        except Exception as exc:
-            logger.error("Research loop failed for %s: %s", investigation_id, exc)
-        finally:
-            _running_investigations.discard(investigation_id)
 
-    thread = threading.Thread(
-        target=_run_bg,
-        daemon=True,
-        name=f"rq-run-{investigation_id[:8]}",
-    )
-    thread.start()
 
-    # Return current workspace so the frontend has something to render immediately
-    return workspace
 
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ ResearchActionType = Literal[
     "web_search",
     "gdelt_search",
     "hacker_news_search",
+    "federal_register_search",
     "canonical_fetch",
     "browser_fetch",
     "internal_search",
@@ -38,6 +39,7 @@ class ResearchBudgetLimits(BaseModel):
     canonical_fetches: int = 20
     browser_renders: int = 3
     internal_searches: int = 4
+    primary_source_queries: int = 4
     domain_requests: int = 4
     retries: int = 2
 
@@ -52,6 +54,7 @@ class ResearchBudgetUsage(BaseModel):
     canonical_fetches: int = 0
     browser_renders: int = 0
     internal_searches: int = 0
+    primary_source_queries: int = 0
     domain_requests: dict[str, int] = Field(default_factory=dict)
     retries: int = 0
 
@@ -70,7 +73,9 @@ class ResearchActionDecision(BaseModel):
 
     @model_validator(mode="after")
     def validate_target(self) -> "ResearchActionDecision":
-        if self.action_type in {"web_search", "gdelt_search", "hacker_news_search", "internal_search"} and not self.query:
+        if self.action_type in {
+            "web_search", "gdelt_search", "hacker_news_search", "federal_register_search", "internal_search"
+        } and not self.query:
             raise ValueError(f"{self.action_type} requires query")
         if self.action_type in {"canonical_fetch", "browser_fetch"} and not self.candidate_id:
             raise ValueError(f"{self.action_type} requires candidate_id")

@@ -1,0 +1,41 @@
+{
+  "results": [
+    {
+      "title": "Agency announces clean-energy rule",
+      "url": "https://example.gov/rule?utm_source=search",
+      "content": "The agency published a new final rule.",
+      "score": 4.2,
+      "engine": "brave",
+      "publishedDate": "2026-09-10T12:00:00Z",
+      "id": "search-native-1"
+    },
+    {
+      "title": "Duplicate tracking URL",
+      "url": "https://example.gov/rule?utm_medium=web#details",
+      "content": "Duplicate result.",
+      "score": 3.9,
+      "engine": "duckduckgo"
+    },
+    {
+      "url": "https://malformed.example/no-title",
+      "content": "Missing title."
+    },
+    {
+      "title": "Credential-bearing URL",
+      "url": "https://user:secret@example.com/private"
+    },
+    {
+      "title": "Unsupported URL",
+      "url": "ftp://example.com/file"
+    },
+    {
+      "title": "Independent analysis",
+      "url": "https://news.example.org/analysis#top",
+      "content": "Independent coverage of the rule.",
+      "score": 2.1,
+      "engines": ["brave", "duckduckgo"]
+    }
+  ],
+  "suggestions": ["clean energy regulation"],
+  "unresponsive_engines": []
+}

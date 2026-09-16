@@ -73,7 +73,9 @@ class Settings(BaseSettings):
     CLAIM_VERIFIER_SUPPORT_THRESHOLD: float = 0.58
     CLAIM_VERIFIER_AMBIGUOUS_LOW: float = 0.46
     CLAIM_VERIFIER_MAX_SPANS_PER_DOCUMENT: int = 3
-    RESEARCH_EXECUTION_MODE: str = "embedded"
+    # Retained as a deployment label for older configuration files. Execution
+    # is Kafka-only; no embedded or synchronous runtime is selected from this value.
+    RESEARCH_EXECUTION_MODE: str = "kafka"
     RESEARCH_CHECKPOINT_DB_PATH: str = "langgraph.sqlite3"
     RESEARCH_WORKER_CONCURRENCY: int = 2
     RESEARCH_LEASE_RENEW_SECONDS: int = 15
@@ -87,10 +89,38 @@ class Settings(BaseSettings):
     RESEARCH_MAX_CANONICAL_FETCHES: int = 20
     RESEARCH_MAX_BROWSER_RENDERS: int = 3
     RESEARCH_MAX_INTERNAL_SEARCHES: int = 4
+    RESEARCH_MAX_PRIMARY_SOURCE_QUERIES: int = 4
     RESEARCH_MAX_DOMAIN_REQUESTS: int = 4
     RESEARCH_MAX_RETRIES: int = 2
     RESEARCH_SEARCH_RESULTS_PER_ACTION: int = 8
     SEARXNG_BASE_URL: str = "http://127.0.0.1:8080"
+    SEARCH_PROVIDER_TIMEOUT_SECONDS: float = 12.0
+    SEARCH_PROVIDER_MAX_RETRIES: int = 2
+    SEARXNG_MIN_INTERVAL_SECONDS: float = 0.0
+    PROVIDER_RETRY_BACKOFF_SECONDS: float = 0.5
+    PROVIDER_MAX_BACKOFF_SECONDS: float = 5.0
+    FEDERAL_REGISTER_BASE_URL: str = "https://www.federalregister.gov/api/v1"
+    FEDERAL_REGISTER_TIMEOUT_SECONDS: float = 15.0
+    FEDERAL_REGISTER_MAX_RETRIES: int = 2
+    FEDERAL_REGISTER_PAGE_SIZE: int = 20
+    FEDERAL_REGISTER_MAX_PAGES: int = 2
+    FEDERAL_REGISTER_MIN_INTERVAL_SECONDS: float = 0.25
+    KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
+    KAFKA_SCHEMA_REGISTRY_URL: str = "http://localhost:8081/apis/ccompat/v7"
+    KAFKA_CLIENT_ID: str = "rhetoriq-api"
+    KAFKA_CONSUMER_GROUP_PREFIX: str = "rhetoriq"
+    KAFKA_TOPIC_PREFIX: str = ""
+    KAFKA_SECURITY_PROTOCOL: str = "PLAINTEXT"
+    KAFKA_SASL_MECHANISM: str = "PLAIN"
+    KAFKA_SASL_USERNAME: str = ""
+    KAFKA_SASL_PASSWORD: str = ""
+    KAFKA_RETRY_MAX_ATTEMPTS: int = 3
+    KAFKA_RETRY_BACKOFF_SECONDS: float = 0.5
+    KAFKA_REQUEST_TIMEOUT_SECONDS: float = 10.0
+    KAFKA_OUTBOX_BATCH_SIZE: int = 100
+    KAFKA_OUTBOX_POLL_SECONDS: float = 0.25
+    KAFKA_PROCESSED_WAIT_SECONDS: float = 20.0
+    KAFKA_WORKER_ROLE: str = "all"
     BROWSER_SERVICE_URL: str = "http://127.0.0.1:8010"
     BROWSER_SERVICE_TOKEN: str = ""
     BROWSER_RENDERING_ENABLED: bool = False
@@ -133,6 +163,16 @@ class Settings(BaseSettings):
             raise ValueError("INVESTIGATION_START_LIMIT_PER_HOUR cannot be negative")
         if self.REQUEST_RATE_LIMIT_MAX_CLIENTS < 1:
             raise ValueError("REQUEST_RATE_LIMIT_MAX_CLIENTS must be at least 1")
+        if self.SEARCH_PROVIDER_MAX_RETRIES < 0 or self.FEDERAL_REGISTER_MAX_RETRIES < 0:
+            raise ValueError("provider retry counts cannot be negative")
+        if self.FEDERAL_REGISTER_PAGE_SIZE < 1 or self.FEDERAL_REGISTER_MAX_PAGES < 1:
+            raise ValueError("Federal Register pagination limits must be positive")
+        if self.PROVIDER_RETRY_BACKOFF_SECONDS < 0 or self.PROVIDER_MAX_BACKOFF_SECONDS < 0:
+            raise ValueError("provider backoff values cannot be negative")
+        if self.KAFKA_RETRY_MAX_ATTEMPTS < 1:
+            raise ValueError("KAFKA_RETRY_MAX_ATTEMPTS must be at least 1")
+        if self.KAFKA_OUTBOX_BATCH_SIZE < 1:
+            raise ValueError("KAFKA_OUTBOX_BATCH_SIZE must be at least 1")
         if self.DATABASE_URL:
             return self
         db_path = Path(self.INVESTIGATION_DB_PATH)

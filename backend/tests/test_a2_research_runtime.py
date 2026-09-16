@@ -105,6 +105,7 @@ def test_precollected_graph_run_reaches_audited_terminal_state(tmp_path, monkeyp
     monkeypatch.setattr(settings, "DEMO_MODE", True)
     monkeypatch.setattr(settings, "ENABLE_VECTOR_SEARCH", False)
     monkeypatch.setattr(settings, "ENABLE_INVESTIGATION_CACHE", False)
+    monkeypatch.setattr(settings, "DATABASE_URL", "")
     monkeypatch.setattr(settings, "RESEARCH_CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite3"))
 
     db_path = str(tmp_path / "investigations.sqlite3")
@@ -148,13 +149,13 @@ def test_precollected_graph_run_reaches_audited_terminal_state(tmp_path, monkeyp
     monkeypatch.setattr(ResearchToolRegistry, "execute", forbid_network)
     manager = ResearchRunManager(repository, audit)
     replay = manager.replay("inv_graph", run.run_id)
+    manager.execute_queued(replay.run_id)
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         replay = audit.get_run(replay.run_id)
         if replay and replay.status not in {"queued", "running"}:
             break
         time.sleep(0.05)
-    manager.executor.shutdown(wait=True)
 
     assert replay is not None
     assert replay.status in {"completed", "insufficient_evidence"}

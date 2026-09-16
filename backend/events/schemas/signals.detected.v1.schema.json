@@ -1,0 +1,231 @@
+{
+  "$defs": {
+    "DetectedSignalPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "auto_investigate": {
+          "default": false,
+          "title": "Auto Investigate",
+          "type": "boolean"
+        },
+        "baseline_window": {
+          "$ref": "#/$defs/InvestigationPlanTimeWindow"
+        },
+        "canonical_phrase_id": {
+          "title": "Canonical Phrase Id",
+          "type": "string"
+        },
+        "coverage_limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Coverage Limitations",
+          "type": "array"
+        },
+        "observed_window": {
+          "$ref": "#/$defs/InvestigationPlanTimeWindow"
+        },
+        "origin_disclaimer": {
+          "default": "This signal identifies the first observation in the available dataset, not proven origin.",
+          "title": "Origin Disclaimer",
+          "type": "string"
+        },
+        "publisher_diversity": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Publisher Diversity",
+          "type": "integer"
+        },
+        "query_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Query Text"
+        },
+        "related_phrase_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Phrase Ids",
+          "type": "array"
+        },
+        "score": {
+          "$ref": "#/$defs/SignalScore"
+        },
+        "signal_id": {
+          "title": "Signal Id",
+          "type": "string"
+        },
+        "source_diversity": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Source Diversity",
+          "type": "integer"
+        },
+        "supporting_document_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supporting Document Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "signal_id",
+        "canonical_phrase_id",
+        "observed_window",
+        "baseline_window",
+        "score"
+      ],
+      "title": "DetectedSignalPayload",
+      "type": "object"
+    },
+    "InvestigationPlanTimeWindow": {
+      "properties": {
+        "end": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End"
+        },
+        "label": {
+          "default": "unknown",
+          "enum": [
+            "today",
+            "this_week",
+            "this_month",
+            "recent",
+            "all_time",
+            "custom",
+            "unknown"
+          ],
+          "title": "Label",
+          "type": "string"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start"
+        }
+      },
+      "title": "InvestigationPlanTimeWindow",
+      "type": "object"
+    },
+    "SignalScore": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_count": {
+          "minimum": 0,
+          "title": "Baseline Count",
+          "type": "integer"
+        },
+        "confidence": {
+          "title": "Confidence",
+          "type": "number"
+        },
+        "observed_count": {
+          "minimum": 0,
+          "title": "Observed Count",
+          "type": "integer"
+        },
+        "spike": {
+          "title": "Spike",
+          "type": "number"
+        }
+      },
+      "required": [
+        "spike",
+        "confidence",
+        "observed_count",
+        "baseline_count"
+      ],
+      "title": "SignalScore",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "causation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Causation Id"
+    },
+    "correlation_id": {
+      "title": "Correlation Id",
+      "type": "string"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "title": "Event Type",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "partition_key": {
+      "title": "Partition Key",
+      "type": "string"
+    },
+    "payload": {
+      "$ref": "#/$defs/DetectedSignalPayload"
+    },
+    "produced_at": {
+      "format": "date-time",
+      "title": "Produced At",
+      "type": "string"
+    },
+    "producer": {
+      "title": "Producer",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "produced_at",
+    "producer",
+    "correlation_id",
+    "partition_key",
+    "payload"
+  ],
+  "title": "DetectedSignalEvent",
+  "type": "object"
+}

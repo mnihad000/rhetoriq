@@ -54,9 +54,9 @@ class SourceProfileEnricher:
         content_form = "unknown"
         confidence = "low"
 
-        if document.source_type == "speech_transcript":
+        if document.source_type in {"speech_transcript", "government_record"}:
             institution_kind = "official"
-            content_form = "transcript"
+            content_form = "transcript" if document.source_type == "speech_transcript" else "unknown"
             confidence = "high"
         elif document.source_type in {"national_news", "local_news"}:
             institution_kind = "media"

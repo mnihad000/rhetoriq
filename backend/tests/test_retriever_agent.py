@@ -18,7 +18,7 @@ from models.investigation import (
 from services.document_normalizer import DocumentNormalizer
 from services.investigation_repository import InvestigationRepository
 from services.page_fetcher import HttpPageFetcher
-from services.search_provider import CachedSearchProvider, UnconfiguredSearchProvider
+from services.search_provider import CachedSearchProvider, SearchProviderUnavailable, UnconfiguredSearchProvider
 
 
 def _plan() -> InvestigationPlan:
@@ -42,13 +42,15 @@ def _plan() -> InvestigationPlan:
 def test_unconfigured_search_provider_explains_model_search_is_pending():
     provider = UnconfiguredSearchProvider()
 
-    with pytest.raises(RuntimeError, match="model-native search provider"):
+    with pytest.raises(SearchProviderUnavailable) as raised:
         provider.search(
             "hidden energy tax",
             InvestigationPlanTimeWindow(label="all_time"),
             ["blog"],
             5,
         )
+    assert raised.value.diagnostics["fallback"] == "internal_corpus"
+    assert raised.value.diagnostics["failure_category"] == "not_configured"
 
 
 def test_cached_search_provider_uses_cache_before_inner_provider():

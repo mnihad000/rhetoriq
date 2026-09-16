@@ -40,7 +40,7 @@ _COUNTER_OUTPUT = "counter_narratives"
 _TIMELINE_OUTPUT = "timeline"
 _GRAPH_OUTPUT = "graph"
 _RECEIPTS_OUTPUT = "receipts"
-_OFFICIAL_SOURCE_TYPES = {"official_statement", "speech_transcript"}
+_OFFICIAL_SOURCE_TYPES = {"official_statement", "speech_transcript", "government_record"}
 
 
 @dataclass
@@ -564,7 +564,10 @@ class RetrieverAgent:
             if oldest is not None:
                 queries.append(f"{phrase} before {oldest.date().isoformat()}")
         if lane == "official":
-            scarce_type = self._find_scarce_requested_source_type(documents, ["official_statement", "speech_transcript"])
+            scarce_type = self._find_scarce_requested_source_type(
+                documents,
+                ["government_record", "official_statement", "speech_transcript"],
+            )
             if scarce_type:
                 queries.append(f"{phrase} {scarce_type.replace('_', ' ')}")
         if lane == "community":
@@ -617,7 +620,7 @@ class RetrieverAgent:
     def _source_types_for_lane(self, plan: InvestigationPlan, lane: RetrievalLane) -> list[str]:
         requested = list(plan.target_source_types)
         if lane == "official":
-            return _dedupe([*requested, "official_statement", "speech_transcript"])
+            return _dedupe([*requested, "government_record", "official_statement", "speech_transcript"])
         if lane == "community":
             return _dedupe([*requested, "forum", "blog", "local_news", "community_post"])
         if lane == "provenance":
@@ -912,7 +915,7 @@ class RetrieverAgent:
         return SequenceMatcher(None, left_text.lower(), right_text.lower()).ratio()
 
     def _primary_source_likelihood(self, doc: Document) -> float:
-        if doc.source_type in {"speech_transcript"}:
+        if doc.source_type in {"speech_transcript", "government_record"}:
             return 0.9
         if doc.source_name.endswith(".gov"):
             return 0.85
@@ -923,7 +926,7 @@ class RetrieverAgent:
     def _date_confidence(self, doc: Document) -> str:
         if doc.published_at is None:
             return "low"
-        if doc.source_type in {"speech_transcript", "national_news", "local_news"}:
+        if doc.source_type in {"speech_transcript", "government_record", "national_news", "local_news"}:
             return "high"
         return "medium"
 

@@ -1174,14 +1174,10 @@ def test_gdelt_search_returns_normalized_documents_timeline_and_first_observed(m
         },
     )
 
-    assert r.status_code == 200
+    assert r.status_code == 202
     payload = r.json()
     assert payload["query"] == "tiktok ban"
-    assert len(payload["documents"]) == 2
-    assert payload["timeline"] == [
-        {"date": "2026-06-03", "count": 1},
-        {"date": "2026-06-04", "count": 1},
-    ]
-    assert payload["first_observed_in_dataset"]["label"] == "first observed in our dataset"
-    assert payload["first_observed_in_dataset"]["title"] == "Earlier local story"
-    assert live_store.count() == 2
+    assert payload["status"] == "queued"
+    assert payload["accepted_count"] == 2
+    assert len(payload["event_ids"]) == 2
+    assert live_store.count() == 0

@@ -1,0 +1,27 @@
+{
+  "count": 3,
+  "total_pages": 2,
+  "results": [
+    {
+      "title": "Duplicate Energy Data Collection Notice",
+      "abstract": "Duplicate record returned on a page boundary.",
+      "type": "Notice",
+      "document_number": "2026-19002",
+      "html_url": "https://www.federalregister.gov/d/2026-19002",
+      "publication_date": "2026-09-11",
+      "agencies": [{"name": "Energy Department"}]
+    },
+    {
+      "document_number": "2026-bad",
+      "publication_date": "not-a-date"
+    },
+    {
+      "title": "Presidential Clean Energy Memorandum",
+      "type": "Presidential Document",
+      "document_number": "2026-19003",
+      "html_url": "https://www.federalregister.gov/d/2026-19003",
+      "publication_date": "not-a-date",
+      "agencies": [{"name": "Executive Office of the President"}]
+    }
+  ]
+}

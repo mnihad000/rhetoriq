@@ -22,6 +22,7 @@ def configured_limits() -> ResearchBudgetLimits:
         canonical_fetches=settings.RESEARCH_MAX_CANONICAL_FETCHES,
         browser_renders=settings.RESEARCH_MAX_BROWSER_RENDERS,
         internal_searches=settings.RESEARCH_MAX_INTERNAL_SEARCHES,
+        primary_source_queries=settings.RESEARCH_MAX_PRIMARY_SOURCE_QUERIES,
         domain_requests=settings.RESEARCH_MAX_DOMAIN_REQUESTS,
         retries=settings.RESEARCH_MAX_RETRIES,
     )
@@ -50,6 +51,11 @@ class ResearchBudget:
             raise BudgetExceeded("browser-render budget exhausted")
         if decision.action_type == "internal_search" and self.usage.internal_searches >= self.limits.internal_searches:
             raise BudgetExceeded("internal-search budget exhausted")
+        if (
+            decision.action_type == "federal_register_search"
+            and self.usage.primary_source_queries >= self.limits.primary_source_queries
+        ):
+            raise BudgetExceeded("primary-source-query budget exhausted")
         if domain and self.usage.domain_requests.get(domain, 0) >= self.limits.domain_requests:
             raise BudgetExceeded(f"per-domain budget exhausted for {domain}")
 
@@ -63,6 +69,8 @@ class ResearchBudget:
             self.usage.browser_renders += 1
         elif decision.action_type == "internal_search":
             self.usage.internal_searches += 1
+        elif decision.action_type == "federal_register_search":
+            self.usage.primary_source_queries += 1
         if decision.action_type in {"web_search", "gdelt_search", "hacker_news_search"}:
             accepted = min(results, max(0, self.limits.search_results - self.usage.search_results))
             self.usage.search_results += accepted

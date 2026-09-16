@@ -1,0 +1,469 @@
+{
+  "$defs": {
+    "Document": {
+      "properties": {
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "claims": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claims"
+        },
+        "collected_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Collected At"
+        },
+        "content_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Type"
+        },
+        "duplicate_of_doc_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duplicate Of Doc Id"
+        },
+        "embedding": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Embedding"
+        },
+        "entities": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Entities",
+          "type": "array"
+        },
+        "geographic_scope": {
+          "anyOf": [
+            {
+              "enum": [
+                "local",
+                "state",
+                "national",
+                "international",
+                "unknown"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Geographic Scope"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "is_seeded_demo_data": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Is Seeded Demo Data"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        },
+        "phrases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Phrases",
+          "type": "array"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published At"
+        },
+        "snippet": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snippet"
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Id"
+        },
+        "source_name": {
+          "title": "Source Name",
+          "type": "string"
+        },
+        "source_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_type": {
+          "enum": [
+            "forum",
+            "blog",
+            "local_news",
+            "national_news",
+            "commentary",
+            "speech_transcript",
+            "government_record"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_name",
+        "source_type",
+        "url",
+        "title",
+        "text",
+        "entities",
+        "phrases"
+      ],
+      "title": "Document",
+      "type": "object"
+    },
+    "ProcessedDocumentPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action Id"
+        },
+        "document": {
+          "$ref": "#/$defs/Document"
+        },
+        "investigation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Investigation Id"
+        },
+        "processing": {
+          "$ref": "#/$defs/ProcessingReceipt"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "required": [
+        "document",
+        "processing"
+      ],
+      "title": "ProcessedDocumentPayload",
+      "type": "object"
+    },
+    "ProcessingReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "duplicate_of_document_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duplicate Of Document Id"
+        },
+        "normalizer_version": {
+          "title": "Normalizer Version",
+          "type": "string"
+        },
+        "quality_flags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Quality Flags",
+          "type": "array"
+        },
+        "raw_event_id": {
+          "title": "Raw Event Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "normalizer_version",
+        "raw_event_id"
+      ],
+      "title": "ProcessingReceipt",
+      "type": "object"
+    },
+    "SourceProfile": {
+      "properties": {
+        "classification_confidence": {
+          "default": "low",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Classification Confidence",
+          "type": "string"
+        },
+        "classification_method": {
+          "default": "unknown",
+          "enum": [
+            "registry",
+            "heuristic",
+            "unknown"
+          ],
+          "title": "Classification Method",
+          "type": "string"
+        },
+        "content_form": {
+          "default": "unknown",
+          "enum": [
+            "original_reporting",
+            "reposting",
+            "opinion",
+            "transcript",
+            "community_post",
+            "unknown"
+          ],
+          "title": "Content Form",
+          "type": "string"
+        },
+        "ideology": {
+          "default": "unknown",
+          "enum": [
+            "left",
+            "center",
+            "right",
+            "unknown"
+          ],
+          "title": "Ideology",
+          "type": "string"
+        },
+        "institution_kind": {
+          "default": "unknown",
+          "enum": [
+            "official",
+            "media",
+            "advocacy",
+            "independent",
+            "community",
+            "unknown"
+          ],
+          "title": "Institution Kind",
+          "type": "string"
+        }
+      },
+      "title": "SourceProfile",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "causation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Causation Id"
+    },
+    "correlation_id": {
+      "title": "Correlation Id",
+      "type": "string"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "title": "Event Type",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "partition_key": {
+      "title": "Partition Key",
+      "type": "string"
+    },
+    "payload": {
+      "$ref": "#/$defs/ProcessedDocumentPayload"
+    },
+    "produced_at": {
+      "format": "date-time",
+      "title": "Produced At",
+      "type": "string"
+    },
+    "producer": {
+      "title": "Producer",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "produced_at",
+    "producer",
+    "correlation_id",
+    "partition_key",
+    "payload"
+  ],
+  "title": "ProcessedDocumentEvent",
+  "type": "object"
+}

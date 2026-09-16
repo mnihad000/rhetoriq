@@ -243,6 +243,7 @@ class FetchFailure(BaseModel):
     message: str
     status_code: int | None = None
     retryable: bool = False
+    retry_after_seconds: float | None = None
 
 
 class DuplicateCandidate(BaseModel):

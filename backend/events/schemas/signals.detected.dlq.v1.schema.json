@@ -1,0 +1,181 @@
+{
+  "$defs": {
+    "DeadLetterPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_count": {
+          "minimum": 1,
+          "title": "Attempt Count",
+          "type": "integer"
+        },
+        "consumer": {
+          "title": "Consumer",
+          "type": "string"
+        },
+        "error_message": {
+          "title": "Error Message",
+          "type": "string"
+        },
+        "failed_at": {
+          "format": "date-time",
+          "title": "Failed At",
+          "type": "string"
+        },
+        "failure_class": {
+          "title": "Failure Class",
+          "type": "string"
+        },
+        "failure_code": {
+          "title": "Failure Code",
+          "type": "string"
+        },
+        "original_event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Event Id"
+        },
+        "original_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Key"
+        },
+        "original_offset": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Offset"
+        },
+        "original_partition": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Partition"
+        },
+        "original_topic": {
+          "title": "Original Topic",
+          "type": "string"
+        },
+        "payload_sha256": {
+          "title": "Payload Sha256",
+          "type": "string"
+        },
+        "safe_payload": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Safe Payload"
+        }
+      },
+      "required": [
+        "original_topic",
+        "payload_sha256",
+        "consumer",
+        "failure_class",
+        "failure_code",
+        "error_message",
+        "attempt_count",
+        "failed_at"
+      ],
+      "title": "DeadLetterPayload",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "causation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Causation Id"
+    },
+    "correlation_id": {
+      "title": "Correlation Id",
+      "type": "string"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "title": "Event Type",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "partition_key": {
+      "title": "Partition Key",
+      "type": "string"
+    },
+    "payload": {
+      "$ref": "#/$defs/DeadLetterPayload"
+    },
+    "produced_at": {
+      "format": "date-time",
+      "title": "Produced At",
+      "type": "string"
+    },
+    "producer": {
+      "title": "Producer",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "produced_at",
+    "producer",
+    "correlation_id",
+    "partition_key",
+    "payload"
+  ],
+  "title": "DeadLetterEvent",
+  "type": "object"
+}

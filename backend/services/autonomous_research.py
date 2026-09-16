@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -37,7 +36,10 @@ from models.research import (
     ResearchEvaluation,
     ResearchRunSummary,
 )
+from models.events import InvestigationRequestedEvent, InvestigationRequestedPayload
+from models.events import RAW_DOCUMENTS_TOPIC
 from services.investigation_repository import InvestigationRepository
+from services.event_factory import raw_event_from_document
 from services.research_budget import BudgetExceeded, ResearchBudget, configured_limits
 from services.research_loop_runner import InvestigationRunner
 from services.research_repository import ResearchRepository
@@ -124,7 +126,7 @@ class PrecollectedRetriever:
 
 
 class ResearchSupervisor:
-    PROMPT_VERSION = "a2-supervisor-v1"
+    PROMPT_VERSION = "b2-supervisor-v1"
 
     def __init__(self, audit: ResearchRepository) -> None:
         self.audit = audit
@@ -158,10 +160,13 @@ class ResearchSupervisor:
             "evidence_gaps": self._gap_summaries(plan, documents),
             "unfetched_candidates": compact_candidates,
             "remaining_tool_calls": budget.limits.tool_calls - budget.usage.tool_calls,
-            "allowed_actions": [
-                "web_search", "gdelt_search", "hacker_news_search", "canonical_fetch",
-                "internal_search", "assess_evidence",
-            ],
+            "allowed_actions": self._allowed_actions(state),
+            "tool_policy": {
+                "web_search": "Discovery only; snippets are not citable.",
+                "internal_search": "Previously receipted evidence is citable; discovery rows require revalidation.",
+                "canonical_fetch": "Fetch an existing candidate under public URL and robots policy.",
+                "federal_register_search": "First-party public records; use for official-source gaps.",
+            },
             "decision_schema": ResearchActionDecision.model_json_schema(),
         }
         system_prompt = (
@@ -184,6 +189,8 @@ class ResearchSupervisor:
                 cost = budget.reserve_model_call(estimated_input, 4096, provider, model)
                 raw = client.generate_json(attempt_system, user_prompt, "research_action")
                 decision = ResearchActionDecision.model_validate(raw)
+                if decision.action_type not in prompt_payload["allowed_actions"]:
+                    raise ValueError("Supervisor selected a tool that is unavailable under the current source policy")
                 self._validate_candidate(decision, compact_candidates)
                 status = "completed" if attempt == 0 else "repaired"
             except (ValidationError, ValueError) as exc:
@@ -212,6 +219,29 @@ class ResearchSupervisor:
         attempted = set(state.get("attempted_candidate_ids", []))
         available = [item for item in candidates if candidate_id(item) not in attempted]
         gap_ids = [item["gap_id"] for item in self._gap_summaries(plan, documents)[:2]]
+        action_count = int(state.get("action_count", 0))
+        warnings = state.get("warnings", [])
+        search_unavailable = any("live_web_search_unavailable:" in item for item in warnings)
+        federal_unavailable = any("federal_register_unavailable:" in item for item in warnings)
+        official_gap = (
+            "official" in plan.retrieval_lanes
+            and not any(
+                item.source_type in {"government_record", "speech_transcript"}
+                or (item.source_profile and item.source_profile.institution_kind == "official")
+                for item in documents
+            )
+        )
+        if official_gap and action_count > 0 and not federal_unavailable:
+            query = (plan.canonical_phrase or plan.topic or plan.query_text).strip()
+            return ResearchActionDecision(
+                action_type="federal_register_search",
+                retrieval_lane="official",
+                query=query,
+                gap_ids=[*gap_ids, "gap_official_primary_source"],
+                requested_source_classes=["government_record"],
+                action_summary="Querying first-party Federal Register records for the official-source evidence gap.",
+                expected_evidence="Dated public-record metadata, abstract text, canonical URL, and agency provenance.",
+            )
         if available:
             item = available[0]
             return ResearchActionDecision(
@@ -220,10 +250,11 @@ class ResearchSupervisor:
                 action_summary="Retrieving a discovered canonical page to create inspectable evidence.",
                 expected_evidence="Normalized source text and acquisition metadata.",
             )
-        action_count = int(state.get("action_count", 0))
         query = (plan.search_queries or [plan.query_text])[min(action_count, len(plan.search_queries or [plan.query_text]) - 1)]
-        if action_count == 0:
+        if action_count == 0 and not search_unavailable:
             action_type, lane = "web_search", "discovery"
+        elif search_unavailable and action_count < 3:
+            action_type, lane = "internal_search", "corroboration"
         elif len(documents) < 3 and action_count < 4:
             action_type, lane = "gdelt_search", "corroboration"
         elif len(documents) < 4 and action_count < 6:
@@ -246,6 +277,19 @@ class ResearchSupervisor:
         )
 
     @staticmethod
+    def _allowed_actions(state: ResearchState) -> list[str]:
+        warnings = state.get("warnings", [])
+        actions = [
+            "web_search", "gdelt_search", "hacker_news_search", "federal_register_search",
+            "canonical_fetch", "internal_search", "assess_evidence",
+        ]
+        if any("live_web_search_unavailable:" in item for item in warnings):
+            actions.remove("web_search")
+        if any("federal_register_unavailable:" in item for item in warnings):
+            actions.remove("federal_register_search")
+        return actions
+
+    @staticmethod
     def _gap_summaries(plan: InvestigationPlan, documents: list[Document]) -> list[dict[str, Any]]:
         gaps: list[dict[str, Any]] = []
         domains = {registrable_domain(item.url) for item in documents if item.url}
@@ -257,6 +301,16 @@ class ResearchSupervisor:
             gaps.append({"gap_id": "gap_domain_diversity", "severity": "high", "summary": "Need evidence from another registrable domain."})
         if len(source_types) < 2 or missing_classes:
             gaps.append({"gap_id": "gap_source_classes", "severity": "high", "summary": f"Missing source classes: {missing_classes or ['one additional class']}."})
+        if "official" in plan.retrieval_lanes and not any(
+            item.source_type in {"government_record", "speech_transcript"}
+            or (item.source_profile and item.source_profile.institution_kind == "official")
+            for item in documents
+        ):
+            gaps.append({
+                "gap_id": "gap_official_primary_source",
+                "severity": "high",
+                "summary": "Need a first-party official record when one directly addresses the question.",
+            })
         if plan.intent in {"origin", "spread"} and sum(1 for item in documents if item.published_at) < 2:
             gaps.append({"gap_id": "gap_chronology", "severity": "high", "summary": "Need at least two reliably dated canonical sources."})
         return gaps
@@ -492,9 +546,10 @@ class AutonomousResearchEngine:
                 "force_research": False,
             }
         provider = {
-            "web_search": "searxng",
+            "web_search": self.tools.search.name,
             "gdelt_search": "gdelt",
             "hacker_news_search": "hacker_news",
+            "federal_register_search": "federal_register",
             "canonical_fetch": "canonical_http",
             "browser_fetch": "isolated_playwright",
             "internal_search": "internal_corpus",
@@ -550,6 +605,10 @@ class AutonomousResearchEngine:
                             state["run_id"], "action.failed",
                             {"action_id": action.action_id, "retrying": True, "warning": attempt_outcome.warning},
                         )
+                        delay = attempt_outcome.retry_after_seconds
+                        if delay is None:
+                            delay = self.settings.PROVIDER_RETRY_BACKOFF_SECONDS * (2 ** (budget.usage.retries - 1))
+                        time.sleep(min(self.settings.PROVIDER_MAX_BACKOFF_SECONDS, max(0.0, delay)))
                         continue
                     outcome = attempt_outcome
                 except BudgetExceeded:
@@ -562,15 +621,85 @@ class AutonomousResearchEngine:
                             state["run_id"], "action.failed",
                             {"action_id": action.action_id, "retrying": True, "failure_category": type(exc).__name__},
                         )
+                        delay = self.settings.PROVIDER_RETRY_BACKOFF_SECONDS * (2 ** (budget.usage.retries - 1))
+                        time.sleep(min(self.settings.PROVIDER_MAX_BACKOFF_SECONDS, max(0.0, delay)))
                         continue
                     raise
             receipt_ids = [
                 self.audit.save_receipt(state["run_id"], action.action_id, kind, payload)
                 for kind, payload in collected_receipts
             ]
+            existing_documents = self.audit.get_documents(state["run_id"])
+            existing_document_ids = {item.id for item in existing_documents}
+            existing_document_urls = {item.url.rstrip("/").lower() for item in existing_documents if item.url}
+            accepted_documents: list[Document] = []
+            duplicate_document_ids: list[str] = []
+            staged_document_ids: list[str] = []
+            staged_event_ids: list[str] = []
             for document in outcome.documents:
-                self.audit.save_document(state["run_id"], document)
-                self.audit.append_event(state["run_id"], "document.normalized", {"document_id": document.id, "source": document.source_name})
+                normalized_url = document.url.rstrip("/").lower()
+                if document.id in existing_document_ids or (normalized_url and normalized_url in existing_document_urls):
+                    duplicate_document_ids.append(document.id)
+                    continue
+                raw_event = raw_event_from_document(
+                    document,
+                    producer="research-worker",
+                    correlation_id=state["investigation_id"],
+                    investigation_id=state["investigation_id"],
+                    run_id=state["run_id"],
+                    action_id=action.action_id,
+                )
+                self.audit.events.enqueue(RAW_DOCUMENTS_TOPIC, raw_event)
+                staged_document_ids.append(document.id)
+                staged_event_ids.append(raw_event.event_id)
+                existing_document_ids.add(document.id)
+                if normalized_url:
+                    existing_document_urls.add(normalized_url)
+            if staged_document_ids:
+                receipt_ids.append(self.audit.save_receipt(
+                    state["run_id"],
+                    action.action_id,
+                    "event_ingestion",
+                    {
+                        "topic": RAW_DOCUMENTS_TOPIC,
+                        "event_ids": staged_event_ids,
+                        "document_ids": staged_document_ids,
+                        "correlation_id": state["investigation_id"],
+                    },
+                ))
+                deadline = time.monotonic() + self.settings.KAFKA_PROCESSED_WAIT_SECONDS
+                persisted: dict[str, Document] = {}
+                while time.monotonic() < deadline:
+                    persisted = {item.id: item for item in self.audit.get_documents(state["run_id"])}
+                    if all(document_id in persisted for document_id in staged_document_ids):
+                        break
+                    time.sleep(0.1)
+                accepted_documents = [persisted[item] for item in staged_document_ids if item in persisted]
+                missing = [item for item in staged_document_ids if item not in persisted]
+                if missing:
+                    limitation = (
+                        "event_ingestion_timeout: Kafka did not materialize "
+                        f"{len(missing)} document(s) within the bounded wait."
+                    )
+                    outcome.warning = f"{outcome.warning}; {limitation}" if outcome.warning else limitation
+                for document in accepted_documents:
+                    self.audit.append_event(
+                        state["run_id"],
+                        "document.normalized",
+                        {"document_id": document.id, "source": document.source_name},
+                    )
+            if duplicate_document_ids:
+                receipt_ids.append(self.audit.save_receipt(
+                    state["run_id"],
+                    action.action_id,
+                    "deduplication",
+                    {
+                        "outcome": "duplicates_collapsed",
+                        "document_ids": duplicate_document_ids,
+                        "count": len(duplicate_document_ids),
+                    },
+                ))
+            outcome.documents = accepted_documents
             existing_urls = {item.url for item in candidates}
             for item in outcome.candidates:
                 if item.url not in existing_urls:
@@ -749,7 +878,22 @@ class AutonomousResearchEngine:
             terminal_decision=decision,
             warnings=list(dict.fromkeys([*state.get("warnings", []), *reasons])),
         )
-        self.audit.append_event(state["run_id"], "run.completed", {"status": status, "decision": decision})
+        workspace = self.repository.get_investigation_workspace(state["investigation_id"])
+        content_hash = None
+        if workspace is not None:
+            content_hash = hashlib.sha256(
+                workspace.model_dump_json(exclude={"research_run"}).encode("utf-8")
+            ).hexdigest()
+        self.audit.append_event(
+            state["run_id"],
+            "run.completed",
+            {
+                "status": status,
+                "decision": decision,
+                "report_id": f"report:{state['investigation_id']}" if workspace and workspace.report else None,
+                "content_hash": content_hash,
+            },
+        )
 
 
 def evaluate_publication(run_id: str, workspace, run: ResearchRunSummary | None = None) -> ResearchEvaluation:
@@ -808,6 +952,10 @@ def evaluate_publication(run_id: str, workspace, run: ResearchRunSummary | None 
             and run.usage.spend_usd <= run.limits.spend_usd
             and run.usage.browser_renders <= run.limits.browser_renders
             and run.usage.canonical_fetches <= run.limits.canonical_fetches
+            and run.usage.internal_searches <= run.limits.internal_searches
+            and run.usage.primary_source_queries <= run.limits.primary_source_queries
+            and run.usage.search_results <= run.limits.search_results
+            and all(count <= run.limits.domain_requests for count in run.usage.domain_requests.values())
             and run.usage.retries <= run.limits.retries
         )
     checks = [
@@ -845,9 +993,8 @@ class ResearchRunManager:
         self.repository = repository
         self.audit = audit
         self.settings = get_settings()
-        self.worker_id = f"embedded-{uuid4().hex[:8]}"
-        self.executor = ThreadPoolExecutor(max_workers=self.settings.RESEARCH_WORKER_CONCURRENCY, thread_name_prefix="rq-research")
-        self.audit.heartbeat_worker(self.worker_id, "embedded")
+        self.worker_id = f"kafka-investigations-{uuid4().hex[:8]}"
+        self.audit.heartbeat_worker(self.worker_id, "kafka")
 
     def start(self, investigation_id: str, *, force_refresh: bool = False) -> ResearchRunSummary:
         existing = self.audit.get_active_run(investigation_id)
@@ -856,7 +1003,32 @@ class ResearchRunManager:
         latest = self.audit.get_latest_run(investigation_id)
         if latest and not force_refresh:
             return latest
-        run = self.audit.create_run(investigation_id, configured_limits())
+        plan = self.repository.get_plan(investigation_id)
+        if plan is None:
+            raise KeyError(investigation_id)
+
+        def requested_event(run_id: str) -> InvestigationRequestedEvent:
+            return InvestigationRequestedEvent.create(
+                InvestigationRequestedPayload(
+                    investigation_id=investigation_id,
+                    run_id=run_id,
+                    query_text=plan.query_text,
+                    requested_outputs=plan.requested_outputs,
+                    time_window=plan.time_window,
+                    source_classes=plan.target_source_types,
+                    authorization_context={"source": "api"},
+                    force_refresh=force_refresh,
+                ),
+                producer="rhetoriq-api",
+                correlation_id=investigation_id,
+                partition_key=investigation_id,
+            )
+
+        run = self.audit.create_run(
+            investigation_id,
+            configured_limits(),
+            requested_event_factory=requested_event,
+        )
         configuration_error = self._model_configuration_error()
         if configuration_error:
             self.audit.update_run(
@@ -868,8 +1040,6 @@ class ResearchRunManager:
                 {"status": "configuration_missing", "decision": "configuration_missing"},
             )
             return self.audit.get_run(run.run_id)  # type: ignore[return-value]
-        if self.settings.RESEARCH_EXECUTION_MODE == "embedded":
-            self.executor.submit(self._execute_claimed, run.run_id)
         return run
 
     def _model_configuration_error(self) -> str | None:
@@ -897,10 +1067,12 @@ class ResearchRunManager:
         return "Configure Gemini, Groq, or a reachable Ollama model before starting live autonomous research."
 
     def resume_incomplete(self) -> None:
-        if self.settings.RESEARCH_EXECUTION_MODE != "embedded":
-            return
-        for run in self.audit.list_resumable_runs():
-            self.executor.submit(self._execute_claimed, run.run_id)
+        # Kafka owns dispatch. Queued runs and their request events are durable.
+        return
+
+    def execute_queued(self, run_id: str) -> None:
+        """Kafka consumer entrypoint, protected by the existing run lease."""
+        self._execute_claimed(run_id)
 
     def replay(self, investigation_id: str, source_run_id: str) -> ResearchRunSummary:
         source = self.audit.get_run(source_run_id)
@@ -937,14 +1109,32 @@ class ResearchRunManager:
             "source_evaluation_decision": source_evaluation.final_decision if source_evaluation else None,
             "status": "pending",
         })
-        self.executor.submit(self._execute_claimed, run.run_id)
+        plan = self.repository.get_plan(investigation_id)
+        if plan is None:
+            raise KeyError(investigation_id)
+        request_event = InvestigationRequestedEvent.create(
+            InvestigationRequestedPayload(
+                investigation_id=investigation_id,
+                run_id=run.run_id,
+                query_text=plan.query_text,
+                requested_outputs=plan.requested_outputs,
+                time_window=plan.time_window,
+                source_classes=plan.target_source_types,
+                authorization_context={"source": "recorded-replay"},
+                force_refresh=True,
+            ),
+            producer="rhetoriq-api",
+            correlation_id=investigation_id,
+            partition_key=investigation_id,
+        )
+        self.audit.events.enqueue("investigations.requested.v1", request_event)
         return run
 
     def _execute_claimed(self, run_id: str) -> None:
         if not self.audit.claim_run(run_id, self.worker_id, self.settings.RESEARCH_LEASE_SECONDS):
             return
         try:
-            with LeaseHeartbeat(self.audit, run_id, self.worker_id, "embedded"):
+            with LeaseHeartbeat(self.audit, run_id, self.worker_id, "kafka"):
                 AutonomousResearchEngine(self.repository, self.audit).execute(run_id)
             run = self.audit.get_run(run_id)
             if run and run.parent_run_id:
@@ -975,7 +1165,7 @@ class ResearchRunManager:
             self.audit.update_run(run_id, status="failed", terminal_decision="failed", warnings=[str(exc)[:500]])
             self.audit.append_event(run_id, "run.failed", {"error": str(exc)[:300]})
         finally:
-            self.audit.heartbeat_worker(self.worker_id, "embedded")
+            self.audit.heartbeat_worker(self.worker_id, "kafka")
 
     @staticmethod
     def _artifact_hash(workspace: Any) -> str | None:

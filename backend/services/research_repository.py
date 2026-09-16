@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from config import get_settings
 from migrations.runner import run_migrations
 from models.document import Document
 from services.database import connect, ensure_parent_dir, is_postgres_database
+from services.event_store import EventStore
 from models.investigation import FinalReportResult, SearchResult
 from models.research import (
     ResearchActionDecision,
@@ -37,6 +39,7 @@ class ResearchRepository:
             run_migrations(db_path)
         else:
             self._init_schema()
+        self.events = EventStore(db_path)
 
     def create_run(
         self,
@@ -45,11 +48,13 @@ class ResearchRepository:
         *,
         parent_run_id: str | None = None,
         mode: str = "live",
+        run_id: str | None = None,
+        requested_event_factory: Callable[[str], Any] | None = None,
     ) -> ResearchRunSummary:
         existing = self.get_active_run(investigation_id)
         if existing is not None:
             return existing
-        run_id = f"run_{uuid4().hex}"
+        run_id = run_id or f"run_{uuid4().hex}"
         now = _now().isoformat()
         with self._connect() as conn:
             conn.execute(
@@ -71,6 +76,13 @@ class ResearchRepository:
                     now,
                 ),
             )
+            if requested_event_factory is not None:
+                from models.events import INVESTIGATIONS_REQUESTED_TOPIC
+                self.events.enqueue(
+                    INVESTIGATIONS_REQUESTED_TOPIC,
+                    requested_event_factory(run_id),
+                    connection=conn,
+                )
         self.append_event(run_id, "run.queued", {"investigation_id": investigation_id, "mode": mode})
         return self.get_run(run_id)  # type: ignore[return-value]
 
@@ -218,6 +230,58 @@ class ResearchRepository:
                 "INSERT INTO research_events (run_id, sequence, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
                 (run_id, sequence, event_type, json.dumps(payload, default=str), created.isoformat()),
             )
+            run_row = conn.execute(
+                "SELECT investigation_id, status, terminal_decision, warnings_json FROM research_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if run_row is not None:
+                from models.events import (
+                    INVESTIGATIONS_COMPLETED_TOPIC,
+                    INVESTIGATIONS_STAGE_EVENTS_TOPIC,
+                    InvestigationCompletedEvent,
+                    InvestigationCompletedPayload,
+                    InvestigationStageEvent,
+                    InvestigationStagePayload,
+                )
+                investigation_id = run_row["investigation_id"]
+                stage_event = InvestigationStageEvent.create(
+                    InvestigationStagePayload(
+                        investigation_id=investigation_id,
+                        run_id=run_id,
+                        sequence=sequence,
+                        stage=event_type.split(".", 1)[0],
+                        status=event_type.split(".", 1)[-1],
+                        artifact_refs=[str(payload["artifact"])] if payload.get("artifact") else [],
+                        warnings=[str(payload["warning"])] if payload.get("warning") else [],
+                        summary=str(payload.get("summary"))[:500] if payload.get("summary") else None,
+                    ),
+                    producer="research-worker",
+                    correlation_id=investigation_id,
+                    partition_key=investigation_id,
+                    event_id=f"evt_stage_{hashlib.sha256(f'{run_id}:{sequence}'.encode()).hexdigest()[:24]}",
+                    occurred_at=created,
+                )
+                self.events.enqueue(INVESTIGATIONS_STAGE_EVENTS_TOPIC, stage_event, connection=conn)
+                if event_type == "run.completed":
+                    warnings = json.loads(run_row["warnings_json"] or "[]")
+                    completed_event = InvestigationCompletedEvent.create(
+                        InvestigationCompletedPayload(
+                            investigation_id=investigation_id,
+                            run_id=run_id,
+                            status=str(payload.get("status") or run_row["status"]),
+                            terminal_decision=str(payload.get("decision") or run_row["terminal_decision"] or "unknown"),
+                            report_id=payload.get("report_id"),
+                            artifact_refs=[f"investigation:{investigation_id}"],
+                            content_hash=payload.get("content_hash"),
+                            limitations=warnings,
+                        ),
+                        producer="research-worker",
+                        correlation_id=investigation_id,
+                        partition_key=investigation_id,
+                        event_id=f"evt_completed_{hashlib.sha256(run_id.encode()).hexdigest()[:24]}",
+                        occurred_at=created,
+                    )
+                    self.events.enqueue(INVESTIGATIONS_COMPLETED_TOPIC, completed_event, connection=conn)
         return ResearchEvent(run_id=run_id, sequence=sequence, event_type=event_type, payload=payload, created_at=created)
 
     def list_events(self, run_id: str, after_sequence: int = 0, limit: int = 100) -> list[ResearchEvent]:

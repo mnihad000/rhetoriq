@@ -1,0 +1,28 @@
+{
+  "count": 3,
+  "total_pages": 2,
+  "results": [
+    {
+      "title": "Clean Energy Reporting Rule",
+      "abstract": "The Environmental Protection Agency establishes reporting requirements for covered facilities.",
+      "type": "Rule",
+      "document_number": "2026-19001",
+      "html_url": "https://www.federalregister.gov/documents/2026/09/10/2026-19001/clean-energy-reporting-rule",
+      "pdf_url": "https://www.govinfo.gov/content/pkg/FR-2026-09-10/pdf/2026-19001.pdf",
+      "raw_text_url": "https://www.federalregister.gov/documents/full_text/text/2026/09/10/2026-19001.txt",
+      "publication_date": "2026-09-10",
+      "citation": "91 FR 50001",
+      "docket_ids": ["EPA-HQ-TEST-2026-0001"],
+      "agencies": [{"name": "Environmental Protection Agency"}]
+    },
+    {
+      "title": "Energy Data Collection Notice",
+      "abstract": "The Department of Energy requests public comment on a proposed data collection.",
+      "type": "Notice",
+      "document_number": "2026-19002",
+      "html_url": "https://www.federalregister.gov/documents/2026/09/11/2026-19002/energy-data-collection-notice",
+      "publication_date": "2026-09-11",
+      "agencies": [{"name": "Energy Department"}]
+    }
+  ]
+}

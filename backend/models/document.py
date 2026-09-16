@@ -25,7 +25,8 @@ class Document(BaseModel):
     source_id: str | None = None
     source_name: str
     source_type: Literal[
-        "forum", "blog", "local_news", "national_news", "commentary", "speech_transcript"
+        "forum", "blog", "local_news", "national_news", "commentary", "speech_transcript",
+        "government_record",
     ]
     url: str
     title: str

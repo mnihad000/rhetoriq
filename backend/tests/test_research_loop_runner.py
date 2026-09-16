@@ -16,6 +16,8 @@ from models.investigation import InvestigationPlan, InvestigationPlanTimeWindow
 from services.document_normalizer import DocumentNormalizer
 from services.investigation_repository import InvestigationRepository
 from services.research_loop_runner import InvestigationRunner
+from services.research_repository import ResearchRepository
+from services.autonomous_research import ResearchRunManager
 
 client = TestClient(app)
 
@@ -190,12 +192,15 @@ def test_runner_returns_configuration_missing_without_live_model(tmp_path, monke
     assert workspace.research_loop.final_decision == "configuration_missing"
 
 
-def test_run_endpoint_returns_workspace_with_research_loop(tmp_path, monkeypatch):
+def test_run_endpoint_queues_workspace_through_kafka_outbox(tmp_path, monkeypatch):
     repo = InvestigationRepository(str(tmp_path / "investigations.sqlite3"))
     monkeypatch.setattr(narratives_api, "_investigation_repo", repo)
     settings = get_settings()
     monkeypatch.setattr(settings, "DEMO_MODE", False)
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    audit = ResearchRepository(str(tmp_path / "investigations.sqlite3"))
+    manager = ResearchRunManager(repo, audit)
+    monkeypatch.setattr(narratives_api, "get_research_manager", lambda: manager)
 
     def _stub_retriever_agent():
         return RetrieverAgent(
@@ -206,25 +211,16 @@ def test_run_endpoint_returns_workspace_with_research_loop(tmp_path, monkeypatch
         )
 
     monkeypatch.setattr(narratives_api, "_build_retriever_agent", _stub_retriever_agent)
-    monkeypatch.setattr(
-        narratives_api,
-        "_build_investigation_runner",
-        lambda: InvestigationRunner(repository=repo, retriever=_stub_retriever_agent()),
-    )
 
     plan_response = client.post("/api/investigate", json={"query_text": _plan().query_text})
     assert plan_response.status_code == 200
     investigation_id = plan_response.json()["investigation_id"]
 
     response = client.post(f"/api/investigations/{investigation_id}/run", json={})
-    assert response.status_code == 200
+    assert response.status_code == 202
     payload = response.json()
-    deadline = time.monotonic() + 5
-    while payload["research_loop"] is None and time.monotonic() < deadline:
-        time.sleep(0.05)
-        payload = client.get(f"/api/investigations/{investigation_id}").json()
-
-    assert payload["research_loop"] is not None
-    assert payload["gap_analysis"] is not None
-    assert payload["provenance_trace"] is not None
-    assert payload["report"] is not None
+    assert payload["research_run"]["status"] == "queued"
+    assert any(
+        item.topic == "investigations.requested.v1"
+        for item in audit.events.pending(100)
+    )

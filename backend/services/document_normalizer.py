@@ -46,7 +46,9 @@ class DocumentNormalizer:
         text = self._extract_text(raw_page.html) or search_result.snippet or title
         snippet = self._build_snippet(search_result.snippet or text)
         author = self._extract_meta(raw_page.html, "author", "article:author")
-        published_at = self._extract_published_at(raw_page.html)
+        page_published_at = self._extract_published_at(raw_page.html)
+        provider_published_at = self._provider_published_at(search_result)
+        published_at = page_published_at or provider_published_at
         source_type = self._classify_source(domain)
         source_name = domain or search_result.provider
 
@@ -73,9 +75,27 @@ class DocumentNormalizer:
                 "search_rank": search_result.rank,
                 "provider_score": search_result.provider_score,
                 "content_type_header": raw_page.content_type,
-                "date_source": "page_meta" if published_at else "unknown",
+                "date_source": "page_meta" if page_published_at else "provider_metadata" if provider_published_at else "unknown",
+                "source_native_id": search_result.metadata.get("source_native_id")
+                or search_result.metadata.get("source_document_id"),
+                "canonical_url": raw_page.final_url or raw_page.url,
+                "publication_timestamp": published_at.isoformat() if published_at else None,
+                "collection_timestamp": raw_page.fetched_at.isoformat(),
+                "discovery_metadata": dict(search_result.metadata),
             },
         )
+
+    def _provider_published_at(self, search_result: SearchResult) -> datetime | None:
+        metadata = search_result.metadata or {}
+        for key in ("published_at", "published_date", "publication_timestamp"):
+            candidate = metadata.get(key)
+            if not candidate:
+                continue
+            try:
+                return self._to_utc(datetime.fromisoformat(str(candidate).replace("Z", "+00:00")))
+            except ValueError:
+                continue
+        return None
 
     def _doc_id(self, url: str) -> str:
         return "web_" + hashlib.md5(url.encode()).hexdigest()[:12]
@@ -170,6 +190,8 @@ class DocumentNormalizer:
         return deduped[:8]
 
     def _classify_source(self, domain: str) -> str:
+        if domain.endswith(".gov") or domain == "federalregister.gov":
+            return "government_record"
         if any(domain.endswith(blog) or blog in domain for blog in _BLOG_DOMAINS):
             return "blog"
         if domain in _COMMENTARY_DOMAINS:
@@ -185,11 +207,15 @@ class DocumentNormalizer:
             return "opinion"
         if source_type == "blog":
             return "analysis"
+        if source_type == "government_record":
+            return "public_record"
         return "article"
 
     def _infer_geographic_scope(self, source_type: str, domain: str) -> str:
         if source_type == "local_news":
             return "local"
+        if source_type == "government_record":
+            return "national"
         if source_type in {"national_news", "commentary"}:
             return "national" if domain.endswith(".com") or domain.endswith(".org") else "unknown"
         return "unknown"
