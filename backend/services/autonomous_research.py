@@ -767,7 +767,16 @@ class AutonomousResearchEngine:
         self._node_event(state, "build_evidence_artifacts", True)
         plan = InvestigationPlan.model_validate(state["plan"])
         documents = self.audit.get_documents(state["run_id"])
-        retriever = PrecollectedRetriever(self.repository, documents)
+        from services.b5_repository import ProjectionRepository
+        projections = ProjectionRepository(self.audit.db_path)
+        eligible_documents = []
+        for document in documents:
+            current = projections.current("document",document.id)
+            if current and (current["data"].get("withdrawn") or not current["eligible"]):
+                continue
+            eligible_documents.append(document)
+        documents = eligible_documents
+        retriever = PrecollectedRetriever(self.repository,documents)
         runner = InvestigationRunner(repository=self.repository, retriever=retriever, require_live_models=False)
         runner.run(state["investigation_id"], plan, force_refresh=True)
         workspace = self.repository.get_investigation_workspace(state["investigation_id"])
@@ -828,7 +837,6 @@ class AutonomousResearchEngine:
         candidate = self.audit.get_candidate_report(state["run_id"])
         if candidate is None:
             raise RuntimeError("Candidate report disappeared before publication.")
-        self.repository.save_final_report_result(candidate)
         self._finish_terminal(state, "completed", "published", [])
         self._node_event(state, "publish_report", False)
         return {"phase": "complete"}
@@ -837,7 +845,6 @@ class AutonomousResearchEngine:
         self._node_event(state, "withhold_report", True)
         evaluation = self.audit.get_evaluation(state["run_id"])
         reasons = evaluation.failed_reasons if evaluation else ["Publication evaluation was unavailable."]
-        self.repository.delete_final_report_result(state["investigation_id"])
         workspace = self.repository.get_investigation_workspace(state["investigation_id"])
         if workspace and workspace.research_loop is not None:
             self.repository.save_research_loop_run_result(
@@ -875,27 +882,49 @@ class AutonomousResearchEngine:
         run = self.audit.get_run(state["run_id"])
         if run and run.started_at:
             usage.active_seconds = max(usage.active_seconds, (datetime.now(timezone.utc) - run.started_at).total_seconds())
-        self.audit.update_run(
-            state["run_id"], status=status, active_action="", usage=usage,
-            terminal_decision=decision,
-            warnings=list(dict.fromkeys([*state.get("warnings", []), *reasons])),
-        )
         workspace = self.repository.get_investigation_workspace(state["investigation_id"])
-        content_hash = None
+        candidate = self.audit.get_candidate_report(state["run_id"]) if decision == "published" else None
         if workspace is not None:
-            content_hash = hashlib.sha256(
-                workspace.model_dump_json(exclude={"research_run"}).encode("utf-8")
-            ).hexdigest()
-        self.audit.append_event(
-            state["run_id"],
-            "run.completed",
-            {
-                "status": status,
-                "decision": decision,
-                "report_id": f"report:{state['investigation_id']}" if workspace and workspace.report else None,
-                "content_hash": content_hash,
-            },
-        )
+            workspace = workspace.model_copy(update={"report": candidate if decision == "published" else None,
+                                                      "status": "report_completed" if candidate else workspace.status,
+                                                      "current_stage": "report" if candidate else workspace.current_stage})
+        from services.b5_repository import ProjectionRepository, semantic_hash
+        from services.database import connect
+        projections = ProjectionRepository(self.audit.db_path)
+        completed_id = f"evt_completed_{hashlib.sha256(state['run_id'].encode()).hexdigest()[:24]}"
+        with connect(self.audit.db_path) as conn:
+            projections._lock(conn, "investigation", state["investigation_id"])
+            # A retried terminal transition reuses the recorded immutable snapshot.
+            existing = conn.execute("SELECT snapshot_id FROM b5_source_operations WHERE kind='investigation' AND domain_id=? AND source_event_id=?",
+                                    (state["investigation_id"], completed_id)).fetchone()
+            if existing:
+                return
+            if candidate is not None and workspace is not None:
+                blocked = []
+                for document in sorted(workspace.retrieved_documents,key=lambda item:item.id):
+                    projections._lock(conn,"document",document.id)
+                    current = projections.current("document",document.id,connection=conn)
+                    if current and (current["data"].get("withdrawn") or not current["eligible"]):
+                        blocked.append(document.id)
+                if blocked:
+                    status = decision = "insufficient_evidence"
+                    reasons = [*reasons,"Canonical evidence withdrawn or no longer eligible before publication: "+", ".join(blocked)]
+                    candidate = None
+                    workspace = workspace.model_copy(update={"report":None})
+            if candidate is not None:
+                self.repository.save_final_report_result(candidate, connection=conn)
+            elif decision != "published":
+                conn.execute("DELETE FROM final_report_results WHERE investigation_id=?", (state["investigation_id"],))
+            self.audit.update_run(state["run_id"], status=status, active_action="", usage=usage,
+                                  terminal_decision=decision, warnings=list(dict.fromkeys([*state.get("warnings", []), *reasons])), connection=conn)
+            if workspace is not None:
+                projections.record_investigation(workspace, run_id=state["run_id"], terminal_decision=decision,
+                                                 source_event_id=completed_id, connection=conn)
+            content_hash = semantic_hash(workspace.model_dump(mode="json", exclude={"research_run"})) if workspace else None
+            self.audit.append_event(state["run_id"], "run.completed",
+                                    {"status": status,"decision": decision,
+                                     "report_id": f"report:{state['investigation_id']}" if candidate else None,
+                                     "content_hash": content_hash}, connection=conn)
 
 
 def evaluate_publication(run_id: str, workspace, run: ResearchRunSummary | None = None) -> ResearchEvaluation:

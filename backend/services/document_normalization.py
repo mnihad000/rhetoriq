@@ -156,6 +156,7 @@ def normalize_raw_event(event: RawDocumentEvent) -> EnrichmentRequestedEvent:
         language=language or (existing.language if existing else None),
         content_type=_clean(raw.content_type) or (existing.content_type if existing else "document"),
         geographic_scope=existing.geographic_scope if existing else None,
+        references=existing.references if existing else [],
         # Entity/phrase extraction belongs to enrichment.  Reusing values from
         # a legacy normalized payload would make replay depend on old code.
         entities=[],
@@ -166,10 +167,23 @@ def normalize_raw_event(event: RawDocumentEvent) -> EnrichmentRequestedEvent:
         source_profile=existing.source_profile if existing else None,
         metadata={},
     )
-    input_hash = _input_hash(document)
     exact_content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
     inherited_metadata = dict(existing.metadata or {}) if existing else {}
     inherited_metadata.pop("input_hash", None)
+    # The B4 Unicode/whitespace pass can shift offsets captured from HTML.
+    # Revalidate against the final text before any reference is treated as observed.
+    references = []
+    for reference in document.references:
+        anchor = _clean(reference.anchor_text)
+        start = text.find(anchor) if anchor else -1
+        valid = start >= 0 and text.find(anchor, start + 1) < 0
+        limitations = list(reference.limitations)
+        if not valid and reference.start is not None:
+            limitations.append("Reference span could not be uniquely aligned after canonical normalization.")
+        references.append(reference.model_copy(update={"anchor_text":anchor,"start":start if valid else None,
+                                                       "end":start+len(anchor) if valid else None,"limitations":limitations}))
+    document.references = references
+    input_hash = _input_hash(document)
     document.metadata = {
         **inherited_metadata,
         "normalizer_version": NORMALIZER_VERSION,

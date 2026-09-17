@@ -18,7 +18,7 @@ The product deliberately distinguishes **first observed in the available dataset
 - A React and TypeScript investigation interface with a live graph, research rail, evidence gate, and replay controls.
 - Production container definitions for the Railway API/frontend deployment, committed PostgreSQL migrations, and CI checks for backend, frontend, documentation, and PostgreSQL migration compatibility.
 
-Flink, Elasticsearch, Neo4j, Kubernetes, and the wider recurring-monitoring connector fleet remain target architecture. B1 pgvector corpus retrieval is implemented behind a disabled-by-default flag and awaits production corpus rollout verification. Public launch evidence is tracked separately in [A5 launch evidence](docs/A5_LAUNCH_EVIDENCE.md). See [the roadmap](docs/ROADMAP.md) for exact implementation status.
+B4 Flink and B5 Elasticsearch/Neo4j/MiniLM/Redis integration are implemented with runtime acceptance pending. B5 supplies recoverable projections, scoped search and provenance UI, operator commands and a local Compose overlay. See [B5 acceptance](docs/B5_ACCEPTANCE.md) and [local operations/B6 handoff](docs/B5_OPERATIONS.md). Kubernetes and the wider recurring-monitoring connector fleet remain later work. Corpus and B5 retrieval are opt-in until deployment qualification. Public launch evidence is tracked separately in [A5 launch evidence](docs/A5_LAUNCH_EVIDENCE.md). See [the roadmap](docs/ROADMAP.md) for exact implementation status.
 
 ## Research strategy
 

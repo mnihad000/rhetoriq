@@ -167,6 +167,14 @@
           "default": null,
           "title": "Published At"
         },
+        "references": {
+          "items": {
+            "$ref": "#/$defs/SourceReference"
+          },
+          "maxItems": 100,
+          "title": "References",
+          "type": "array"
+        },
         "snippet": {
           "anyOf": [
             {
@@ -581,6 +589,76 @@
         }
       },
       "title": "SourceProfile",
+      "type": "object"
+    },
+    "SourceReference": {
+      "properties": {
+        "anchor_text": {
+          "default": "",
+          "title": "Anchor Text",
+          "type": "string"
+        },
+        "context": {
+          "default": "",
+          "title": "Context",
+          "type": "string"
+        },
+        "end": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End"
+        },
+        "extraction_version": {
+          "default": "b5-links-v1",
+          "title": "Extraction Version",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "reference_kind": {
+          "default": "hyperlink",
+          "enum": [
+            "hyperlink",
+            "structured"
+          ],
+          "title": "Reference Kind",
+          "type": "string"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start"
+        },
+        "target_url": {
+          "title": "Target Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_url"
+      ],
+      "title": "SourceReference",
       "type": "object"
     }
   },

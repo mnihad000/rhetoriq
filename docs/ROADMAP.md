@@ -87,7 +87,7 @@ The current repository is a functional narrative-investigation MVP, not an empty
 
 The A2 runtime supports SearXNG discovery, but its availability on the reported public deployment is not yet verified in the A5 evidence record. The initial production topology excludes browser rendering; JavaScript-only sources remain a recorded retrieval limitation. The planner and retriever determine queries, follow-up searches, and retrieval lanes through the `SearchProvider` abstraction.
 
-The current repository includes LangGraph, production containers, PostgreSQL/pgvector, and the B3 Kafka/Apicurio event backbone. It does **not** claim that React Query, Sigma.js, WebSockets, Flink, Elasticsearch, Neo4j, Kubernetes, Terraform, ArgoCD, Prometheus, or Grafana are implemented. The pgvector corpus path is opt-in and awaits production corpus rollout verification.
+The repository includes LangGraph, production containers, PostgreSQL/pgvector, the B3 Kafka/Apicurio backbone, B4 Flink implementation, and B5 projection/search/graph/cache implementation. B3?B5 actual runtime qualification remains separate from offline code verification. Kubernetes, Terraform, ArgoCD, Prometheus and Grafana remain later work; corpus/B5 retrieval are opt-in until deployment acceptance.
 
 ---
 
@@ -401,27 +401,25 @@ for the Compose and recovery evidence.
 
 ---
 
-### B5. Elasticsearch and Neo4j
+### B5. Search, Provenance, and Recoverable Projections
 
-**Status: Planned**
+**Status: In Progress ? implementation available; actual runtime acceptance pending**
 
-**Estimate: 3–4 weeks**
+Deliver the same persisted investigation through MiniLM/pgvector semantic retrieval, Elasticsearch exact phrase/full-text search, and Neo4j explained provenance paths. PostgreSQL remains authoritative through immutable snapshots, atomic outbox dispatch, monotonic revisions, withdrawal/restore audit, and a shared generation manifest.
 
-#### Goals
+Implementation includes independent projection consumers and versioned schemas/DLQs, reference extraction with validated spans, scoped search/graph/path APIs, Evidence and React Flow Narrative integration, bounded graph hypotheses/context, Redis query caching, reconciliation/repair/bootstrap/rebuild/cutover/rollback commands, authenticated encrypted local data services, pinned store/model locks and B6 runtime handoff.
 
-- Index normalized documents and phrases in Elasticsearch for exact, filtered, and time-bounded search.
-- Persist source, document, phrase, citation, mutation, and amplification relationships in Neo4j.
-- Replace local graph approximations with graph-backed provenance queries where appropriate.
-- Add consistency checks between PostgreSQL, Elasticsearch, and Neo4j records.
+#### Milestone gates
 
-#### Dependencies
+1. Contracts, atomic persistence and authenticated initialized runtime.
+2. One real B4 document projected consistently into all four data paths.
+3. Persisted investigation, evidence/search/reference/path product acceptance.
+4. Actual replay/crash/withdrawal/cache/drift/rebuild/cutover/rollback recovery.
+5. 10,000-document load qualification, bounded live canary, regressions and handoff.
 
-- B1 canonical relational identifiers.
-- B4 processed-document events.
+Offline verification cannot close runtime gates. B3/B4 actual Kafka/Flink delivery, recovery and load evidence remains a prerequisite. B5 does not create Kubernetes manifests; B6 deploys the qualified services to the local cluster.
 
-#### Completion condition
-
-The same investigation can retrieve semantically related documents from pgvector, phrase matches from Elasticsearch, and an explainable provenance path from Neo4j using consistent document identifiers.
+See [B5 sprint](B5_SPRINT.md), [acceptance evidence](B5_ACCEPTANCE.md), and [operations/B6 handoff](B5_OPERATIONS.md). B5 is complete only when every gate has recorded passing evidence.
 
 ---
 
@@ -535,7 +533,7 @@ Product and infrastructure work should alternate so the project remains demoable
 | 7 | B2 Agent-led web research and primary sources | Completed |
 | 8 | B3 Kafka contracts and replayable ingestion | Implemented; Compose evidence pending host restart |
 | 9 | B4 Flink processing and anomaly detection | In Progress; milestone-gated sprint |
-| 10 | B5 Elasticsearch and Neo4j | Planned |
+| 10 | B5 search, provenance, and recoverable projections | In Progress; runtime acceptance pending |
 | 11 | B6 Kubernetes local deployment | Planned |
 | 12 | B7 CI/CD and GitOps | Planned |
 | 13 | B8 Observability and operations | Planned |

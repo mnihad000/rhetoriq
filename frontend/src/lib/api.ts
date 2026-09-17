@@ -5,6 +5,10 @@ import type {
   LiveRecentInvestigationSummary,
   LiveTrendingFeed,
   LiveTrendingInvestigationResponse,
+  B5SearchMode,
+  B5SearchResponse,
+  B5GraphResponse,
+  B5ProvenancePathsResponse,
 } from "../types/rhetoriq";
 
 declare global {
@@ -21,6 +25,7 @@ const API_BASE_URL =
 type RequestOptions = {
   body?: unknown;
   method?: "GET" | "POST";
+  signal?: AbortSignal;
 };
 
 export class ApiError extends Error {
@@ -38,6 +43,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     body: options.body ? JSON.stringify(options.body) : undefined,
     headers: options.body ? { "Content-Type": "application/json" } : undefined,
     method: options.method ?? "GET",
+    signal: options.signal,
   });
 
   if (!response.ok) {
@@ -104,6 +110,106 @@ export async function startTrendingInvestigation(topicId: string) {
 export async function getInvestigationWorkspace(investigationId: string) {
   return request<LiveInvestigationWorkspace>(
     `/api/investigations/${investigationId}`,
+  );
+}
+
+export type InvestigationEvidenceSearchOptions = {
+  q?: string;
+  mode?: B5SearchMode;
+  sourceId?: string;
+  sourceType?: string;
+  language?: string;
+  publishedAfter?: string;
+  publishedBefore?: string;
+  collectedAfter?: string;
+  collectedBefore?: string;
+  includeUnknownDates?: boolean;
+  includeLeads?: boolean;
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
+};
+
+function b5Query(options: InvestigationEvidenceSearchOptions = {}) {
+  const query = new URLSearchParams();
+  query.set("q", options.q ?? "");
+  query.set("mode", options.mode ?? "fulltext");
+  const optional: Array<[string, string | undefined]> = [
+    ["source_id", options.sourceId],
+    ["source_type", options.sourceType],
+    ["language", options.language],
+    ["published_after", options.publishedAfter],
+    ["published_before", options.publishedBefore],
+    ["collected_after", options.collectedAfter],
+    ["collected_before", options.collectedBefore],
+  ];
+  optional.forEach(([key, value]) => {
+    if (value) query.set(key, value);
+  });
+  query.set("include_unknown_dates", String(options.includeUnknownDates ?? false));
+  query.set("include_leads", String(options.includeLeads ?? false));
+  query.set("limit", String(options.limit ?? 25));
+  query.set("offset", String(options.offset ?? 0));
+  return query.toString();
+}
+
+export async function searchInvestigationEvidence(
+  investigationId: string,
+  options: InvestigationEvidenceSearchOptions = {},
+) {
+  return request<B5SearchResponse>(
+    `/api/investigations/${encodeURIComponent(investigationId)}/search?${b5Query(options)}`,
+    { signal: options.signal },
+  );
+}
+
+// Alias kept short for callers that treat the endpoint as a search service.
+export const getEvidenceSearch = searchInvestigationEvidence;
+
+export type InvestigationGraphOptions = {
+  includeInferred?: boolean;
+  relationships?: string[] | string;
+  signal?: AbortSignal;
+};
+
+export async function getInvestigationGraph(
+  investigationId: string,
+  options: InvestigationGraphOptions = {},
+) {
+  const query = new URLSearchParams();
+  query.set("include_inferred", String(options.includeInferred ?? true));
+  if (options.relationships) {
+    query.set(
+      "relationships",
+      Array.isArray(options.relationships) ? options.relationships.join(",") : options.relationships,
+    );
+  }
+  return request<B5GraphResponse>(
+    `/api/investigations/${encodeURIComponent(investigationId)}/graph?${query.toString()}`,
+    { signal: options.signal },
+  );
+}
+
+export type ProvenancePathsOptions = {
+  fromDocumentId?: string;
+  toDocumentId?: string;
+  maxDepth?: number;
+  includeInferred?: boolean;
+  signal?: AbortSignal;
+};
+
+export async function getProvenancePaths(
+  investigationId: string,
+  options: ProvenancePathsOptions = {},
+) {
+  const query = new URLSearchParams();
+  if (options.fromDocumentId) query.set("from_document_id", options.fromDocumentId);
+  if (options.toDocumentId) query.set("to_document_id", options.toDocumentId);
+  query.set("max_depth", String(options.maxDepth ?? 4));
+  query.set("include_inferred", String(options.includeInferred ?? false));
+  return request<B5ProvenancePathsResponse>(
+    `/api/investigations/${encodeURIComponent(investigationId)}/provenance-paths?${query.toString()}`,
+    { signal: options.signal },
   );
 }
 

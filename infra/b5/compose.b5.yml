@@ -1,0 +1,343 @@
+# Add to the root topology; --profile b5 enables the specialized stores/workers.
+x-b5-environment: &b5-environment
+  DEPLOYMENT_ENV: production
+  DATABASE_URL: &b5-database-url postgresql://${POSTGRES_USER:-rhetoriq}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rhetoriq}?sslmode=verify-full&sslrootcert=/etc/rhetoriq/ca/ca.crt
+  KAFKA_BOOTSTRAP_SERVERS: broker:19092
+  KAFKA_SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+  ENABLE_B5_RETRIEVAL: ${ENABLE_B5_RETRIEVAL:-false}
+  ENABLE_POSTGRES_VECTOR_SEARCH: "true"
+  EMBEDDING_LOCAL_ONLY: "true"
+  ELASTICSEARCH_URL: https://elasticsearch:9200
+  ELASTICSEARCH_USERNAME: elastic
+  ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_PASSWORD:?Set ELASTICSEARCH_PASSWORD}
+  ELASTICSEARCH_CA_CERT: /etc/rhetoriq/ca/ca.crt
+  NEO4J_URL: bolt://neo4j:7687
+  NEO4J_USERNAME: neo4j
+  NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}
+  NEO4J_CA_CERT: /etc/rhetoriq/ca/ca.crt
+  REDIS_URL: rediss://redis:6379/0
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+  REDIS_CA_CERT: /etc/rhetoriq/ca/ca.crt
+
+x-b5-worker: &b5-worker
+  image: rhetoriq-b5:local
+  build:
+    context: .
+    dockerfile: infra/b5/Dockerfile
+  profiles: [b5]
+  restart: unless-stopped
+  volumes:
+    - b5-ca-public:/etc/rhetoriq/ca:ro
+  depends_on:
+    b5-init:
+      condition: service_completed_successfully
+    topic-init:
+      condition: service_completed_successfully
+  healthcheck:
+    test: [CMD, python, -m, events.b5_probe]
+    interval: 20s
+    timeout: 5s
+    retries: 6
+    start_period: 90s
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  stop_grace_period: 45s
+
+x-b5-flink-properties: &b5-flink-properties |
+  jobmanager.rpc.address: flink-jobmanager
+  rest.bind-address: 0.0.0.0
+  taskmanager.numberOfTaskSlots: 4
+  parallelism.default: 2
+  jobmanager.memory.process.size: 1024m
+  taskmanager.memory.process.size: 2048m
+  execution.checkpointing.interval: 60s
+  execution.checkpointing.mode: EXACTLY_ONCE
+  execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+  state.checkpoints.dir: file:///opt/flink/checkpoints
+  state.savepoints.dir: file:///opt/flink/savepoints
+  restart-strategy.type: fixed-delay
+  restart-strategy.fixed-delay.attempts: 10
+  restart-strategy.fixed-delay.delay: 10s
+  python.executable: /usr/local/bin/python3.12
+  python.client.executable: /usr/local/bin/python3.12
+
+services:
+  b5-tls-init:
+    image: rhetoriq-b5:local
+    build:
+      context: .
+      dockerfile: infra/b5/Dockerfile
+    profiles: [b5]
+    restart: "no"
+    command: [python, /opt/rhetoriq/tls_init.py]
+    volumes:
+      - b5-ca-private:/ca-private
+      - b5-ca-public:/ca-public
+      - b5-elasticsearch-certs:/certificates/elasticsearch
+      - b5-neo4j-certs:/certificates/neo4j
+      - b5-redis-certs:/certificates/redis
+      - b5-postgres-certs:/certificates/postgres
+    mem_limit: 256m
+    cpus: 0.5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.4@sha256:82ac14f43fe701992e601f4cc81e1c0d7dbc5a2576d8cd736006452925df4026
+    profiles: [b5]
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      cluster.name: rhetoriq-local
+      ELASTIC_PASSWORD: ${ELASTICSEARCH_PASSWORD:?Set ELASTICSEARCH_PASSWORD}
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "true"
+      xpack.security.http.ssl.key: certs/private.key
+      xpack.security.http.ssl.certificate: certs/public.crt
+      xpack.security.transport.ssl.enabled: "true"
+      xpack.security.transport.ssl.verification_mode: certificate
+      xpack.security.transport.ssl.key: certs/private.key
+      xpack.security.transport.ssl.certificate: certs/public.crt
+      xpack.security.transport.ssl.certificate_authorities: ca/ca.crt
+    volumes:
+      - b5-elasticsearch-data:/usr/share/elasticsearch/data
+      - b5-elasticsearch-certs:/usr/share/elasticsearch/config/certs:ro
+      - b5-ca-public:/usr/share/elasticsearch/config/ca:ro
+    depends_on:
+      b5-tls-init:
+        condition: service_completed_successfully
+    mem_limit: 2g
+    cpus: 1
+    healthcheck:
+      test: [CMD-SHELL, 'curl --silent --fail --cacert config/ca/ca.crt -u "elastic:$${ELASTIC_PASSWORD}" https://elasticsearch:9200/_cluster/health >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 24
+
+  neo4j:
+    image: neo4j:2026.08.1@sha256:eabfbb042bdaca2fd5e1950db1329b22c794eee80f0eacc4e7a729d44b2e863f
+    profiles: [b5]
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}
+      B5_NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      NEO4J_server_memory_heap_initial__size: 768m
+      NEO4J_server_memory_heap_max__size: 768m
+      NEO4J_server_memory_pagecache_size: 768m
+      NEO4J_server_bolt_tls__level: REQUIRED
+      NEO4J_server_http_enabled: "false"
+      NEO4J_server_https_enabled: "false"
+      NEO4J_dbms_ssl_policy_bolt_enabled: "true"
+      NEO4J_dbms_ssl_policy_bolt_base__directory: /certificates/bolt
+      NEO4J_dbms_ssl_policy_bolt_private__key: private.key
+      NEO4J_dbms_ssl_policy_bolt_public__certificate: public.crt
+      NEO4J_dbms_ssl_policy_bolt_client__auth: NONE
+    volumes:
+      - b5-neo4j-data:/data
+      - b5-neo4j-certs:/certificates/bolt:ro
+    depends_on:
+      b5-tls-init:
+        condition: service_completed_successfully
+    mem_limit: 2g
+    cpus: 1
+    healthcheck:
+      test: [CMD-SHELL, 'cypher-shell -a bolt+ssc://localhost:7687 -u neo4j -p "$${B5_NEO4J_PASSWORD}" "RETURN 1" >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 24
+
+  redis:
+    image: redis:8.2.3-alpine@sha256:08ad0b1d280850169a790dba1393ff7a90aef951fc19632cf4d3ce4f78e679ba
+    profiles: [b5]
+    restart: unless-stopped
+    user: "999:999"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    command: [sh, -c, 'exec redis-server --port 0 --tls-port 6379 --tls-cert-file /certs/public.crt --tls-key-file /certs/private.key --tls-ca-cert-file /ca/ca.crt --tls-auth-clients no --requirepass "$${REDIS_PASSWORD}" --maxmemory 128mb --maxmemory-policy allkeys-lru --save "" --appendonly no']
+    volumes:
+      - b5-redis-certs:/certs:ro
+      - b5-ca-public:/ca:ro
+    depends_on:
+      b5-tls-init:
+        condition: service_completed_successfully
+    mem_limit: 256m
+    cpus: 0.25
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli --tls --cacert /ca/ca.crt -h redis ping | grep -q PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  b5-init:
+    <<: *b5-worker
+    restart: "no"
+    command: [python, -m, events.b5_init]
+    environment: *b5-environment
+    healthcheck:
+      disable: true
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      topic-init:
+        condition: service_completed_successfully
+    mem_limit: 256m
+    cpus: 0.5
+
+  elasticsearch-worker:
+    <<: *b5-worker
+    environment:
+      <<: *b5-environment
+      B5_WORKER_TARGET: elasticsearch
+    mem_limit: 384m
+    cpus: 0.5
+
+  neo4j-worker:
+    <<: *b5-worker
+    environment:
+      <<: *b5-environment
+      B5_WORKER_TARGET: neo4j
+    mem_limit: 384m
+    cpus: 0.5
+
+  minilm-worker:
+    <<: *b5-worker
+    environment:
+      <<: *b5-environment
+      B5_WORKER_TARGET: minilm
+    mem_limit: 1536m
+    cpus: 1
+
+  api:
+    image: rhetoriq-b5:local
+    build:
+      context: .
+      dockerfile: infra/b5/Dockerfile
+    command: [sh, -c, 'python -m migrations && python -m uvicorn main:app --host 0.0.0.0 --port 8000']
+    environment:
+      <<: *b5-environment
+    volumes:
+      - b5-ca-public:/etc/rhetoriq/ca:ro
+    mem_limit: 1g
+    cpus: 0.75
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health',timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+
+  investigation-worker:
+    image: rhetoriq-b5:local
+    build:
+      context: .
+      dockerfile: infra/b5/Dockerfile
+    environment:
+      <<: *b5-environment
+    volumes:
+      - b5-ca-public:/etc/rhetoriq/ca:ro
+    mem_limit: 640m
+    cpus: 0.75
+
+  flink-jobmanager:
+    ports: !override ["127.0.0.1:8082:8081"]
+    environment:
+      FLINK_PROPERTIES: *b5-flink-properties
+    mem_limit: 1024m
+    cpus: 0.75
+
+  flink-taskmanager:
+    environment:
+      FLINK_PROPERTIES: *b5-flink-properties
+    mem_limit: 2048m
+    cpus: 2
+
+  broker:
+    ports: !override ["127.0.0.1:9092:9092"]
+    environment:
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx384m
+    mem_limit: 640m
+    cpus: 0.75
+
+  postgres:
+    command: [postgres, -c, ssl=on, -c, ssl_cert_file=/certs/public.crt, -c, ssl_key_file=/certs/private.key]
+    volumes:
+      - b5-postgres-certs:/certs:ro
+    depends_on:
+      b5-tls-init:
+        condition: service_completed_successfully
+    mem_limit: 448m
+    cpus: 0.5
+
+  schema-registry:
+    ports: !override ["127.0.0.1:8081:8080"]
+    mem_limit: 256m
+    cpus: 0.5
+
+  outbox-publisher:
+    environment:
+      DATABASE_URL: *b5-database-url
+    volumes:
+      - b5-ca-public:/etc/rhetoriq/ca:ro
+    mem_limit: 128m
+    cpus: 0.25
+
+  document-worker:
+    environment:
+      DATABASE_URL: *b5-database-url
+    volumes:
+      - b5-ca-public:/etc/rhetoriq/ca:ro
+    mem_limit: 256m
+    cpus: 0.5
+
+  signal-worker:
+    environment:
+      DATABASE_URL: *b5-database-url
+    volumes:
+      - b5-ca-public:/etc/rhetoriq/ca:ro
+    mem_limit: 128m
+    cpus: 0.25
+
+  projection-worker:
+    environment:
+      DATABASE_URL: *b5-database-url
+    volumes:
+      - b5-ca-public:/etc/rhetoriq/ca:ro
+    mem_limit: 128m
+    cpus: 0.25
+
+  enrichment-worker:
+    environment:
+      DATABASE_URL: *b5-database-url
+    volumes:
+      - b5-ca-public:/etc/rhetoriq/ca:ro
+    mem_limit: 384m
+    cpus: 0.75
+
+  searxng:
+    mem_limit: 256m
+    cpus: 0.5
+
+  frontend:
+    mem_limit: 64m
+    cpus: 0.25
+
+  topic-init:
+    environment:
+      DATABASE_URL: *b5-database-url
+    volumes:
+      - b5-ca-public:/etc/rhetoriq/ca:ro
+    mem_limit: 128m
+    cpus: 0.25
+
+volumes:
+  b5-ca-private:
+  b5-ca-public:
+  b5-elasticsearch-certs:
+  b5-neo4j-certs:
+  b5-redis-certs:
+  b5-postgres-certs:
+  b5-elasticsearch-data:
+  b5-neo4j-data:

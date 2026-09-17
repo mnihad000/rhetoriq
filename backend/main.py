@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.health import router as health_router
+from api.b5 import router as b5_router
 from api.ingest import router as ingest_router
 from api.narratives import router as narratives_router
 from api.redis_status import router as redis_status_router
@@ -61,6 +62,7 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+app.include_router(b5_router)
 
 app.add_middleware(
     RequestLimitMiddleware,

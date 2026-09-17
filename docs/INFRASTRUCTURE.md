@@ -15,7 +15,7 @@ The repository currently supports local execution of:
 - Apache Kafka KRaft, Apicurio Registry, topic initialization, persistent broker storage, and Kafka-only leased research execution;
 - production API and frontend containers, with committed PostgreSQL migrations and CI coverage for PostgreSQL migration compatibility.
 
-A managed deployment uses the public API/frontend plus private Kafka, Apicurio, outbox/worker services, PostgreSQL, and SearXNG. Browser rendering remains optional. The repository does not currently contain deployable Flink, Kubernetes, Terraform, or ArgoCD implementations.
+A managed deployment uses the public API/frontend plus private Kafka, Apicurio, outbox/worker services, PostgreSQL, and SearXNG. Browser rendering remains optional. The repository includes the B4 Flink topology and B5 authenticated specialized-store overlay, initialization, projection workers and recovery tooling. Actual runtime acceptance remains pending. Kubernetes, Terraform and ArgoCD remain later work. See [B5 operations and B6 handoff](B5_OPERATIONS.md).
 
 ## Initial public boundary
 

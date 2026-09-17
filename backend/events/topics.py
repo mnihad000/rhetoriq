@@ -15,6 +15,8 @@ from services.kafka_runtime import SchemaRegistry, kafka_client_config, physical
 
 
 RETENTION_MS = {
+    "corpus.projections.v1": 90 * 24 * 60 * 60 * 1000,
+    "investigation.projections.v1": 180 * 24 * 60 * 60 * 1000,
     "raw.documents.v1": 14 * 24 * 60 * 60 * 1000,
     ENRICHMENT_REQUESTED_TOPIC: 30 * 24 * 60 * 60 * 1000,
     ENRICHED_DOCUMENTS_TOPIC: 30 * 24 * 60 * 60 * 1000,

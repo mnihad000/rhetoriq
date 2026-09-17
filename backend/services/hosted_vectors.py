@@ -1,6 +1,8 @@
 """Persist receipted Gemini vectors without mixing the MiniLM retrieval corpus."""
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import math
 
 from models.events import EnrichmentReceipt
@@ -20,7 +22,7 @@ def validate_hosted_vector(receipt: EnrichmentReceipt) -> list[float]:
     return vector
 
 
-def persist_hosted_vector(target: str, document_id: str, receipt: EnrichmentReceipt) -> None:
+def persist_hosted_vector(target: str, document_id: str, receipt: EnrichmentReceipt, *, connection=None) -> None:
     vector = validate_hosted_vector(receipt)
     if not is_postgres_database(target):
         # The isolated development projection stores the receipt as JSON.
@@ -28,7 +30,7 @@ def persist_hosted_vector(target: str, document_id: str, receipt: EnrichmentRece
     from migrations.runner import run_migrations
     run_migrations(target)
     literal = "[" + ",".join(str(value) for value in vector) + "]"
-    with connect(target) as db:
+    with nullcontext(connection) if connection is not None else connect(target) as db:
         db.execute(
             """INSERT INTO hosted_document_embeddings
             (document_id, artifact_id, embedding_model, input_hash, output_hash, embedding)

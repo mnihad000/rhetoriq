@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import json
 from datetime import datetime, timezone
 
@@ -608,9 +610,9 @@ class InvestigationRepository:
             return None
         return AnalystResult.model_validate_json(row["result_json"])
 
-    def save_final_report_result(self, result: FinalReportResult, *, update_stage: bool = True) -> None:
+    def save_final_report_result(self, result: FinalReportResult, *, update_stage: bool = True, connection=None) -> None:
         now = datetime.now(timezone.utc).isoformat()
-        with self._connect() as conn:
+        with nullcontext(connection) if connection is not None else self._connect() as conn:
             if update_stage:
                 conn.execute(
                     """

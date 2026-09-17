@@ -409,6 +409,12 @@ class ResearchToolRegistry:
 
     def _internal_search(self, query: str) -> list[Document]:
         self._internal_search_warning = None
+        if getattr(self.settings, "ENABLE_B5_RETRIEVAL", False):
+            from services.b5_search import SearchService
+            service = SearchService(settings=self.settings)
+            documents = service.internal_search(query, limit=self.settings.RESEARCH_SEARCH_RESULTS_PER_ACTION)
+            self._internal_search_warning = getattr(service, "warning", None)
+            return documents
         if self.settings.ENABLE_POSTGRES_VECTOR_SEARCH and self.settings.DATABASE_URL:
             try:
                 from services.postgres_corpus import DEFAULT_DIMENSION, DEFAULT_MODEL, PostgresCorpusStore

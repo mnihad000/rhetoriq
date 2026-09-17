@@ -36,6 +36,8 @@ class CorpusSearchResult:
     score: float
     source_kind: str
     citable: bool
+    embedding_input_hash: str | None = None
+    embedding_model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -258,6 +260,8 @@ class PostgresCorpusStore:
         *,
         limit: int,
         model_name: str | None = None,
+        document_ids: list[str] | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[CorpusSearchResult]:
         model_name = model_name or self._resolve_model()
         vector = validate_embedding(
@@ -268,20 +272,40 @@ class PostgresCorpusStore:
         )
         if vector is None or not any(vector):
             return []
+        if document_ids is not None and not document_ids:
+            return []
+        conditions = ["embedding IS NOT NULL", "embedding_status = 'ready'", "embedding_model = %s"]
+        parameters: list[Any] = [model_name]
+        if document_ids is not None:
+            conditions.append("document_id = ANY(%s)")
+            parameters.append(document_ids)
+        if filters is not None:
+            if not filters.get("include_leads", False):
+                conditions.append("citable = TRUE")
+            for name in ("source_id", "source_type", "language"):
+                if filters.get(name):
+                    conditions.append(f"document_json::jsonb ->> '{name}' = %s")
+                    parameters.append(filters[name])
+            publication_filter = filters.get("published_after") or filters.get("published_before")
+            if publication_filter and not filters.get("include_unknown_dates"):
+                conditions.append("COALESCE(document_json::jsonb -> 'metadata' ->> 'event_time_quality', 'published_at') != 'collected_at_fallback'")
+                conditions.append("document_json::jsonb ->> 'published_at' IS NOT NULL")
+            for field in ("published", "collected"):
+                for bound, operator in (("after", ">="), ("before", "<=")):
+                    key = f"{field}_{bound}"
+                    if filters.get(key):
+                        expression = f"NULLIF(document_json::jsonb ->> '{field}_at', '')::timestamptz {operator} %s::timestamptz"
+                        if field == "published" and filters.get("include_unknown_dates"):
+                            expression = f"({expression} OR document_json::jsonb ->> 'published_at' IS NULL)"
+                        conditions.append(expression)
+                        parameters.append(filters[key])
+        query = "SELECT document_json,source_kind,citable,embedding_input_hash,embedding_model,1-(embedding <=> %s::vector) AS similarity FROM semantic_document_corpus WHERE "
+        query += " AND ".join(conditions) + " ORDER BY embedding <=> %s::vector,document_id LIMIT %s"
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    """
-                    SELECT document_json, source_kind, citable,
-                           1 - (embedding <=> %s::vector) AS similarity
-                    FROM semantic_document_corpus
-                    WHERE embedding IS NOT NULL
-                      AND embedding_status = 'ready'
-                      AND embedding_model = %s
-                    ORDER BY embedding <=> %s::vector, document_id
-                    LIMIT %s
-                    """,
-                    (_vector_literal(vector), model_name, _vector_literal(vector), max(0, int(limit))),
+                    query,
+                    [_vector_literal(vector), *parameters, _vector_literal(vector), max(0, int(limit))],
                 )
                 rows = cursor.fetchall()
         return [
@@ -290,6 +314,8 @@ class PostgresCorpusStore:
                 score=float(row["similarity"]),
                 source_kind=str(row["source_kind"]),
                 citable=bool(row["citable"]),
+                embedding_input_hash=row.get("embedding_input_hash"),
+                embedding_model=row.get("embedding_model"),
             )
             for row in rows
         ]

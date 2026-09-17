@@ -1,0 +1,63 @@
+# B5 actual-stack acceptance overlay. Use with a separate disposable Compose
+# project and an isolated .env file; this file never clears volumes or data.
+services:
+  enrichment-worker:
+    command: ["python", "-m", "events.enrichment_worker", "--recorded-fixture", "/fixtures/provider.json"]
+    volumes:
+      - ./infra/flink/recorded-provider.json:/fixtures/provider.json:ro
+    environment:
+      GEMINI_API_KEY: ""
+      GROQ_API_KEY: ""
+      B5_RUNTIME_TESTS: "true"
+      EMBEDDING_LOCAL_ONLY: "true"
+
+  b5-acceptance:
+    image: rhetoriq-b5:local
+    build:
+      context: .
+      dockerfile: infra/b5/Dockerfile
+    profiles: [acceptance]
+    command: ["python", "-m", "events.b5_acceptance", "--mode", "load", "--disposable-stack", "--output", "/reports/b5-acceptance.json"]
+    environment:
+      B5_RUNTIME_TESTS: "true"
+      ENABLE_B5_RETRIEVAL: "true"
+      EMBEDDING_LOCAL_ONLY: "true"
+      ENABLE_POSTGRES_VECTOR_SEARCH: "true"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-rhetoriq}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rhetoriq}?sslmode=verify-full&sslrootcert=/etc/rhetoriq/ca/ca.crt"
+      KAFKA_BOOTSTRAP_SERVERS: "broker:19092"
+      KAFKA_SCHEMA_REGISTRY_URL: "http://schema-registry:8080/apis/ccompat/v7"
+      ELASTICSEARCH_URL: "https://elasticsearch:9200"
+      ELASTICSEARCH_USERNAME: "elastic"
+      ELASTICSEARCH_PASSWORD: "${ELASTICSEARCH_PASSWORD:?Set ELASTICSEARCH_PASSWORD}"
+      ELASTICSEARCH_CA_CERT: "/etc/rhetoriq/ca/ca.crt"
+      NEO4J_URL: "bolt://neo4j:7687"
+      NEO4J_USERNAME: "neo4j"
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}"
+      NEO4J_CA_CERT: "/etc/rhetoriq/ca/ca.crt"
+      REDIS_URL: "rediss://redis:6379/0"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD}"
+      REDIS_CA_CERT: "/etc/rhetoriq/ca/ca.crt"
+      B5_GENERATION: "${B5_GENERATION:-live}"
+      B5_COMPOSE_PROJECT: "${B5_COMPOSE_PROJECT:-rhetoriq_b5_test}"
+      B5_API_URL: "http://api:8000"
+    volumes:
+      - b5-acceptance-reports:/reports
+      - b5-ca-public:/etc/rhetoriq/ca:ro
+    depends_on:
+      api:
+        condition: service_started
+      enrichment-worker:
+        condition: service_started
+      elasticsearch-worker:
+        condition: service_started
+      neo4j-worker:
+        condition: service_started
+      minilm-worker:
+        condition: service_started
+    restart: "no"
+    mem_limit: 512m
+    cpus: 1
+
+volumes:
+  b5-acceptance-reports:
+  b5-ca-public:

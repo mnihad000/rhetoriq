@@ -1287,7 +1287,20 @@ def verify_investigation_claims(
             counterpoints,
             force_refresh=request.force_refresh,
         )
-        _investigation_repo.save_final_report_result(verified_report, update_stage=False)
+        from services.b5_repository import ProjectionRepository
+        from services.database import connect
+        from uuid import uuid4
+        target = _investigation_repo.db_path
+        projections = ProjectionRepository(target)
+        workspace = _investigation_repo.get_investigation_workspace(investigation_id)
+        if workspace is not None:
+            workspace = workspace.model_copy(update={"report": verified_report, "claim_verification": verification})
+        with connect(target) as conn:
+            _investigation_repo.save_final_report_result(verified_report, update_stage=False, connection=conn)
+            if workspace is not None:
+                latest = get_research_repository().get_latest_run(investigation_id)
+                projections.record_investigation(workspace, run_id=latest.run_id if latest else f"reverify:{investigation_id}",
+                                                 terminal_decision="published", source_event_id=f"reverify:{uuid4().hex}", connection=conn)
         _update_workspace_cache(investigation_id)
         return verification.model_copy(update={"cached": not request.force_refresh})
     except Exception as exc:

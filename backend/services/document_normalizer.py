@@ -51,6 +51,8 @@ class DocumentNormalizer:
         published_at = page_published_at or provider_published_at
         source_type = self._classify_source(domain)
         source_name = domain or search_result.provider
+        from services.source_references import extract_source_references
+        references, reference_limitations = extract_source_references(raw_page.html, raw_page.final_url or raw_page.url, text)
 
         return Document(
             id=self._doc_id(raw_page.final_url or raw_page.url),
@@ -69,6 +71,7 @@ class DocumentNormalizer:
             geographic_scope=self._infer_geographic_scope(source_type, domain),
             entities=self._extract_entities(title, text, plan),
             phrases=self._extract_phrases(title, search_result, plan),
+            references=references,
             metadata={
                 "provider": search_result.provider,
                 "search_query": search_result.query,
@@ -82,6 +85,8 @@ class DocumentNormalizer:
                 "publication_timestamp": published_at.isoformat() if published_at else None,
                 "collection_timestamp": raw_page.fetched_at.isoformat(),
                 "discovery_metadata": dict(search_result.metadata),
+                "reference_extraction": "b5-links-v1",
+                "reference_limitations": reference_limitations,
             },
         )
 

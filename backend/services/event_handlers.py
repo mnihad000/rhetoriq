@@ -82,15 +82,27 @@ class EventHandlers:
         event = ProcessedDocumentEvent.model_validate(envelope.model_dump(mode="json"))
         payload = event.payload
         from services.signal_repository import SignalRepository
-        SignalRepository(self.target).project_processed(event)
-        if payload.enrichment is not None:
-            from services.hosted_vectors import persist_hosted_vector
-            persist_hosted_vector(self.target, payload.document.id, payload.enrichment)
-        live_store.save(payload.document)
-        from services.postgres_corpus import sync_document
-        sync_document(self.target, payload.document, source_kind="research" if payload.run_id else "ingestion")
-        if payload.run_id:
-            self.research.save_document(payload.run_id, payload.document)
+        from services.b5_repository import ProjectionRepository
+        from services.database import connect
+        projections = ProjectionRepository(self.target)
+        signals = SignalRepository(self.target)
+        with connect(self.target) as conn:
+            snapshot = projections.record_document(
+                payload.document, source_event_id=event.event_id, enrichment=payload.enrichment,
+                processing=payload.processing, source_kind="research" if payload.run_id else "ingestion", connection=conn)
+            signals.project_processed(event, connection=conn)
+            if payload.enrichment is not None:
+                from services.hosted_vectors import persist_hosted_vector
+                persist_hosted_vector(self.target, payload.document.id, payload.enrichment, connection=conn)
+            if payload.run_id:
+                member = payload.document
+                if snapshot["data"].get("withdrawn"):
+                    member = member.model_copy(update={"metadata": {**(member.metadata or {}),
+                        "acquisition_receipt_valid": False, "evidence_status": "withdrawn",
+                        "retrieval_limitation": "Canonical document withdrawn by operator"}})
+                self.research.save_document(payload.run_id, member, connection=conn)
+        # Process-local compatibility state is updated only after durable commit.
+        live_store.save(Document.model_validate(snapshot["data"]["document"]))
 
     def schedule_signal(self, envelope: EventEnvelope) -> None:
         event = DetectedSignalEvent.model_validate(envelope.model_dump(mode="json"))

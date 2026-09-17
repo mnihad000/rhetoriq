@@ -20,6 +20,8 @@ SIGNALS_DETECTED_TOPIC = "signals.detected.v1"
 INVESTIGATIONS_REQUESTED_TOPIC = "investigations.requested.v1"
 INVESTIGATIONS_STAGE_EVENTS_TOPIC = "investigations.stage-events.v1"
 INVESTIGATIONS_COMPLETED_TOPIC = "investigations.completed.v1"
+CORPUS_PROJECTIONS_TOPIC = "corpus.projections.v1"
+INVESTIGATION_PROJECTIONS_TOPIC = "investigation.projections.v1"
 
 PRIMARY_TOPICS = (
     RAW_DOCUMENTS_TOPIC,
@@ -32,6 +34,8 @@ PRIMARY_TOPICS = (
     INVESTIGATIONS_REQUESTED_TOPIC,
     INVESTIGATIONS_STAGE_EVENTS_TOPIC,
     INVESTIGATIONS_COMPLETED_TOPIC,
+    CORPUS_PROJECTIONS_TOPIC,
+    INVESTIGATION_PROJECTIONS_TOPIC,
 )
 
 
@@ -283,6 +287,19 @@ class DeadLetterPayload(EventModel):
     failed_at: datetime
 
 
+class ProjectionPayload(EventModel):
+    snapshot_id: str
+    domain_id: str
+    revision: int = Field(ge=1)
+    semantic_hash: str
+    semantic_output_hash: str
+    operation: Literal["upsert", "withdraw", "restore"] = "upsert"
+    eligible: bool
+    source_event_id: str
+    run_id: str | None = None
+    terminal_decision: str | None = None
+
+
 class EventEnvelope(EventModel):
     event_id: str
     event_type: str
@@ -398,6 +415,18 @@ class PipelineEvaluationEvent(EventEnvelope):
     expected_event_type = "pipeline.evaluated"
 
 
+class CorpusProjectionEvent(EventEnvelope):
+    payload: ProjectionPayload
+    payload_model = ProjectionPayload
+    expected_event_type = "corpus.projection.requested"
+
+
+class InvestigationProjectionEvent(EventEnvelope):
+    payload: ProjectionPayload
+    payload_model = ProjectionPayload
+    expected_event_type = "investigation.projection.requested"
+
+
 TOPIC_EVENT_MODELS: dict[str, type[EventEnvelope]] = {
     RAW_DOCUMENTS_TOPIC: RawDocumentEvent,
     ENRICHMENT_REQUESTED_TOPIC: EnrichmentRequestedEvent,
@@ -409,6 +438,8 @@ TOPIC_EVENT_MODELS: dict[str, type[EventEnvelope]] = {
     INVESTIGATIONS_REQUESTED_TOPIC: InvestigationRequestedEvent,
     INVESTIGATIONS_STAGE_EVENTS_TOPIC: InvestigationStageEvent,
     INVESTIGATIONS_COMPLETED_TOPIC: InvestigationCompletedEvent,
+    CORPUS_PROJECTIONS_TOPIC: CorpusProjectionEvent,
+    INVESTIGATION_PROJECTIONS_TOPIC: InvestigationProjectionEvent,
 }
 
 

@@ -7,6 +7,8 @@ API workers still use the B3 event models.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -49,7 +51,7 @@ class SignalRepository:
         else:
             self._init_schema()
 
-    def project_processed(self, event: Any) -> bool:
+    def project_processed(self, event: Any, *, connection=None) -> bool:
         """Project one processed-document event, returning False on replay."""
         envelope = _event_dict(event)
         payload = envelope.get("payload") or {}
@@ -61,7 +63,7 @@ class SignalRepository:
         if semantic_hash is None and isinstance(receipt, dict):
             semantic_hash = receipt.get("output_hash")
         projected_at = _now()
-        with self._connect() as conn:
+        with nullcontext(connection) if connection is not None else self._connect() as conn:
             existing = conn.execute(
                 "SELECT event_json FROM processed_document_lineage WHERE event_id = ?", (event_id,)
             ).fetchone()

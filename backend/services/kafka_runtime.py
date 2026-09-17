@@ -19,6 +19,9 @@ from services.event_store import EventStore, OutboxRecord
 logger = logging.getLogger(__name__)
 
 _TOPICS_BY_CONSUMER_ROLE = {
+    "b5-elasticsearch": ("corpus.projections.v1",),
+    "b5-neo4j": ("corpus.projections.v1", "investigation.projections.v1"),
+    "b5-minilm": ("corpus.projections.v1",),
     "documents": ("documents.processed.v1",),
     "enrichment": ("documents.enrichment-requested.v1",),
     "signals": ("signals.detected.v1",),
@@ -70,6 +73,8 @@ def kafka_consumer_health(settings: Settings | None = None) -> dict[str, Any]:
         total_lag = 0
         all_ready = True
         for role, topics in _TOPICS_BY_CONSUMER_ROLE.items():
+            if role.startswith("b5-") and not settings.ENABLE_B5_RETRIEVAL:
+                continue
             group_id = f"{settings.KAFKA_CONSUMER_GROUP_PREFIX}-{role}-worker-v1"
             consumer = Consumer({**base, "group.id": group_id, "enable.auto.commit": False})
             role_lag = 0

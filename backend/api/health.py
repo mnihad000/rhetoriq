@@ -5,6 +5,30 @@ from services.embedding_service import get_embedding_service
 router = APIRouter()
 
 
+@router.get("/health/b5")
+def b5_health() -> dict:
+    """Dependency readiness is separate from the process liveness route."""
+    settings = get_settings()
+    if not settings.ENABLE_B5_RETRIEVAL:
+        return {"status": "disabled", "enabled": False}
+    try:
+        from api.b5 import get_b5_service
+        service = get_b5_service()
+        durable = service.repository.status()
+        dependencies = {}
+        for name, target in (("elasticsearch", service.elastic), ("neo4j", service.neo4j)):
+            dependencies[name] = target.health() if target else {"status": "unconfigured"}
+            dependencies[name].pop("details", None)
+            dependencies[name].pop("error", None)
+        dependencies["redis"] = {"status": "healthy" if service.cache.available else "unavailable"}
+        return {"status": "ready" if all(item["status"] == "healthy" for item in dependencies.values()) else "degraded",
+                "enabled": True, "dependencies": dependencies, "projections": durable,
+                "queries": {"latency":service.query_metrics,"cache":service.cache.status()},
+                "event_health_url": "/api/research/health"}
+    except Exception as exc:
+        return {"status": "degraded", "enabled": True, "reason": type(exc).__name__}
+
+
 @router.get("/health")
 def health_check() -> dict:
     settings = get_settings()

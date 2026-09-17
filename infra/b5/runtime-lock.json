@@ -1,0 +1,10 @@
+{
+  "python_base": "python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285",
+  "elasticsearch": "docker.elastic.co/elasticsearch/elasticsearch:9.5.4@sha256:82ac14f43fe701992e601f4cc81e1c0d7dbc5a2576d8cd736006452925df4026",
+  "neo4j": "neo4j:2026.08.1@sha256:eabfbb042bdaca2fd5e1950db1329b22c794eee80f0eacc4e7a729d44b2e863f",
+  "redis": "redis:8.2.3-alpine@sha256:08ad0b1d280850169a790dba1393ff7a90aef951fc19632cf4d3ce4f78e679ba",
+  "neo4j_python_driver": "6.3.0",
+  "minilm_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "minilm_revision": "c9745ed1d9f207416be6d2e6f8de32d1f16199bf",
+  "embedding_dimensions": 384
+}

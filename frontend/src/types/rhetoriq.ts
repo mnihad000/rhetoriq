@@ -356,6 +356,98 @@ export type LiveDocument = {
   source_profile?: LiveSourceProfile | null;
 };
 
+export type B5SearchMode = "fulltext" | "phrase" | "semantic" | "hybrid";
+
+export type B5EvidenceSpan = {
+  start: number;
+  end: number;
+  text: string;
+};
+
+export type B5EvidenceResult = {
+  document_id: string;
+  title: string;
+  source_name: string;
+  url: string;
+  citable: boolean;
+  score: number;
+  contributions: Record<string, unknown>;
+  spans: B5EvidenceSpan[];
+  revision: number;
+  semantic_hash: string;
+};
+
+export type B5SearchResponse = {
+  investigation_id: string;
+  query: string;
+  mode: B5SearchMode;
+  results: B5EvidenceResult[];
+  total: number;
+  next_offset: number | null;
+  source: string;
+  fallback_active: boolean;
+  pending: boolean;
+  complete: boolean;
+  limitations: string[];
+  snapshot_id?: string | null;
+  generation: number;
+};
+
+export type B5GraphNode = {
+  id: string;
+  kind: string;
+  label: string;
+  document_id?: string | null;
+  published_at?: string | null;
+  timestamp_quality?: string | null;
+  [key: string]: unknown;
+};
+
+export type B5GraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  relationship: string;
+  evidence_class: "observed" | "inferred" | "contextual";
+  method: string;
+  method_version: string;
+  document_id?: string | null;
+  investigation_id?: string | null;
+  confidence?: number | null;
+  evidence: Record<string, unknown>;
+  limitations: string[];
+  snapshot_hash: string;
+};
+
+export type B5GraphResponse = {
+  investigation_id: string;
+  nodes: B5GraphNode[];
+  edges: B5GraphEdge[];
+  source: string;
+  fallback_active: boolean;
+  pending: boolean;
+  complete: boolean;
+  limitations: string[];
+  truncated: boolean;
+  snapshot_id?: string | null;
+  generation: number;
+};
+
+export type B5ProvenancePath = {
+  nodes?: B5GraphNode[];
+  edges?: B5GraphEdge[];
+  node_ids?: string[];
+  edge_ids?: string[];
+  document_ids?: string[];
+  steps?: Array<Record<string, unknown>>;
+  explanation: string;
+  limitations?: string[];
+};
+
+export type B5ProvenancePathsResponse = Omit<B5GraphResponse, "nodes" | "edges" | "truncated"> & {
+  paths: B5ProvenancePath[];
+};
+
 export type LiveSourceProfile = {
   institution_kind: "official" | "media" | "advocacy" | "independent" | "community" | "unknown";
   content_form:

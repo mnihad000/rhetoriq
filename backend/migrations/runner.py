@@ -19,6 +19,7 @@ def run_migrations(database_url: str) -> None:
 
     with psycopg.connect(database_url, autocommit=False) as connection:
         with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(728946103)")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS schema_migrations (

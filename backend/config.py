@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # Redis configuration
     REDIS_URL: str = "redis://localhost:6379"
     REDIS_PASSWORD: str = ""
+    REDIS_CA_CERT: str = ""
     REDIS_DB: int = 0
 
     # Redis features
@@ -46,6 +47,22 @@ class Settings(BaseSettings):
     ENABLE_POSTGRES_VECTOR_SEARCH: bool = False
     POSTGRES_VECTOR_SEARCH_TOP_K: int = 8
     POSTGRES_VECTOR_BACKFILL_BATCH_SIZE: int = 100
+
+    ENABLE_B5_RETRIEVAL: bool = False
+    ELASTICSEARCH_URL: str = "https://elasticsearch:9200"
+    ELASTICSEARCH_USERNAME: str = "elastic"
+    ELASTICSEARCH_PASSWORD: str = ""
+    ELASTICSEARCH_CA_CERT: str = ""
+    NEO4J_URL: str = "bolt+s://neo4j:7687"
+    NEO4J_USERNAME: str = "neo4j"
+    NEO4J_PASSWORD: str = ""
+    NEO4J_CA_CERT: str = ""
+    B5_QUERY_TIMEOUT_SECONDS: float = 3.0
+    B5_CACHE_TTL_SECONDS: int = 30
+    B5_CACHE_MAX_BYTES: int = 262144
+    B5_WORKER_TARGET: str = "elasticsearch"
+    B5_GENERATION: str = "live"
+    B5_MODEL_REVISION: str = "c9745ed1d9f207416be6d2e6f8de32d1f16199bf"
 
     # Investigation runtime
     DEPLOYMENT_ENV: str = "development"
@@ -165,6 +182,12 @@ class Settings(BaseSettings):
             raise ValueError("DATABASE_URL is required when DEPLOYMENT_ENV=production")
         if self.REQUEST_RATE_LIMIT_PER_MINUTE < 0:
             raise ValueError("REQUEST_RATE_LIMIT_PER_MINUTE cannot be negative")
+        if self.B5_QUERY_TIMEOUT_SECONDS <= 0 or self.B5_CACHE_TTL_SECONDS < 1:
+            raise ValueError("B5 query timeout and cache TTL must be positive")
+        if self.B5_CACHE_MAX_BYTES < 1024:
+            raise ValueError("B5 cache item limit must be at least 1024 bytes")
+        if self.B5_WORKER_TARGET not in {"elasticsearch", "neo4j", "minilm"}:
+            raise ValueError("Invalid B5_WORKER_TARGET")
         if self.INVESTIGATION_START_LIMIT_PER_HOUR < 0:
             raise ValueError("INVESTIGATION_START_LIMIT_PER_HOUR cannot be negative")
         if self.REQUEST_RATE_LIMIT_MAX_CLIENTS < 1:

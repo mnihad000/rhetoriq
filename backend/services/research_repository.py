@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
@@ -86,8 +88,8 @@ class ResearchRepository:
         self.append_event(run_id, "run.queued", {"investigation_id": investigation_id, "mode": mode})
         return self.get_run(run_id)  # type: ignore[return-value]
 
-    def get_run(self, run_id: str) -> ResearchRunSummary | None:
-        with self._connect() as conn:
+    def get_run(self, run_id: str, *, connection=None) -> ResearchRunSummary | None:
+        with nullcontext(connection) if connection is not None else self._connect() as conn:
             row = conn.execute("SELECT * FROM research_runs WHERE run_id = ?", (run_id,)).fetchone()
         return self._row_to_run(row) if row else None
 
@@ -190,13 +192,14 @@ class ResearchRepository:
         usage: ResearchBudgetUsage | None = None,
         terminal_decision: str | None = None,
         warnings: list[str] | None = None,
+        connection=None,
     ) -> None:
-        current = self.get_run(run_id)
+        current = self.get_run(run_id, connection=connection)
         if current is None:
             return
         next_status = status or current.status
         completed_at = _now().isoformat() if next_status not in {"queued", "running"} else None
-        with self._connect() as conn:
+        with nullcontext(connection) if connection is not None else self._connect() as conn:
             conn.execute(
                 """
                 UPDATE research_runs SET status = ?, active_node = ?, active_action = ?,
@@ -217,10 +220,14 @@ class ResearchRepository:
                 ),
             )
 
-    def append_event(self, run_id: str, event_type: str, payload: dict[str, Any]) -> ResearchEvent:
+    def append_event(self, run_id: str, event_type: str, payload: dict[str, Any], *, connection=None) -> ResearchEvent:
         created = _now()
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with nullcontext(connection) if connection is not None else self._connect() as conn:
+            if connection is None:
+                conn.execute("BEGIN IMMEDIATE")
+            if is_postgres_database(self.db_path):
+                lock_id = int.from_bytes(hashlib.sha256(f"research:{run_id}".encode()).digest()[:8], "big", signed=True)
+                conn.execute("SELECT pg_advisory_xact_lock(?)", (lock_id,))
             row = conn.execute(
                 "SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence FROM research_events WHERE run_id = ?",
                 (run_id,),
@@ -404,8 +411,8 @@ class ResearchRepository:
             )
         return receipt_id
 
-    def save_document(self, run_id: str, document: Document) -> None:
-        with self._connect() as conn:
+    def save_document(self, run_id: str, document: Document, *, connection=None) -> None:
+        with nullcontext(connection) if connection is not None else self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO research_documents (run_id, doc_id, document_json, created_at)
@@ -416,8 +423,9 @@ class ResearchRepository:
             )
         # Indexing is additive and best effort. A model or pgvector outage
         # must never make the durable research artifact unavailable.
-        from services.postgres_corpus import sync_document
-        sync_document(self.db_path, document, source_kind="research")
+        if connection is None:
+            from services.postgres_corpus import sync_document
+            sync_document(self.db_path, document, source_kind="research")
 
     def save_candidate(self, run_id: str, candidate_key: str, result: SearchResult) -> None:
         with self._connect() as conn:

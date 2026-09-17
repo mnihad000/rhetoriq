@@ -224,6 +224,8 @@ class EmbeddingService:
 
             logger.info("Loading embedding model: %s", self.model_name)
             kwargs = {"local_files_only": True} if self.local_only else {}
+            if self.model_name == DEFAULT_EMBEDDING_MODEL_NAME:
+                kwargs["revision"] = get_settings().B5_MODEL_REVISION
             self._model = SentenceTransformer(self.model_name, **kwargs)
             test_embedding = self._model.encode("test", convert_to_numpy=True)
             self._dimension = len(test_embedding)

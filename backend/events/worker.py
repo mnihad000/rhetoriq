@@ -7,6 +7,8 @@ import logging
 import random
 import re
 import time
+import signal
+import threading
 from typing import Any
 
 from config import get_settings
@@ -27,6 +29,9 @@ logger = logging.getLogger(__name__)
 _SECRET_PATTERN = re.compile(r"(?i)(password|secret|token|authorization|api[_-]?key)\s*[=:]\s*[^\s,;]+")
 _BEARER_PATTERN = re.compile(r"(?i)\bBearer\s+[^\s,;\"']+")
 TOPICS_BY_ROLE = {
+    "b5-elasticsearch": ("corpus.projections.v1",),
+    "b5-neo4j": ("corpus.projections.v1", "investigation.projections.v1"),
+    "b5-minilm": ("corpus.projections.v1",),
     "documents": ("documents.processed.v1",),
     "signals": ("signals.detected.v1",),
     "investigations": ("investigations.requested.v1",),
@@ -94,6 +99,8 @@ class KafkaEventWorker:
     def __init__(self, role: str | None = None) -> None:
         settings = get_settings()
         self.settings = settings
+        self.role = role or settings.KAFKA_WORKER_ROLE
+        self._stop = threading.Event()
         self.registry = SchemaRegistry()
         self.publisher = KafkaEventPublisher(self.registry)
         self.store = EventStore(settings.persistence_target)
@@ -117,7 +124,22 @@ class KafkaEventWorker:
         self.consumer.subscribe([physical_topic(topic) for topic in TOPICS_BY_ROLE[role]])
 
     def run_forever(self) -> None:
-        while True:
+        if threading.current_thread() is threading.main_thread():
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                signal.signal(signum, lambda *_: self._stop.set())
+        try:
+            self._run_loop()
+        finally:
+            self.consumer.close()
+            close = getattr(self.processor.handlers, "close", None)
+            if close:
+                close()
+
+    def _run_loop(self) -> None:
+        while not self._stop.is_set():
+            heartbeat = getattr(self.processor.handlers, "heartbeat", None)
+            if heartbeat:
+                heartbeat()
             message = self.consumer.poll(1.0)
             if message is None:
                 continue
@@ -180,7 +202,7 @@ class KafkaEventWorker:
                 original_event_id=original_event_id,
                 payload_sha256=hashlib.sha256(raw).hexdigest(),
                 safe_payload=safe_payload,
-                consumer=f"{self.settings.KAFKA_CONSUMER_GROUP_PREFIX}-event-worker-v1",
+                consumer=f"{self.settings.KAFKA_CONSUMER_GROUP_PREFIX}-{self.role}-worker-v1",
                 failure_class=type(error).__name__,
                 failure_code="permanent_failure" if _is_permanent(error) else "retry_exhausted",
                 error_message=_redact(str(error)),

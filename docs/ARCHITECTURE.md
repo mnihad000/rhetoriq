@@ -1,6 +1,6 @@
 # RhetoriQ Architecture
 
-This document defines the collection, processing, evidence, and product boundaries for RhetoriQ. B2 research acquisition and the B3 Kafka backbone are implemented; Flink, Elasticsearch, Neo4j, Kubernetes, and managed-cloud operations remain later phases.
+This document defines collection, processing, evidence and product boundaries. B2/B3 are implemented, B4 provides Flink processing, and B5 provides immutable PostgreSQL authority with Elasticsearch, Neo4j, MiniLM/pgvector and Redis projections. B3?B5 actual runtime qualification is pending separately from implementation. Kubernetes and cloud operations remain later phases. See [B5 sprint](B5_SPRINT.md) and [operations](B5_OPERATIONS.md).
 
 ## Architecture status
 
@@ -23,7 +23,7 @@ This document defines the collection, processing, evidence, and product boundari
 - Production secrets, observability, and compliance controls.
 - A self-hosted LangGraph investigative workflow that chooses approved browser and search tools, with RhetoriQ-controlled tracing and evaluation.
 
-Flink, Kubernetes, Elasticsearch, and Neo4j should not be described as implemented until their roadmap phases are complete.
+Flink and specialized-store integration have implementation in the repository. Their actual throughput, recovery and deployment claims require passing B4/B5 acceptance evidence. Kubernetes remains B6; graph hypotheses never establish claim support.
 
 ## Core research rule
 
