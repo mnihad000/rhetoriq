@@ -1,0 +1,638 @@
+{
+  "$defs": {
+    "CanonicalPhrase": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "$ref": "#/$defs/EvidenceSpan"
+        },
+        "phrase": {
+          "title": "Phrase",
+          "type": "string"
+        },
+        "surface_form": {
+          "title": "Surface Form",
+          "type": "string"
+        }
+      },
+      "required": [
+        "phrase",
+        "surface_form",
+        "evidence"
+      ],
+      "title": "CanonicalPhrase",
+      "type": "object"
+    },
+    "Document": {
+      "properties": {
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "claims": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claims"
+        },
+        "collected_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Collected At"
+        },
+        "content_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Type"
+        },
+        "duplicate_of_doc_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duplicate Of Doc Id"
+        },
+        "embedding": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Embedding"
+        },
+        "entities": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Entities",
+          "type": "array"
+        },
+        "geographic_scope": {
+          "anyOf": [
+            {
+              "enum": [
+                "local",
+                "state",
+                "national",
+                "international",
+                "unknown"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Geographic Scope"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "is_seeded_demo_data": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Is Seeded Demo Data"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        },
+        "phrases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Phrases",
+          "type": "array"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published At"
+        },
+        "snippet": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snippet"
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Id"
+        },
+        "source_name": {
+          "title": "Source Name",
+          "type": "string"
+        },
+        "source_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_type": {
+          "enum": [
+            "forum",
+            "blog",
+            "local_news",
+            "national_news",
+            "commentary",
+            "speech_transcript",
+            "government_record"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_name",
+        "source_type",
+        "url",
+        "title",
+        "text",
+        "entities",
+        "phrases"
+      ],
+      "title": "Document",
+      "type": "object"
+    },
+    "EnrichedDocumentPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action Id"
+        },
+        "document": {
+          "$ref": "#/$defs/Document"
+        },
+        "enrichment": {
+          "$ref": "#/$defs/EnrichmentReceipt"
+        },
+        "input_hash": {
+          "title": "Input Hash",
+          "type": "string"
+        },
+        "investigation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Investigation Id"
+        },
+        "pipeline_version": {
+          "default": "b4-v1",
+          "title": "Pipeline Version",
+          "type": "string"
+        },
+        "quality_flags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Quality Flags",
+          "type": "array"
+        },
+        "raw_event_id": {
+          "title": "Raw Event Id",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "semantic_output_hash": {
+          "title": "Semantic Output Hash",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document",
+        "input_hash",
+        "raw_event_id",
+        "enrichment",
+        "semantic_output_hash"
+      ],
+      "title": "EnrichedDocumentPayload",
+      "type": "object"
+    },
+    "EnrichmentReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "canonical_phrases": {
+          "items": {
+            "$ref": "#/$defs/CanonicalPhrase"
+          },
+          "maxItems": 20,
+          "title": "Canonical Phrases",
+          "type": "array"
+        },
+        "embedding": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 384,
+          "minItems": 384,
+          "title": "Embedding",
+          "type": "array"
+        },
+        "embedding_input_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Embedding Input Hash"
+        },
+        "embedding_model": {
+          "default": "gemini-embedding-001",
+          "title": "Embedding Model",
+          "type": "string"
+        },
+        "embedding_truncated": {
+          "default": false,
+          "title": "Embedding Truncated",
+          "type": "boolean"
+        },
+        "entities": {
+          "items": {
+            "$ref": "#/$defs/EntityMention"
+          },
+          "maxItems": 20,
+          "title": "Entities",
+          "type": "array"
+        },
+        "failure_state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failure State"
+        },
+        "input_hash": {
+          "title": "Input Hash",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "output_hash": {
+          "title": "Output Hash",
+          "type": "string"
+        },
+        "prompt_version": {
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "schema_version": {
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "usage": {
+          "title": "Usage",
+          "type": "object"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "input_hash",
+        "output_hash",
+        "provider",
+        "model",
+        "prompt_version",
+        "schema_version",
+        "embedding"
+      ],
+      "title": "EnrichmentReceipt",
+      "type": "object"
+    },
+    "EntityMention": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "$ref": "#/$defs/EvidenceSpan"
+        },
+        "surface_form": {
+          "title": "Surface Form",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "surface_form",
+        "evidence"
+      ],
+      "title": "EntityMention",
+      "type": "object"
+    },
+    "EvidenceSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "minimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "surface_form": {
+          "title": "Surface Form",
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface_form",
+        "start",
+        "end"
+      ],
+      "title": "EvidenceSpan",
+      "type": "object"
+    },
+    "SourceProfile": {
+      "properties": {
+        "classification_confidence": {
+          "default": "low",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Classification Confidence",
+          "type": "string"
+        },
+        "classification_method": {
+          "default": "unknown",
+          "enum": [
+            "registry",
+            "heuristic",
+            "unknown"
+          ],
+          "title": "Classification Method",
+          "type": "string"
+        },
+        "content_form": {
+          "default": "unknown",
+          "enum": [
+            "original_reporting",
+            "reposting",
+            "opinion",
+            "transcript",
+            "community_post",
+            "unknown"
+          ],
+          "title": "Content Form",
+          "type": "string"
+        },
+        "ideology": {
+          "default": "unknown",
+          "enum": [
+            "left",
+            "center",
+            "right",
+            "unknown"
+          ],
+          "title": "Ideology",
+          "type": "string"
+        },
+        "institution_kind": {
+          "default": "unknown",
+          "enum": [
+            "official",
+            "media",
+            "advocacy",
+            "independent",
+            "community",
+            "unknown"
+          ],
+          "title": "Institution Kind",
+          "type": "string"
+        }
+      },
+      "title": "SourceProfile",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "causation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Causation Id"
+    },
+    "correlation_id": {
+      "title": "Correlation Id",
+      "type": "string"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "title": "Event Type",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "partition_key": {
+      "title": "Partition Key",
+      "type": "string"
+    },
+    "payload": {
+      "$ref": "#/$defs/EnrichedDocumentPayload"
+    },
+    "produced_at": {
+      "format": "date-time",
+      "title": "Produced At",
+      "type": "string"
+    },
+    "producer": {
+      "title": "Producer",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "produced_at",
+    "producer",
+    "correlation_id",
+    "partition_key",
+    "payload"
+  ],
+  "title": "EnrichedDocumentEvent",
+  "type": "object"
+}

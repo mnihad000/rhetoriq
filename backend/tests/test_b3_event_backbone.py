@@ -180,7 +180,9 @@ def test_completion_outbox_event_is_exactly_once(tmp_path) -> None:
     assert len(completions) == 1
 
 
-def test_signal_replay_does_not_duplicate_investigation_request(tmp_path) -> None:
+def test_signal_replay_does_not_duplicate_investigation_request(tmp_path, monkeypatch) -> None:
+    from config import get_settings
+    monkeypatch.setattr(get_settings(), "FLINK_AUTO_INVESTIGATE", True)
     target = str(tmp_path / "events.sqlite3")
     store = EventStore(target)
     processor = EventProcessor(store, EventHandlers(target))
@@ -193,6 +195,8 @@ def test_signal_replay_does_not_duplicate_investigation_request(tmp_path) -> Non
             baseline_window=InvestigationPlanTimeWindow(label="all_time"),
             score=SignalScore(spike=2.0, confidence=0.9, observed_count=10, baseline_count=2),
             auto_investigate=True,
+            publisher_diversity=3,
+            source_diversity=2,
         ),
         producer="test",
         correlation_id="signal-1",

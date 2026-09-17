@@ -667,7 +667,9 @@ class AutonomousResearchEngine:
                         "correlation_id": state["investigation_id"],
                     },
                 ))
-                deadline = time.monotonic() + self.settings.KAFKA_PROCESSED_WAIT_SECONDS
+                remaining_wall = max(0.0, budget.limits.wall_seconds - budget.usage.active_seconds
+                                     - (time.perf_counter() - started))
+                deadline = time.monotonic() + min(self.settings.KAFKA_PROCESSED_WAIT_SECONDS, remaining_wall)
                 persisted: dict[str, Document] = {}
                 while time.monotonic() < deadline:
                     persisted = {item.id: item for item in self.audit.get_documents(state["run_id"])}

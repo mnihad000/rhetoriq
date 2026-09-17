@@ -3,13 +3,36 @@
     "DetectedSignalPayload": {
       "additionalProperties": false,
       "properties": {
+        "artifact_lineage": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifact Lineage",
+          "type": "array"
+        },
         "auto_investigate": {
           "default": false,
           "title": "Auto Investigate",
           "type": "boolean"
         },
+        "baseline_statistics": {
+          "title": "Baseline Statistics",
+          "type": "object"
+        },
         "baseline_window": {
           "$ref": "#/$defs/InvestigationPlanTimeWindow"
+        },
+        "canonical_phrase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Canonical Phrase"
         },
         "canonical_phrase_id": {
           "title": "Canonical Phrase Id",
@@ -21,6 +44,82 @@
           },
           "title": "Coverage Limitations",
           "type": "array"
+        },
+        "event_time_quality": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Time Quality"
+        },
+        "first_observed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "First Observed At"
+        },
+        "horizon": {
+          "anyOf": [
+            {
+              "enum": [
+                "emerging",
+                "sustained"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Horizon"
+        },
+        "horizon_metrics": {
+          "title": "Horizon Metrics",
+          "type": "object"
+        },
+        "latest_observed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latest Observed At"
+        },
+        "lifecycle_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "new",
+                "active",
+                "revised",
+                "resolved"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lifecycle Status"
         },
         "observed_window": {
           "$ref": "#/$defs/InvestigationPlanTimeWindow"
@@ -55,8 +154,38 @@
           "title": "Related Phrase Ids",
           "type": "array"
         },
+        "revision": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
         "score": {
           "$ref": "#/$defs/SignalScore"
+        },
+        "scoring_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scoring Version"
+        },
+        "semantic_output_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Output Hash"
         },
         "signal_id": {
           "title": "Signal Id",

@@ -1,0 +1,9 @@
+# Use only with a separate disposable Compose project, never a live database.
+services:
+  enrichment-worker:
+    command: ["python", "-m", "events.enrichment_worker", "--recorded-fixture", "/fixtures/provider.json"]
+    volumes:
+      - ./infra/flink/recorded-provider.json:/fixtures/provider.json:ro
+    environment:
+      GEMINI_API_KEY: ""
+      GROQ_API_KEY: ""

@@ -1,0 +1,7 @@
+Flink runtime: 2.3.0
+Kafka connector source: apache/flink-connector-kafka tag v4.0.1
+Build: shaded flink-sql-connector-kafka module with -Dflink.version=2.3.0
+Candidate artifact: b4-kafka-4.0.1-flink-2.3.0.jar
+Apache Flink 2.3 documentation: no Kafka connector release is published yet.
+Qualification: candidate image build and actual delivery/checkpoint/recovery gates pending.
+Production cutover remains disabled until compatibility is demonstrated.

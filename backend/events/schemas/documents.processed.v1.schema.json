@@ -1,5 +1,28 @@
 {
   "$defs": {
+    "CanonicalPhrase": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "$ref": "#/$defs/EvidenceSpan"
+        },
+        "phrase": {
+          "title": "Phrase",
+          "type": "string"
+        },
+        "surface_form": {
+          "title": "Surface Form",
+          "type": "string"
+        }
+      },
+      "required": [
+        "phrase",
+        "surface_form",
+        "evidence"
+      ],
+      "title": "CanonicalPhrase",
+      "type": "object"
+    },
     "Document": {
       "properties": {
         "author": {
@@ -245,6 +268,163 @@
       "title": "Document",
       "type": "object"
     },
+    "EnrichmentReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "canonical_phrases": {
+          "items": {
+            "$ref": "#/$defs/CanonicalPhrase"
+          },
+          "maxItems": 20,
+          "title": "Canonical Phrases",
+          "type": "array"
+        },
+        "embedding": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 384,
+          "minItems": 384,
+          "title": "Embedding",
+          "type": "array"
+        },
+        "embedding_input_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Embedding Input Hash"
+        },
+        "embedding_model": {
+          "default": "gemini-embedding-001",
+          "title": "Embedding Model",
+          "type": "string"
+        },
+        "embedding_truncated": {
+          "default": false,
+          "title": "Embedding Truncated",
+          "type": "boolean"
+        },
+        "entities": {
+          "items": {
+            "$ref": "#/$defs/EntityMention"
+          },
+          "maxItems": 20,
+          "title": "Entities",
+          "type": "array"
+        },
+        "failure_state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failure State"
+        },
+        "input_hash": {
+          "title": "Input Hash",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "output_hash": {
+          "title": "Output Hash",
+          "type": "string"
+        },
+        "prompt_version": {
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "schema_version": {
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "usage": {
+          "title": "Usage",
+          "type": "object"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "input_hash",
+        "output_hash",
+        "provider",
+        "model",
+        "prompt_version",
+        "schema_version",
+        "embedding"
+      ],
+      "title": "EnrichmentReceipt",
+      "type": "object"
+    },
+    "EntityMention": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "$ref": "#/$defs/EvidenceSpan"
+        },
+        "surface_form": {
+          "title": "Surface Form",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "surface_form",
+        "evidence"
+      ],
+      "title": "EntityMention",
+      "type": "object"
+    },
+    "EvidenceSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "minimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "surface_form": {
+          "title": "Surface Form",
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface_form",
+        "start",
+        "end"
+      ],
+      "title": "EvidenceSpan",
+      "type": "object"
+    },
     "ProcessedDocumentPayload": {
       "additionalProperties": false,
       "properties": {
@@ -262,6 +442,17 @@
         },
         "document": {
           "$ref": "#/$defs/Document"
+        },
+        "enrichment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnrichmentReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "investigation_id": {
           "anyOf": [
@@ -289,6 +480,18 @@
           ],
           "default": null,
           "title": "Run Id"
+        },
+        "semantic_output_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Output Hash"
         }
       },
       "required": [

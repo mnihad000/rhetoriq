@@ -23,6 +23,13 @@ def replay(
 ) -> dict[str, int | str]:
     if topic not in PRIMARY_TOPICS:
         raise ValueError(f"Replay supports versioned primary topics only: {topic}")
+    if not dry_run and topic in {
+        "raw.documents.v1", "documents.enrichment-requested.v1", "documents.enriched.v1",
+    }:
+        raise ValueError(
+            "Stream-owned inputs must be replayed through Flink with recorded enrichment artifacts; "
+            "the projection replay command cannot bypass enrichment. Use --dry-run to inspect only."
+        )
     settings = get_settings()
     replay_job_id = f"replay_{uuid4().hex}"
     store = EventStore(settings.persistence_target)
@@ -43,6 +50,7 @@ def replay(
             "group.id": f"{settings.KAFKA_CONSUMER_GROUP_PREFIX}-{replay_job_id}",
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
+            "isolation.level": "read_committed",
         })
         consumer = Consumer(config)
         consumer.assign([TopicPartition(physical_topic(topic, settings), partition, start_offset)])

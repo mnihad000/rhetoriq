@@ -119,8 +119,14 @@ class Settings(BaseSettings):
     KAFKA_REQUEST_TIMEOUT_SECONDS: float = 10.0
     KAFKA_OUTBOX_BATCH_SIZE: int = 100
     KAFKA_OUTBOX_POLL_SECONDS: float = 0.25
-    KAFKA_PROCESSED_WAIT_SECONDS: float = 20.0
+    # Two transactional Flink branches become visible at checkpoint commit,
+    # with a bounded hosted enrichment step between them.
+    KAFKA_PROCESSED_WAIT_SECONDS: float = 180.0
     KAFKA_WORKER_ROLE: str = "all"
+    ENABLE_FLINK_TRENDING: bool = False
+    FLINK_REST_URL: str = "http://localhost:8082"
+    FLINK_HEARTBEAT_MAX_AGE_SECONDS: int = 1800
+    FLINK_AUTO_INVESTIGATE: bool = False
     BROWSER_SERVICE_URL: str = "http://127.0.0.1:8010"
     BROWSER_SERVICE_TOKEN: str = ""
     BROWSER_RENDERING_ENABLED: bool = False
@@ -173,6 +179,10 @@ class Settings(BaseSettings):
             raise ValueError("KAFKA_RETRY_MAX_ATTEMPTS must be at least 1")
         if self.KAFKA_OUTBOX_BATCH_SIZE < 1:
             raise ValueError("KAFKA_OUTBOX_BATCH_SIZE must be at least 1")
+        if not 1 <= self.FLINK_HEARTBEAT_MAX_AGE_SECONDS <= 1800:
+            raise ValueError("FLINK_HEARTBEAT_MAX_AGE_SECONDS must be between 1 and 1800")
+        if self.KAFKA_PROCESSED_WAIT_SECONDS < 0:
+            raise ValueError("KAFKA_PROCESSED_WAIT_SECONDS cannot be negative")
         if self.DATABASE_URL:
             return self
         db_path = Path(self.INVESTIGATION_DB_PATH)

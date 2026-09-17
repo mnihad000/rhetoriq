@@ -1,0 +1,8 @@
+{
+  "entities": [
+    {"value": "Acme", "surface_form": "Acme", "start": 0, "end": 4}
+  ],
+  "canonical_phrases": [
+    {"phrase": "energy surcharge", "surface_form": "energy surcharge", "start": 16, "end": 32}
+  ]
+}

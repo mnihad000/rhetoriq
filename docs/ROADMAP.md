@@ -363,16 +363,26 @@ The implementation and non-container verification gates are complete. On this wo
 
 ### B4. Flink Processing and Anomaly Detection
 
-**Status: Planned**
+**Status: In Progress**
 
-**Estimate: 3–5 weeks**
+One milestone-gated sprint; no separate calendar estimate. The approved scope,
+contracts, operational requirements, and acceptance gates are recorded in
+[B4_SPRINT.md](B4_SPRINT.md). Verification evidence is tracked in
+[B4_ACCEPTANCE.md](B4_ACCEPTANCE.md).
 
 #### Goals
 
-- Implement text normalization, entity and phrase extraction, embedding generation, and event-time handling.
-- Implement windowed narrative-frequency baselines and configurable spike detection.
-- Handle late events, checkpointing, replay, and deterministic output schemas.
-- Publish processed documents and detected narrative signals through Kafka.
+- Replace the raw-document consumer with a pinned Flink 2.3.0 application
+  cluster using Python 3.12, transactional Kafka sinks, and durable checkpoints.
+- Normalize documents before independently scalable hosted enrichment;
+  persist immutable Gemini/Groq extraction artifacts and normalized
+  384-dimensional Gemini embeddings, with bounded retries and explicit budgets.
+- Evaluate emerging six-hour and sustained 24-hour event-time horizons against
+  seven aligned daily baseline buckets; deduplicate exact content and revise
+  windows for allowed late events without duplicate topic cards.
+- Project document lineage, signal revisions, horizon metrics, and evaluation
+  heartbeats to PostgreSQL. Make fresh, healthy Flink projections the primary
+  Narrative Radar feed with visible legacy fallback and manual investigation.
 
 #### Dependencies
 
@@ -381,7 +391,13 @@ The implementation and non-container verification gates are complete. On this wo
 
 #### Completion condition
 
-Replaying a known event fixture produces reproducible processed documents and anomaly signals, including correct behavior for late, duplicate, and out-of-order events.
+All five sprint gates pass: contracts/cluster, deterministic enrichment,
+stream intelligence, product cutover, and final stabilization. Repeated clean
+replays must preserve payloads, event IDs, revisions, and semantic hashes;
+checkpoint recovery, failure injection, sustained/burst load, a bounded live
+provider canary, and complete regression checks must be recorded before this
+phase is marked implemented. Docker Desktop availability is a prerequisite
+for the Compose and recovery evidence.
 
 ---
 
@@ -518,7 +534,7 @@ Product and infrastructure work should alternate so the project remains demoable
 | 6 | B1 pgvector migration and PostgreSQL hardening | In Progress |
 | 7 | B2 Agent-led web research and primary sources | Completed |
 | 8 | B3 Kafka contracts and replayable ingestion | Implemented; Compose evidence pending host restart |
-| 9 | B4 Flink processing and anomaly detection | Planned |
+| 9 | B4 Flink processing and anomaly detection | In Progress; milestone-gated sprint |
 | 10 | B5 Elasticsearch and Neo4j | Planned |
 | 11 | B6 Kubernetes local deployment | Planned |
 | 12 | B7 CI/CD and GitOps | Planned |

@@ -1,3 +1,25 @@
+x-flink-environment: &flink-environment
+  KAFKA_BOOTSTRAP_SERVERS: broker:19092
+  KAFKA_SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+  PYTHONPATH: /opt/flink/usrlib/backend
+  FLINK_PROPERTIES: |
+    jobmanager.rpc.address: flink-jobmanager
+    rest.bind-address: 0.0.0.0
+    taskmanager.numberOfTaskSlots: 4
+    parallelism.default: 2
+    jobmanager.memory.process.size: 1600m
+    taskmanager.memory.process.size: 4096m
+    execution.checkpointing.interval: 60s
+    execution.checkpointing.mode: EXACTLY_ONCE
+    execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+    state.checkpoints.dir: file:///opt/flink/checkpoints
+    state.savepoints.dir: file:///opt/flink/savepoints
+    restart-strategy.type: fixed-delay
+    restart-strategy.fixed-delay.attempts: 10
+    restart-strategy.fixed-delay.delay: 10s
+    python.executable: /usr/local/bin/python3.12
+    python.client.executable: /usr/local/bin/python3.12
+
 services:
   postgres:
     image: pgvector/pgvector:0.8.6-pg17
@@ -84,6 +106,9 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: broker:19092
       KAFKA_SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
       BROWSER_RENDERING_ENABLED: "false"
+      ENABLE_FLINK_TRENDING: ${ENABLE_FLINK_TRENDING:-false}
+      FLINK_REST_URL: http://flink-jobmanager:8081
+      FLINK_AUTO_INVESTIGATE: ${FLINK_AUTO_INVESTIGATE:-false}
       CORS_ALLOW_ORIGINS: http://localhost:4173
       REQUEST_RATE_LIMIT_PER_MINUTE: ${REQUEST_RATE_LIMIT_PER_MINUTE:-120}
       INVESTIGATION_START_LIMIT_PER_HOUR: ${INVESTIGATION_START_LIMIT_PER_HOUR:-5}
@@ -202,6 +227,73 @@ services:
       topic-init:
         condition: service_completed_successfully
 
+  enrichment-worker:
+    build: ./backend
+    restart: unless-stopped
+    command: ["python", "-m", "events.enrichment_worker"]
+    environment:
+      DEPLOYMENT_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rhetoriq}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rhetoriq}
+      KAFKA_BOOTSTRAP_SERVERS: broker:19092
+      KAFKA_SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+      KAFKA_CLIENT_ID: rhetoriq-enrichment-worker
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
+      ENRICHMENT_REQUEST_BUDGET: ${ENRICHMENT_REQUEST_BUDGET:-0}
+      ENRICHMENT_SPEND_BUDGET_MICROS: ${ENRICHMENT_SPEND_BUDGET_MICROS:-0}
+      ENRICHMENT_INPUT_PRICE_MICROS_PER_MILLION: ${ENRICHMENT_INPUT_PRICE_MICROS_PER_MILLION:-0}
+      ENRICHMENT_OUTPUT_PRICE_MICROS_PER_MILLION: ${ENRICHMENT_OUTPUT_PRICE_MICROS_PER_MILLION:-0}
+      ENRICHMENT_EMBEDDING_PRICE_MICROS_PER_MILLION: ${ENRICHMENT_EMBEDDING_PRICE_MICROS_PER_MILLION:-0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      topic-init:
+        condition: service_completed_successfully
+
+  flink-jobmanager:
+    build:
+      context: .
+      dockerfile: infra/flink/Dockerfile
+    image: rhetoriq-flink:2.3.0-py3.12
+    restart: unless-stopped
+    command: ["standalone-job", "--job-classname", "org.apache.flink.client.python.PythonDriver", "--pyModule", "flink.job", "--pyFiles", "/opt/flink/usrlib/backend"]
+    environment: *flink-environment
+    ports:
+      - "8082:8081"
+    volumes:
+      - flink-checkpoints:/opt/flink/checkpoints
+      - flink-savepoints:/opt/flink/savepoints
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/overview >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 24
+    depends_on:
+      topic-init:
+        condition: service_completed_successfully
+
+  flink-taskmanager:
+    image: rhetoriq-flink:2.3.0-py3.12
+    build:
+      context: .
+      dockerfile: infra/flink/Dockerfile
+    restart: unless-stopped
+    command: ["taskmanager"]
+    environment: *flink-environment
+    volumes:
+      - flink-checkpoints:/opt/flink/checkpoints
+      - flink-savepoints:/opt/flink/savepoints
+    healthcheck:
+      test: ["CMD-SHELL", "python3.12 -c \"import json,urllib.request; d=json.load(urllib.request.urlopen('http://flink-jobmanager:8081/taskmanagers', timeout=3)); assert len(d['taskmanagers']) == 1\""]
+      interval: 10s
+      timeout: 5s
+      retries: 24
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+
   frontend:
     build: ./frontend
     restart: unless-stopped
@@ -215,3 +307,5 @@ services:
 volumes:
   postgres-data:
   kafka-data:
+  flink-checkpoints:
+  flink-savepoints:

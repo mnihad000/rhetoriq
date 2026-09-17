@@ -17,7 +17,15 @@ def _now() -> datetime:
 
 def payload_hash(value: bytes | str | dict[str, Any] | EventEnvelope) -> str:
     if isinstance(value, EventEnvelope):
-        raw = value.model_dump_json().encode("utf-8")
+        payload = value.payload
+        semantic_hash = (payload.get("semantic_output_hash") if isinstance(payload, dict)
+                         else getattr(payload, "semantic_output_hash", None))
+        if semantic_hash:
+            # Flink replays preserve semantics while publication time changes.
+            raw = json.dumps(value.model_dump(mode="json", exclude={"produced_at"}),
+                             sort_keys=True, separators=(",", ":")).encode("utf-8")
+        else:
+            raw = value.model_dump_json().encode("utf-8")
     elif isinstance(value, bytes):
         raw = value
     elif isinstance(value, str):

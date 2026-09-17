@@ -74,6 +74,18 @@ export async function getTrendingFeed(limit = 6) {
   return request<LiveTrendingFeed>(`/api/trending?limit=${limit}`);
 }
 
+export async function getTrendingStatus() {
+  return request<{
+    state: string;
+    source: string;
+    fallback_active: boolean;
+    pipeline_evaluated_at?: string | null;
+    flink: Record<string, unknown>;
+    enrichment: Record<string, unknown>;
+    signals: Record<string, unknown>;
+  }>("/api/trending/status");
+}
+
 export async function getRecentInvestigations(limit = 12) {
   return request<LiveRecentInvestigationSummary[]>(
     `/api/investigations?limit=${limit}`,

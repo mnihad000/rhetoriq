@@ -1,0 +1,129 @@
+{
+  "$defs": {
+    "PipelineEvaluationPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "title": "Details",
+          "type": "object"
+        },
+        "documents_in_state": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Documents In State",
+          "type": "integer"
+        },
+        "evaluated_at": {
+          "format": "date-time",
+          "title": "Evaluated At",
+          "type": "string"
+        },
+        "late_event_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Late Event Count",
+          "type": "integer"
+        },
+        "signal_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Signal Count",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "healthy",
+            "degraded"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "watermark": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Watermark"
+        }
+      },
+      "required": [
+        "evaluated_at",
+        "status"
+      ],
+      "title": "PipelineEvaluationPayload",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "causation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Causation Id"
+    },
+    "correlation_id": {
+      "title": "Correlation Id",
+      "type": "string"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "title": "Event Type",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "partition_key": {
+      "title": "Partition Key",
+      "type": "string"
+    },
+    "payload": {
+      "$ref": "#/$defs/PipelineEvaluationPayload"
+    },
+    "produced_at": {
+      "format": "date-time",
+      "title": "Produced At",
+      "type": "string"
+    },
+    "producer": {
+      "title": "Producer",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "produced_at",
+    "producer",
+    "correlation_id",
+    "partition_key",
+    "payload"
+  ],
+  "title": "PipelineEvaluationEvent",
+  "type": "object"
+}

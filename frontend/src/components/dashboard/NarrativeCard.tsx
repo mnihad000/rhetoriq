@@ -73,6 +73,14 @@ export default function NarrativeCard({ topic }: NarrativeCardProps) {
         </div>
       </dl>
 
+      {topic.pipeline_source === "flink" ? (
+        <div className="mt-5 grid grid-cols-2 gap-3 rounded-[1rem] bg-[rgba(124,144,172,0.08)] p-4 text-sm">
+          <Metric label="Emerging · 6h" observed={topic.emerging_observed_count} baseline={topic.emerging_baseline_count} spike={topic.emerging_spike} />
+          <Metric label="Sustained · 24h" observed={topic.sustained_observed_count} baseline={topic.sustained_baseline_count} spike={topic.sustained_spike} />
+          <p className="col-span-2 text-[var(--muted)]">{topic.publisher_count} publishers · {topic.event_time_quality} event time</p>
+        </div>
+      ) : null}
+
       <div className="mt-6 space-y-3 text-sm text-[var(--muted)]">
         <p>
           First observed in our dataset at{" "}
@@ -85,6 +93,10 @@ export default function NarrativeCard({ topic }: NarrativeCardProps) {
           <span className="font-semibold text-[var(--ink)]">Persistence:</span>{" "}
           {topic.persistence_runs} runs
         </p>
+        {topic.coverage_limitations?.length ? (
+          <p><span className="font-semibold text-[var(--ink)]">Coverage:</span> {topic.coverage_limitations.join("; ")}</p>
+        ) : null}
+        {topic.origin_disclaimer ? <p className="text-xs leading-5">{topic.origin_disclaimer}</p> : null}
       </div>
 
       <button
@@ -106,4 +118,9 @@ export default function NarrativeCard({ topic }: NarrativeCardProps) {
       ) : null}
     </article>
   );
+}
+
+function Metric({ label, observed, baseline, spike }: { label: string; observed?: number | null; baseline?: number | null; spike?: number | null }) {
+  if (observed == null && baseline == null && spike == null) return <p className="text-[var(--muted)]"><span className="font-semibold text-[var(--ink)]">{label}</span><br />No signal yet</p>;
+  return <p className="text-[var(--muted)]"><span className="font-semibold text-[var(--ink)]">{label}</span><br />{observed ?? 0} observed / {baseline ?? 0} baseline · {(spike ?? 0).toFixed(1)}×</p>;
 }

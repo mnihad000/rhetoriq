@@ -19,10 +19,12 @@ from services.event_store import EventStore, OutboxRecord
 logger = logging.getLogger(__name__)
 
 _TOPICS_BY_CONSUMER_ROLE = {
-    "documents": ("raw.documents.v1", "documents.processed.v1"),
+    "documents": ("documents.processed.v1",),
+    "enrichment": ("documents.enrichment-requested.v1",),
     "signals": ("signals.detected.v1",),
     "investigations": ("investigations.requested.v1",),
-    "projections": ("investigations.stage-events.v1", "investigations.completed.v1"),
+    "projections": ("investigations.stage-events.v1", "investigations.completed.v1",
+                    "pipeline.evaluated.v1", "documents.late.v1"),
 }
 
 
@@ -147,6 +149,7 @@ class SchemaRegistry:
         self.timeout = settings.KAFKA_REQUEST_TIMEOUT_SECONDS
         self.transport = transport
         self._schema_ids: dict[str, int] = {}
+        self._writer_schemas: dict[tuple[str, int], dict[str, Any]] = {}
         self._lock = threading.Lock()
 
     def ensure_schema(self, topic: str) -> int:
@@ -199,10 +202,23 @@ class SchemaRegistry:
         actual_id = struct.unpack(">I", value[1:5])[0]
         expected_id = self.ensure_schema(topic)
         if actual_id != expected_id:
-            raise SchemaRegistryError(
-                f"Message schema id {actual_id} is incompatible with expected schema id {expected_id}"
-            )
+            # Backward-transitive registration does not change older messages'
+            # framing IDs. Require membership in this subject, then validate
+            # both the original writer schema and our current reader contract.
+            cache_key = (topic, actual_id)
+            if cache_key not in self._writer_schemas:
+                subject = f"{physical_topic(topic)}-value"
+                with httpx.Client(timeout=self.timeout, transport=self.transport) as client:
+                    versions = client.get(f"{self.base_url}/schemas/ids/{actual_id}/versions")
+                    versions.raise_for_status()
+                    if not any(item.get("subject") == subject for item in versions.json()):
+                        raise SchemaRegistryError("Message schema is not registered for this topic")
+                    writer = client.get(f"{self.base_url}/schemas/ids/{actual_id}")
+                    writer.raise_for_status()
+                    self._writer_schemas[cache_key] = json.loads(writer.json()["schema"])
         decoded = json.loads(value[5:])
+        if actual_id != expected_id:
+            Draft202012Validator(self._writer_schemas[(topic, actual_id)]).validate(decoded)
         Draft202012Validator(event_schema(topic)).validate(decoded)
         return decoded
 

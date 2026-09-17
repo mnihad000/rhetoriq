@@ -73,6 +73,19 @@ class TrendingTopic(BaseModel):
     persistence_runs: int = 0
     provider_mix: dict[str, int] = Field(default_factory=dict)
     supporting_document_ids: list[str] = Field(default_factory=list)
+    # Stream signal fields are additive so legacy snapshots remain readable.
+    signal_id: str | None = None
+    signal_revision: int = 0
+    pipeline_source: str = "legacy"
+    emerging_observed_count: int | None = None
+    emerging_baseline_count: float | None = None
+    emerging_spike: float | None = None
+    sustained_observed_count: int | None = None
+    sustained_baseline_count: float | None = None
+    sustained_spike: float | None = None
+    event_time_quality: str = "unknown"
+    coverage_limitations: list[str] = Field(default_factory=list)
+    origin_disclaimer: str = "This signal identifies the first observation in the available dataset, not proven origin."
 
 
 class PublishedTrendingSnapshot(BaseModel):
@@ -94,6 +107,9 @@ class TrendingFeedResponse(BaseModel):
     last_reseed_at: datetime | None = None
     warning: str | None = None
     topics: list[TrendingTopic] = Field(default_factory=list)
+    source: str = "legacy"
+    fallback_active: bool = False
+    pipeline_evaluated_at: datetime | None = None
 
 
 class TrendingStatusResponse(BaseModel):
@@ -106,6 +122,13 @@ class TrendingStatusResponse(BaseModel):
     last_reseed_at: datetime | None = None
     last_error: str | None = None
     latest_snapshot_id: str | None = None
+    source: str = "legacy"
+    fallback_active: bool = False
+    pipeline_evaluated_at: datetime | None = None
+    flink: dict[str, object] = Field(default_factory=dict)
+    kafka: dict[str, object] = Field(default_factory=dict)
+    enrichment: dict[str, object] = Field(default_factory=dict)
+    signals: dict[str, object] = Field(default_factory=dict)
 
 
 class TrendingInvestigationResponse(BaseModel):

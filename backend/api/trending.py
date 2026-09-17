@@ -43,6 +43,8 @@ def refresh_trending(reseed: bool = Query(default=False)) -> TrendingFeedRespons
         last_reseed_at=snapshot.last_reseed_at,
         warning=snapshot.warning,
         topics=snapshot.topics,
+        source="legacy",
+        fallback_active=bool(getattr(_settings, "ENABLE_FLINK_TRENDING", False)),
     )
 
 

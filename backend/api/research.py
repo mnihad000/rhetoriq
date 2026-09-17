@@ -13,6 +13,8 @@ from demo_data import ALL_DOCUMENTS
 from models.research import ReplayResponse, ResearchTrailResponse
 from services.autonomous_research import get_research_manager, get_research_repository
 from services.event_store import EventStore
+from services.signal_repository import SignalRepository
+from services.flink_health import get_flink_health
 
 router = APIRouter(prefix="/api")
 
@@ -24,10 +26,27 @@ def research_health() -> dict:
     event_store = EventStore(settings.persistence_target)
     components["outbox"] = event_store.health()
     try:
+        signal_health = SignalRepository(settings.persistence_target).health()
+    except Exception as exc:
+        signal_health = {"status": "unavailable", "detail": "Signal projection unavailable", "latest_evaluation": None}
+    components["signals"] = signal_health
+    components["enrichment"] = {
+        "status": signal_health.get("enrichment_status", "unavailable"),
+        "artifact_failure_count": signal_health.get("artifact_failure_count", 0),
+        "workers": signal_health.get("enrichment_workers", []),
+    }
+    components["flink"] = get_flink_health(
+        settings,
+        evaluation=signal_health.get("latest_evaluation"),
+    )
+    try:
         from services.kafka_runtime import KafkaEventPublisher, SchemaRegistry, kafka_consumer_health
         components["kafka"] = KafkaEventPublisher().health()
         components["schema_registry"] = SchemaRegistry().health()
         components["event_consumers"] = kafka_consumer_health(settings)
+        enrichment_group = next((group for group in components["event_consumers"].get("groups", []) if group.get("role") == "enrichment"), {})
+        components["enrichment"]["backlog"] = enrichment_group.get("lag")
+        components["enrichment"]["dlq_depth"] = components["event_consumers"].get("dlq_counts", {}).get("documents.enrichment-requested.dlq.v1")
     except Exception as exc:
         unavailable = {"status": "unavailable", "detail": str(exc)[:180]}
         components["kafka"] = unavailable

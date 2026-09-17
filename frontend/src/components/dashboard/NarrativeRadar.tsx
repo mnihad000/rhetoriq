@@ -34,7 +34,7 @@ export default function NarrativeRadar({
           body="Fetching the latest published hot-topics snapshot."
           tone="neutral"
         />
-      ) : feed.state !== "ready" || feed.topics.length === 0 ? (
+      ) : feed.topics.length === 0 ? (
         <RadarStateCard
           title={feed.state === "error" ? "Live radar unavailable" : "Live radar warming"}
           body={
@@ -44,11 +44,18 @@ export default function NarrativeRadar({
           tone={feed.state === "error" ? "error" : "neutral"}
         />
       ) : (
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {feed.topics.map((topic) => (
-            <NarrativeCard key={topic.id} topic={topic} />
-          ))}
-        </div>
+        <>
+          {feed.fallback_active ? (
+            <div className="mb-5 rounded-[1rem] border border-[rgba(146,71,71,0.18)] bg-[rgba(255,244,244,0.92)] px-4 py-3 text-sm text-[rgb(130,50,50)]">
+              {feed.warning ?? "The stream is stale; these cards show the last valid legacy snapshot."}
+            </div>
+          ) : null}
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {feed.topics.map((topic) => (
+              <NarrativeCard key={topic.id} topic={topic} />
+            ))}
+          </div>
+        </>
       )}
     </Section>
   );

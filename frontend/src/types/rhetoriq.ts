@@ -51,6 +51,18 @@ export type LiveTrendingTopic = {
   persistence_runs: number;
   provider_mix: Record<string, number>;
   supporting_document_ids: string[];
+  signal_id?: string | null;
+  signal_revision?: number;
+  pipeline_source?: "legacy" | "flink" | string;
+  emerging_observed_count?: number | null;
+  emerging_baseline_count?: number | null;
+  emerging_spike?: number | null;
+  sustained_observed_count?: number | null;
+  sustained_baseline_count?: number | null;
+  sustained_spike?: number | null;
+  event_time_quality?: string;
+  coverage_limitations?: string[];
+  origin_disclaimer?: string;
 };
 
 export type LiveTrendingFeed = {
@@ -61,6 +73,9 @@ export type LiveTrendingFeed = {
   last_reseed_at?: string | null;
   warning?: string | null;
   topics: LiveTrendingTopic[];
+  source?: "legacy" | "flink" | string;
+  fallback_active?: boolean;
+  pipeline_evaluated_at?: string | null;
 };
 
 export type LiveTrendingInvestigationResponse = {

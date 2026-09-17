@@ -53,6 +53,7 @@ class EventHandlers:
         return handlers.get(topic, (f"{topic}-projector-v1", self.project_audit_event))
 
     def normalize_raw_document(self, envelope: EventEnvelope) -> None:
+        """B3 fixture support only; production source consumption belongs to Flink."""
         event = RawDocumentEvent.model_validate(envelope.model_dump(mode="json"))
         raw = event.payload
         document = raw.normalized_document or _document_from_raw(event)
@@ -80,6 +81,11 @@ class EventHandlers:
     def persist_processed_document(self, envelope: EventEnvelope) -> None:
         event = ProcessedDocumentEvent.model_validate(envelope.model_dump(mode="json"))
         payload = event.payload
+        from services.signal_repository import SignalRepository
+        SignalRepository(self.target).project_processed(event)
+        if payload.enrichment is not None:
+            from services.hosted_vectors import persist_hosted_vector
+            persist_hosted_vector(self.target, payload.document.id, payload.enrichment)
         live_store.save(payload.document)
         from services.postgres_corpus import sync_document
         sync_document(self.target, payload.document, source_kind="research" if payload.run_id else "ingestion")
@@ -89,7 +95,15 @@ class EventHandlers:
     def schedule_signal(self, envelope: EventEnvelope) -> None:
         event = DetectedSignalEvent.model_validate(envelope.model_dump(mode="json"))
         signal = event.payload
+        from services.signal_repository import SignalRepository
+        SignalRepository(self.target).project_signal(event)
         if not signal.auto_investigate:
+            return
+        if not get_settings().FLINK_AUTO_INVESTIGATE:
+            return
+        if (signal.lifecycle_status == "resolved" or signal.score.observed_count < 4
+                or signal.publisher_diversity < 3 or signal.source_diversity < 2
+                or signal.score.spike < 2 or signal.score.confidence < 0.65):
             return
         query = (signal.query_text or signal.canonical_phrase_id).strip()
         investigation_id = f"inv_signal_{signal.signal_id}"
@@ -127,8 +141,16 @@ class EventHandlers:
         from services.autonomous_research import get_research_manager
         get_research_manager().execute_queued(event.payload.run_id)
 
-    @staticmethod
-    def project_audit_event(_envelope: EventEnvelope) -> None:
+    def project_audit_event(self, envelope: EventEnvelope) -> None:
+        from services.signal_repository import SignalRepository
+        if envelope.event_type == "pipeline.evaluated":
+            payload = envelope.payload
+            data = payload.model_dump(mode="json") if hasattr(payload, "model_dump") else payload
+            SignalRepository(self.target).record_evaluation(data["evaluated_at"], data)
+            return
+        if envelope.event_type == "document.late":
+            SignalRepository(self.target).project_late(envelope)
+            return
         # Stage and completion records are transactionally stored before their
         # outbox entry. This consumer ledger proves projection delivery without
         # duplicating the authoritative PostgreSQL state.

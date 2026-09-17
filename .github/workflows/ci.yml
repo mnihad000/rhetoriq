@@ -37,6 +37,7 @@ jobs:
       - run: python -m compileall -q .
       - run: pytest tests -m "not integration"
       - run: pytest tests/test_postgres_migration.py
+      - run: pytest tests/test_b4_postgres.py
 
   frontend:
     runs-on: ubuntu-latest
@@ -59,3 +60,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: "! rg -n '<<<<<<<|=======|>>>>>>>' --glob '*.md'"
+      - name: Validate local topology without loading developer dotenv
+        run: docker compose --env-file .env.production.example config --quiet
+
+  flink-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      COMPOSE_PROJECT_NAME: rhetoriq_b4_ci
+      COMPOSE_FILE: compose.yml:infra/flink/compose.acceptance.yml
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned Python 3.12 and connector candidate
+        run: docker compose --env-file .env.production.example build flink-jobmanager enrichment-worker
+      - name: Start disposable recorded-provider topology
+        run: >-
+          docker compose --env-file .env.production.example up -d
+          flink-jobmanager flink-taskmanager enrichment-worker document-worker
+          signal-worker projection-worker
+      - name: Verify real Kafka delivery through both Flink branches
+        run: >-
+          docker compose --env-file .env.production.example run --rm --no-deps
+          enrichment-worker python -m events.b4_acceptance --disposable-stack
+      - name: Probe delivery across TaskManager and JobManager failure
+        run: |
+          docker compose --env-file .env.production.example run --rm --no-deps enrichment-worker python -m events.b4_acceptance --disposable-stack --drain-seconds 360 > recovery.json &
+          probe=$!
+          sleep 75
+          docker compose --env-file .env.production.example kill -s SIGKILL flink-taskmanager
+          docker compose --env-file .env.production.example up -d flink-taskmanager
+          sleep 15
+          docker compose --env-file .env.production.example kill -s SIGKILL flink-jobmanager
+          docker compose --env-file .env.production.example up -d flink-jobmanager
+          wait "$probe"
+          cat recovery.json
+      - name: Capture runtime evidence
+        if: always()
+        run: docker compose --env-file .env.production.example logs --no-color > b4-runtime.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: b4-runtime-evidence
+          path: |
+            b4-runtime.log
+            recovery.json
+      - name: Stop disposable topology
+        if: always()
+        run: docker compose --env-file .env.production.example down

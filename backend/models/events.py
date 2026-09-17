@@ -11,6 +11,10 @@ from models.investigation import InvestigationPlanTimeWindow
 
 
 RAW_DOCUMENTS_TOPIC = "raw.documents.v1"
+ENRICHMENT_REQUESTED_TOPIC = "documents.enrichment-requested.v1"
+ENRICHED_DOCUMENTS_TOPIC = "documents.enriched.v1"
+LATE_DOCUMENTS_TOPIC = "documents.late.v1"
+PIPELINE_EVALUATED_TOPIC = "pipeline.evaluated.v1"
 PROCESSED_DOCUMENTS_TOPIC = "documents.processed.v1"
 SIGNALS_DETECTED_TOPIC = "signals.detected.v1"
 INVESTIGATIONS_REQUESTED_TOPIC = "investigations.requested.v1"
@@ -19,6 +23,10 @@ INVESTIGATIONS_COMPLETED_TOPIC = "investigations.completed.v1"
 
 PRIMARY_TOPICS = (
     RAW_DOCUMENTS_TOPIC,
+    ENRICHMENT_REQUESTED_TOPIC,
+    ENRICHED_DOCUMENTS_TOPIC,
+    LATE_DOCUMENTS_TOPIC,
+    PIPELINE_EVALUATED_TOPIC,
     PROCESSED_DOCUMENTS_TOPIC,
     SIGNALS_DETECTED_TOPIC,
     INVESTIGATIONS_REQUESTED_TOPIC,
@@ -86,14 +94,6 @@ class ProcessingReceipt(EventModel):
     raw_event_id: str
 
 
-class ProcessedDocumentPayload(EventModel):
-    document: Document
-    processing: ProcessingReceipt
-    investigation_id: str | None = None
-    run_id: str | None = None
-    action_id: str | None = None
-
-
 class SignalScore(EventModel):
     spike: float
     confidence: float
@@ -115,6 +115,116 @@ class DetectedSignalPayload(EventModel):
     origin_disclaimer: str = "This signal identifies the first observation in the available dataset, not proven origin."
     auto_investigate: bool = False
     query_text: str | None = None
+    horizon: Literal["emerging", "sustained"] | None = None
+    revision: int = Field(default=1, ge=1)
+    lifecycle_status: Literal["new", "active", "revised", "resolved"] | None = None
+    scoring_version: str | None = None
+    baseline_statistics: dict[str, Any] = Field(default_factory=dict)
+    event_time_quality: str | None = None
+    artifact_lineage: list[str] = Field(default_factory=list)
+    horizon_metrics: dict[str, Any] = Field(default_factory=dict)
+    canonical_phrase: str | None = None
+    semantic_output_hash: str | None = None
+    first_observed_at: datetime | None = None
+    latest_observed_at: datetime | None = None
+
+
+class EvidenceSpan(EventModel):
+    surface_form: str
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def valid_range(self) -> "EvidenceSpan":
+        if self.end < self.start:
+            raise ValueError("Evidence span end must be >= start")
+        return self
+
+
+class EntityMention(EventModel):
+    value: str
+    surface_form: str
+    evidence: EvidenceSpan
+
+
+class CanonicalPhrase(EventModel):
+    phrase: str
+    surface_form: str
+    evidence: EvidenceSpan
+
+
+class EnrichmentReceipt(EventModel):
+    artifact_id: str
+    input_hash: str
+    output_hash: str
+    provider: str
+    model: str
+    prompt_version: str
+    schema_version: str
+    embedding_model: str = "gemini-embedding-001"
+    embedding: list[float] = Field(min_length=384, max_length=384)
+    embedding_input_hash: str | None = None
+    embedding_truncated: bool = False
+    entities: list[EntityMention] = Field(default_factory=list, max_length=20)
+    canonical_phrases: list[CanonicalPhrase] = Field(default_factory=list, max_length=20)
+    usage: dict[str, Any] = Field(default_factory=dict)
+    failure_state: str | None = None
+
+
+class EnrichmentRequestedPayload(EventModel):
+    document: Document
+    input_hash: str
+    pipeline_version: str = "b4-v1"
+    raw_event_id: str
+    quality_flags: list[str] = Field(default_factory=list)
+    investigation_id: str | None = None
+    run_id: str | None = None
+    action_id: str | None = None
+
+
+class EnrichedDocumentPayload(EventModel):
+    document: Document
+    input_hash: str
+    pipeline_version: str = "b4-v1"
+    raw_event_id: str
+    quality_flags: list[str] = Field(default_factory=list)
+    enrichment: EnrichmentReceipt
+    semantic_output_hash: str
+    investigation_id: str | None = None
+    run_id: str | None = None
+    action_id: str | None = None
+
+
+class LateDocumentPayload(EventModel):
+    document: Document
+    input_hash: str
+    raw_event_id: str
+    event_time_quality: str
+    lateness_seconds: float = Field(ge=0)
+    quality_flags: list[str] = Field(default_factory=list)
+    investigation_id: str | None = None
+    run_id: str | None = None
+    action_id: str | None = None
+
+
+class PipelineEvaluationPayload(EventModel):
+    evaluated_at: datetime
+    status: Literal["healthy", "degraded"]
+    watermark: datetime | None = None
+    signal_count: int = Field(default=0, ge=0)
+    late_event_count: int = Field(default=0, ge=0)
+    documents_in_state: int = Field(default=0, ge=0)
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProcessedDocumentPayload(EventModel):
+    document: Document
+    processing: ProcessingReceipt
+    semantic_output_hash: str | None = None
+    enrichment: EnrichmentReceipt | None = None
+    investigation_id: str | None = None
+    run_id: str | None = None
+    action_id: str | None = None
 
 
 class InvestigationRequestedPayload(EventModel):
@@ -264,8 +374,36 @@ class DeadLetterEvent(EventEnvelope):
     expected_event_type = "event.dead_lettered"
 
 
+class EnrichmentRequestedEvent(EventEnvelope):
+    payload: EnrichmentRequestedPayload
+    payload_model = EnrichmentRequestedPayload
+    expected_event_type = "document.enrichment_requested"
+
+
+class EnrichedDocumentEvent(EventEnvelope):
+    payload: EnrichedDocumentPayload
+    payload_model = EnrichedDocumentPayload
+    expected_event_type = "document.enriched"
+
+
+class LateDocumentEvent(EventEnvelope):
+    payload: LateDocumentPayload
+    payload_model = LateDocumentPayload
+    expected_event_type = "document.late"
+
+
+class PipelineEvaluationEvent(EventEnvelope):
+    payload: PipelineEvaluationPayload
+    payload_model = PipelineEvaluationPayload
+    expected_event_type = "pipeline.evaluated"
+
+
 TOPIC_EVENT_MODELS: dict[str, type[EventEnvelope]] = {
     RAW_DOCUMENTS_TOPIC: RawDocumentEvent,
+    ENRICHMENT_REQUESTED_TOPIC: EnrichmentRequestedEvent,
+    ENRICHED_DOCUMENTS_TOPIC: EnrichedDocumentEvent,
+    LATE_DOCUMENTS_TOPIC: LateDocumentEvent,
+    PIPELINE_EVALUATED_TOPIC: PipelineEvaluationEvent,
     PROCESSED_DOCUMENTS_TOPIC: ProcessedDocumentEvent,
     SIGNALS_DETECTED_TOPIC: DetectedSignalEvent,
     INVESTIGATIONS_REQUESTED_TOPIC: InvestigationRequestedEvent,

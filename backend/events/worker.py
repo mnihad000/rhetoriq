@@ -25,17 +25,22 @@ from services.kafka_runtime import SchemaRegistryError
 
 logger = logging.getLogger(__name__)
 _SECRET_PATTERN = re.compile(r"(?i)(password|secret|token|authorization|api[_-]?key)\s*[=:]\s*[^\s,;]+")
+_BEARER_PATTERN = re.compile(r"(?i)\bBearer\s+[^\s,;\"']+")
 TOPICS_BY_ROLE = {
-    "documents": ("raw.documents.v1", "documents.processed.v1"),
+    "documents": ("documents.processed.v1",),
     "signals": ("signals.detected.v1",),
     "investigations": ("investigations.requested.v1",),
-    "projections": ("investigations.stage-events.v1", "investigations.completed.v1"),
-    "all": PRIMARY_TOPICS,
+    "projections": ("investigations.stage-events.v1", "investigations.completed.v1",
+                    "pipeline.evaluated.v1", "documents.late.v1"),
+    # The Flink job exclusively owns raw/enriched stream processing.
+    "all": ("documents.processed.v1", "signals.detected.v1", "investigations.requested.v1",
+            "investigations.stage-events.v1", "investigations.completed.v1",
+            "pipeline.evaluated.v1", "documents.late.v1"),
 }
 
 
 def _redact(message: str) -> str:
-    return _SECRET_PATTERN.sub(r"\1=<redacted>", message)[:500]
+    return _SECRET_PATTERN.sub(r"\1=<redacted>", _BEARER_PATTERN.sub("Bearer <redacted>", message))[:500]
 
 
 def _is_permanent(error: Exception) -> bool:
@@ -104,6 +109,7 @@ class KafkaEventWorker:
         config.update({
             "group.id": f"{settings.KAFKA_CONSUMER_GROUP_PREFIX}-{role}-worker-v1",
             "enable.auto.commit": False,
+            "isolation.level": "read_committed",
             "auto.offset.reset": "earliest",
             "max.poll.interval.ms": 900000,
         })
