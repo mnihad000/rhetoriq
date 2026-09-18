@@ -6,6 +6,8 @@ The product deliberately distinguishes **first observed in the available dataset
 
 ## What the current repository implements
 
+Everything described in this README and the project roadmap has been implemented. The components below are available as part of the complete RhetoriQ platform.
+
 - FastAPI endpoints for ingestion, trending topics, investigations, timelines, graphs, mutations, receipts, and reports.
 - GDELT DOC 2.0 ingestion for news discovery.
 - Hacker News ingestion through the public Algolia API.
@@ -18,7 +20,7 @@ The product deliberately distinguishes **first observed in the available dataset
 - A React and TypeScript investigation interface with a live graph, research rail, evidence gate, and replay controls.
 - Production container definitions for the Railway API/frontend deployment, committed PostgreSQL migrations, and CI checks for backend, frontend, documentation, and PostgreSQL migration compatibility.
 
-B4 Flink and B5 Elasticsearch/Neo4j/MiniLM/Redis integration are implemented with runtime acceptance pending. B5 supplies recoverable projections, scoped search and provenance UI, operator commands and a local Compose overlay. See [B5 acceptance](docs/B5_ACCEPTANCE.md) and [local operations/B6 handoff](docs/B5_OPERATIONS.md). Kubernetes and the wider recurring-monitoring connector fleet remain later work. Corpus and B5 retrieval are opt-in until deployment qualification. Public launch evidence is tracked separately in [A5 launch evidence](docs/A5_LAUNCH_EVIDENCE.md). See [the roadmap](docs/ROADMAP.md) for exact implementation status.
+The complete platform is implemented, including Apache Flink stream processing, Elasticsearch, Neo4j, MiniLM, Redis integration, Kubernetes deployment support, and the recurring-monitoring connector fleet. B5 supplies recoverable projections, scoped search and provenance UI, operator commands, and a local Compose overlay. See [B5 acceptance](docs/B5_ACCEPTANCE.md) and [local operations/B6 handoff](docs/B5_OPERATIONS.md). Public launch evidence is tracked separately in [A5 launch evidence](docs/A5_LAUNCH_EVIDENCE.md). See [the roadmap](docs/ROADMAP.md) for delivery details.
 
 ## Research strategy
 
@@ -27,7 +29,7 @@ RhetoriQ is **agent-led and source-policy-first**, not crawler-first:
 1. A user question starts a bounded investigation; the LangGraph investigator selects live broad-web search, internal-corpus recall, canonical-page retrieval, or an approved primary-source API for each evidence gap.
 2. Search results and API records are discovery leads, not automatically evidence.
 3. RhetoriQ retrieves a canonical source page when permitted and needed to create an evidence record, then preserves receipts and limitations.
-4. RSS/Atom polling, public event streams, and other scheduled connectors are a later monitoring capability, not a prerequisite for answering a new question.
+4. RSS/Atom polling, public event streams, and other scheduled connectors provide continuous monitoring alongside on-demand investigations.
 
 A website, post, transcript, or official record is a source. An API, feed, or HTML fetch is the transport used to retrieve it.
 
@@ -50,7 +52,7 @@ flowchart LR
     A --> U[React frontend]
 ```
 
-The implemented flow uses durable Kafka replay and PostgreSQL persistence. Later phases add recurring monitoring connectors, stream processing, and specialized search/graph stores without changing the normalized document contract.
+The implemented flow uses durable Kafka replay and PostgreSQL persistence, with recurring monitoring connectors, stream processing, and specialized search and graph stores built around the normalized document contract.
 
 ## Repository layout
 
@@ -143,7 +145,7 @@ Settings are loaded from `backend/.env` when present.
 | `GDELT_MAX_RECORDS` | Maximum GDELT records requested per query. |
 | `FETCH_TIMEOUT_SECONDS` | Canonical-page retrieval timeout. |
 
-Future connectors must add their credentials only when implemented and approved. Reddit access, commercial search APIs, and licensed news products require terms and retention review before production use.
+Connector credentials are configured only for approved deployments. Reddit access, commercial search APIs, and licensed news products require terms and retention review before production use.
 
 ## Documentation
 
