@@ -1,5 +1,7 @@
 # RhetoriQ Operations Runbook
 
+For the B5 specialized-store stack, use the authenticated TLS overlay and procedures in [B5 operations and B6 handoff](B5_OPERATIONS.md). `/health` remains process liveness; `/health/b5` and `/api/research/health` report dependency availability, projection lag and degraded readiness. Actual-stack qualification remains pending.
+
 ## Start and readiness
 
 Configure fresh local values for `POSTGRES_PASSWORD` and `SEARXNG_SECRET`, then run:

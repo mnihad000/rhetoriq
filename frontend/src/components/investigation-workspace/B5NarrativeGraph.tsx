@@ -6,6 +6,7 @@ import InvestigationFlowchart from "../investigation-flowchart/InvestigationFlow
 
 type B5NarrativeGraphProps = {
   investigationId: string;
+  refreshKey?: string;
   fallbackData?: InvestigationFlowchartData;
   timeline?: Array<{ id: string; document_id: string; title: string; timestamp: string; explanation: string }>;
   onOpenSource: (documentId: string) => void;
@@ -14,6 +15,7 @@ type B5NarrativeGraphProps = {
 
 export default function B5NarrativeGraph({
   investigationId,
+  refreshKey,
   fallbackData,
   timeline = [],
   onOpenSource,
@@ -37,30 +39,47 @@ export default function B5NarrativeGraph({
   useEffect(() => {
     const controller = new AbortController();
     let current = true;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     setError(null);
-    void getInvestigationGraph(investigationId, { includeInferred, signal: controller.signal })
+    function refresh() {
+      void getInvestigationGraph(investigationId, { includeInferred, signal: controller.signal })
       .then((response) => {
         if (!current) return;
         setGraph(normalizeGraphResponse(response));
-        setSelectedEdge(null);
+        setError(null);
+        setSelectedEdge((previous) => previous ? response.edges.find((edge) => edge.id === previous.id) ?? null : null);
+        if (response.pending || response.fallback_active) retryTimer = setTimeout(refresh, 5000);
       })
       .catch((reason: unknown) => {
         if (!current || (reason instanceof DOMException && reason.name === "AbortError")) return;
         setError("The live narrative graph is unavailable; showing the stored timeline view.");
+        retryTimer = setTimeout(refresh, 10000);
       })
       .finally(() => {
         if (current) setLoading(false);
       });
+    }
+    refresh();
     return () => {
       current = false;
+      clearTimeout(retryTimer);
       controller.abort();
     };
-  }, [investigationId, includeInferred]);
+  }, [investigationId, includeInferred, refreshKey]);
 
   useEffect(() => () => pathControllerRef.current?.abort(), []);
 
-  const documentNodes = useMemo(() => (graph?.nodes ?? []).filter((node) => node.document_id), [graph]);
+  useEffect(() => {
+    pathControllerRef.current?.abort();
+    pathRequestRef.current += 1;
+    setPaths(null);
+    setFromDocumentId("");
+    setToDocumentId("");
+    setPathLoading(false);
+  }, [investigationId]);
+
+  const documentNodes = useMemo(() => (graph?.nodes ?? []).filter((node) => node.kind === "document" && node.document_id), [graph]);
   const visibleEdges = useMemo(
     () =>
       (graph?.edges ?? []).filter(

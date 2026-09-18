@@ -28,10 +28,10 @@ from models.document import Document, SourceReference
 
 
 BASE_TEXT = "Public records policy changes today."
-RECORDED_PROVIDER_FIXTURE = Path(__file__).resolve().parents[2] / "infra" / "flink" / "recorded-provider.json"
+RECORDED_PROVIDER_FIXTURE = Path(os.getenv("B5_RECORDED_PROVIDER_FIXTURE",str(Path(__file__).resolve().parents[2] / "infra" / "flink" / "recorded-provider.json")))
 LOAD_SEED_COUNT = 10_000
 LOAD_PHASES = ((3_000, 100, "initial_100_per_minute"), (2_500, 500, "burst_500_per_minute"))
-SMOKE_PHASES = ((20, 120, "smoke"),)
+SMOKE_PHASES = ((18, 120, "smoke"),)
 MAX_QUERY_CLIENTS = 10
 DEFAULT_DRAIN_SECONDS = 600
 
@@ -107,6 +107,8 @@ def build_seed_document(run_id: str, index: int, *, now: datetime | None = None)
     unique = f"Acceptance record {run_id} {index}."
     text = f"{BASE_TEXT} {unique}"
     anchor = "Public records policy"
+    target_index = 1 if index == 0 else index - 1
+    target_url = f"https://acceptance-publisher-{target_index % 20}.example/records/{run_id}/{target_index}"
     return Document(
         id=f"{run_id}:document:{index}",
         source_id=f"{domain}:record:{index}",
@@ -130,7 +132,7 @@ def build_seed_document(run_id: str, index: int, *, now: datetime | None = None)
             "acquisition_receipt_valid": True,
             "acceptance_run_id": run_id,
         },
-        references=[SourceReference(target_url="https://www.archives.gov/", anchor_text=anchor, context=text, start=0, end=len(anchor), extraction_version="b5-acceptance-v1", reference_kind="hyperlink")],
+        references=[SourceReference(target_url=target_url, anchor_text=anchor, context=text, start=0, end=len(anchor), extraction_version="b5-acceptance-v1", reference_kind="hyperlink")],
     )
 
 
@@ -222,16 +224,16 @@ def validate_disposable_settings(settings: Any, *, disposable_stack: bool) -> li
         errors.append("--disposable-stack is required for runtime acceptance")
     database_url = str(getattr(settings, "DATABASE_URL", ""))
     if database_url:
-        if (urlparse(database_url).hostname or "").lower() != "postgres":
+        if (urlparse(database_url).hostname or "").lower() != "postgres" or "test" not in urlparse(database_url).path.lower():
             errors.append("DATABASE_URL must target the disposable postgres service")
     else:
         errors.append("DATABASE_URL must be configured for the disposable postgres service")
     broker = str(getattr(settings, "KAFKA_BOOTSTRAP_SERVERS", ""))
-    if "broker" not in broker.lower():
+    if not broker or any(endpoint.split(":")[0].strip().lower() != "broker" for endpoint in broker.split(",")):
         errors.append("KAFKA_BOOTSTRAP_SERVERS must target the disposable broker service")
     for field, expected_host in (("ELASTICSEARCH_URL", "elasticsearch"), ("NEO4J_URL", "neo4j"), ("REDIS_URL", "redis")):
         value = str(getattr(settings, field, ""))
-        if value and (urlparse(value).hostname or "").lower() != expected_host:
+        if not value or (urlparse(value).hostname or "").lower() != expected_host:
             errors.append(f"{field} must target the disposable {expected_host} service")
     if not bool(getattr(settings, "EMBEDDING_LOCAL_ONLY", False)):
         errors.append("EMBEDDING_LOCAL_ONLY must be enabled")
@@ -245,7 +247,7 @@ def validate_disposable_settings(settings: Any, *, disposable_stack: bool) -> li
 class _Latency:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self.values: dict[str, list[float]] = {"raw_to_processed_ms": [], "target_freshness_ms": [], "search_ms": [], "graph_ms": [], "path_ms": [], "cache_hit_ms": [], "cache_miss_ms": []}
+        self.values: dict[str, list[float]] = {key: [] for key in ("raw_to_processed_ms", "raw_to_search_ms", "target_freshness_ms", "lexical_ms", "hybrid_ms", "graph_ms", "path_ms", "cache_hit_ms", "cache_miss_ms")}
         self.cache_unknown = 0
 
     def add(self, key: str, value_ms: float) -> None:
@@ -298,7 +300,7 @@ def _health_probe(settings: Any) -> dict[str, Any]:
     return result
 
 
-def _api_probe(stop: threading.Event, *, api_url: str, investigation_id: str, from_document_id: str, to_document_id: str, latency: _Latency, errors: list[str], clients: int = MAX_QUERY_CLIENTS, raw_started_at: float | None = None) -> None:
+def _api_probe(stop: threading.Event, *, api_url: str, investigation_id: str, from_document_id: str, to_document_id: str, latency: _Latency, errors: list[str], clients: int = MAX_QUERY_CLIENTS) -> None:
     """Run bounded concurrent search/graph/path probes during ingestion."""
 
     try:
@@ -312,19 +314,27 @@ def _api_probe(stop: threading.Event, *, api_url: str, investigation_id: str, fr
             with httpx.Client(base_url=api_url.rstrip("/"), timeout=3.0) as client:
                 while not stop.is_set():
                     for name, path in (
-                        ("search_ms", f"/api/investigations/{investigation_id}/search?q=public%20records%20policy&mode=hybrid&limit=10"),
-                        ("graph_ms", f"/api/investigations/{investigation_id}/graph?include_inferred=true"),
-                        ("path_ms", f"/api/investigations/{investigation_id}/provenance-paths?from_document_id={from_document_id}&to_document_id={to_document_id}"),
+                        ("lexical_ms", f"/api/investigations/{investigation_id}/search?q=public%20records%20policy&mode=fulltext&limit=10&use_cache=false"),
+                        ("hybrid_ms", f"/api/investigations/{investigation_id}/search?q=public%20records%20policy&mode=hybrid&limit=10&use_cache=false"),
+                        ("graph_ms", f"/api/investigations/{investigation_id}/graph?include_inferred=true&use_cache=false"),
+                        ("path_ms", f"/api/investigations/{investigation_id}/provenance-paths?from_document_id={from_document_id}&to_document_id={to_document_id}&use_cache=false"),
                     ):
                         started = time.monotonic()
                         response = client.get(path)
                         finished = time.monotonic()
                         elapsed = (finished - started) * 1000.0
                         latency.add(name, elapsed)
-                        if name == "search_ms" and raw_started_at is not None:
-                            latency.add("raw_to_search_ms", (finished - raw_started_at) * 1000.0)
                         if response.status_code >= 400:
-                            errors.append(f"{name}:{response.status_code}")
+                            if len(errors) < 100:
+                                errors.append(f"{name}:{response.status_code}")
+                        elif len(errors) < 100:
+                            payload = response.json()
+                            if payload.get("fallback_active") or payload.get("pending") or not payload.get("complete"):
+                                errors.append(name + ":degraded_query")
+                            elif name in {"lexical_ms", "hybrid_ms"} and not payload.get("results"):
+                                errors.append(name + ":seed_not_retrieved")
+                            elif name == "path_ms" and not payload.get("paths"):
+                                errors.append(name + ":recorded_path_missing")
                     # The second search is the cache comparison request.  The
                     # service may expose cache metadata in JSON or headers;
                     # timing is recorded either way.
@@ -332,16 +342,18 @@ def _api_probe(stop: threading.Event, *, api_url: str, investigation_id: str, fr
                     response = client.get(f"/api/investigations/{investigation_id}/search?q=public%20records%20policy&mode=hybrid&limit=10")
                     elapsed = (time.monotonic() - started) * 1000.0
                     if response.status_code >= 400:
-                        errors.append(f"cache_search:{response.status_code}")
+                        if len(errors) < 100:
+                            errors.append(f"cache_search:{response.status_code}")
                     body = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
                     cache_header = response.headers.get("x-b5-cache", "").lower()
-                    if "cache_hit" in body or cache_header in {"hit", "miss"}:
-                        cache_hit = bool(body.get("cache_hit")) if "cache_hit" in body else cache_header == "hit"
+                    if "cached" in body or "cache_hit" in body or cache_header in {"hit", "miss"}:
+                        cache_hit = bool(body.get("cached",body.get("cache_hit"))) if "cached" in body or "cache_hit" in body else cache_header == "hit"
                         latency.add("cache_hit_ms" if cache_hit else "cache_miss_ms", elapsed)
                     else:
                         latency.mark_cache_unknown()
         except Exception as exc:
-            errors.append(type(exc).__name__)
+            if len(errors) < 100:
+                errors.append(type(exc).__name__)
 
     threads = [threading.Thread(target=client_loop, name=f"b5-query-{index}", daemon=True) for index in range(max(1, min(MAX_QUERY_CLIENTS, clients)))]
     for thread in threads:
@@ -390,19 +402,19 @@ def recovery_probe(repository: Any, targets: dict[str, Any], *, generation_prefi
     snapshots = list(repository.current_records())
     if not snapshots:
         return {"status": "unavailable", "reason": "no_canonical_snapshots"}
-    documents_by_id = {str(snapshot["snapshot_id"]): snapshot for snapshot in snapshots if snapshot.get("kind") == "document"}
     expected = {(snapshot["domain_id"] if snapshot["kind"] == "document" else f"investigation:{snapshot['domain_id']}"): {"revision": snapshot["revision"], "semantic_hash": snapshot["semantic_hash"], "eligible": snapshot["eligible"]} for snapshot in snapshots}
     inventories: dict[str, dict[str, Any]] = {}
+    validation: dict[str, dict[str, Any]] = {}
     generations: list[str] = []
+    from events.b5_ops import rebuild, reconcile
     for index in (1, 2):
         generation = f"{generation_prefix}-{index}"
-        repository.create_generation(generation)
         generations.append(generation)
-        for name, adapter in targets.items():
-            adapter.initialize(generation)
-            for snapshot in snapshots:
-                documents = [documents_by_id[ref] for ref in snapshot.get("data", {}).get("document_snapshot_ids", []) if ref in documents_by_id]
-                adapter.apply(snapshot, generation, document_snapshots=documents)
+        rebuilt = rebuild(repository, targets, generation)
+        # Catch mutations after the first durable high-water mark. Reconciliation
+        # must still prove a stable mark; concurrent writes cannot silently pass.
+        rebuild(repository, targets, generation, after=rebuilt["next_after"])
+        validation[generation] = reconcile(repository, targets, generation)
         inventories[generation] = {name: adapter.inventory(generation) for name, adapter in targets.items()}
     document_expected = {key: value for key, value in expected.items() if not key.startswith("investigation:")}
     matching = {generation: {name: all(inventory.get(key) == value for key, value in (expected.items() if name == "neo4j" else document_expected).items()) for name, inventory in by_target.items()} for generation, by_target in inventories.items()}
@@ -435,8 +447,10 @@ def recovery_probe(repository: Any, targets: dict[str, Any], *, generation_prefi
                 limitations.append("Recovery probe cleanup could not restore the selected document.")
     else:
         limitations.append("No eligible document was available for withdrawal/restore recovery checks.")
-    checks_pass = all(all(item.values()) for item in matching.values()) and withdraw_restore_checked and cache_checked and drift_repair_checked
-    return {"status": "passed" if checks_pass else "failed", "generations": generations, "canonical_count": len(expected), "matching": matching, "withdraw_restore_checked": withdraw_restore_checked, "cache_checked": cache_checked, "drift_repair_checked": drift_repair_checked, "limitations": limitations}
+    equivalent = (inventories[generations[0]] == inventories[generations[1]]
+                  and all(record["complete"] and not record["drift"] for record in validation.values()))
+    checks_pass = equivalent and all(all(item.values()) for item in matching.values()) and withdraw_restore_checked and cache_checked and drift_repair_checked
+    return {"status": "passed" if checks_pass else "failed", "generations": generations, "canonical_count": len(expected), "matching": matching, "semantic_content_equivalent": equivalent, "validation": validation, "withdraw_restore_checked": withdraw_restore_checked, "cache_checked": cache_checked, "drift_repair_checked": drift_repair_checked, "limitations": limitations}
 
 
 def _sample_target_delivery(repository: Any, document_id: str, generation: str, latency: _Latency, seen: set[tuple[str, str]]) -> None:
@@ -466,18 +480,59 @@ def _sample_target_delivery(repository: Any, document_id: str, generation: str, 
         seen.add(key)
 
 
-def _delivery_integrity(repository: Any, document_ids: set[str], generation: str) -> dict[str, Any]:
+def _delivery_integrity(repository: Any, document_ids: set[str], generation: str, *, observations: list[dict] | None = None) -> dict[str, Any]:
     counts: dict[str, int] = {}
     missing: dict[str, list[str]] = {}
+    rows = repository.delivery_observations(generation) if observations is None else observations
+    applied = {(row["target"], row["domain_id"]) for row in rows if _applied_observation(row)}
     for target in ("elasticsearch", "neo4j", "minilm"):
-        absent = []
-        for document_id in document_ids:
-            delivery = repository.delivery(target, "document", document_id, generation)
-            if not delivery or delivery.get("status") != "applied":
-                absent.append(document_id)
+        absent = sorted(identity for identity in document_ids if (target, identity) not in applied)
         counts[target] = len(document_ids) - len(absent)
         missing[target] = absent[:100]
     return {"counts": counts, "missing": missing, "all_targets_applied": all(counts[target] == len(document_ids) for target in counts)}
+
+
+def _applied_observation(row: dict) -> bool:
+    return (row.get("status") == "applied" and row.get("revision") == row.get("applied_revision")
+            and row.get("semantic_hash") == row.get("applied_hash"))
+
+
+def _sample_deliveries(rows: list[dict], measured_ids: set[str], latency: _Latency, seen: set[tuple[str, str]]) -> None:
+    for row in rows:
+        key = (row.get("target"), row["domain_id"])
+        if row["domain_id"] not in measured_ids or key in seen or not _applied_observation(row) or not row.get("applied_at"):
+            continue
+        created = datetime.fromisoformat(str(row["created_at"]).replace("Z", "+00:00"))
+        applied = datetime.fromisoformat(str(row["applied_at"]).replace("Z", "+00:00"))
+        latency.add("target_freshness_ms", max(0.0, (applied - created).total_seconds() * 1000))
+        seen.add(key)
+
+
+def _sustained_backlog_growth(samples: list[dict], windows: list[dict]) -> bool | None:
+    """Flag three consecutive minute increases exceeding 10% of input rate.
+
+    Evaluate each measured rate window separately, rather than treating the
+    transition to a burst as sustained growth. Preserve the raw trace in JSON.
+    """
+    if not samples or not windows:
+        return None
+    for window in windows:
+        minutes = int(window["duration_seconds"] // 60)
+        buckets = [[] for _ in range(minutes)]
+        for sample in samples:
+            index = int((sample["elapsed_seconds"] - window["started_elapsed_seconds"]) // 60)
+            if 0 <= index < minutes:
+                buckets[index].append(sample["pending"])
+        if minutes >= 4 and any(not bucket for bucket in buckets):
+            return None
+        for target in ("elasticsearch", "neo4j", "minilm"):
+            averages = [statistics.mean(item[target] for item in bucket) for bucket in buckets if bucket]
+            growing = 0
+            for before, after in zip(averages, averages[1:]):
+                growing = growing + 1 if after - before > window["rate_per_minute"] * 0.1 else 0
+                if growing >= 3:
+                    return True
+    return False
 
 
 def _wait_for_canonical_documents(repository: Any, document_ids: Iterable[str], timeout: float = 180.0) -> bool:
@@ -614,7 +669,6 @@ def run_acceptance(*, mode: str = "smoke", disposable_stack: bool = False, outpu
                     published_at = publish_times.get(document_id)
                     if published_at is not None:
                         latencies.add("raw_to_processed_ms", (processed_at - published_at) * 1000.0)
-                _sample_target_delivery(repository, document_id, str(getattr(settings, "B5_GENERATION", "live")), latencies, delivery_seen)
         except Exception as exc:
             failures.append(type(exc).__name__)
 
@@ -622,6 +676,38 @@ def run_acceptance(*, mode: str = "smoke", disposable_stack: bool = False, outpu
     collector.start()
     documents = build_seed_documents(run_id, plan.seed_documents)
     generation = str(getattr(settings, "B5_GENERATION", "live"))
+    warmup_count = plan.backlog_documents if mode == "load" else min(2, len(documents))
+    measured_ids = {document.id for document in documents[warmup_count:]}
+    visibility_seen: set[str] = set()
+    backlog_samples: list[dict] = []
+    phase_windows: list[dict] = []
+
+    def observe() -> None:
+        from services.b5_targets import ElasticsearchTarget
+        adapter = ElasticsearchTarget(settings)
+        try:
+            while not stop.is_set():
+                rows = repository.delivery_observations(generation)
+                _sample_deliveries(rows, measured_ids, latencies, delivery_seen)
+                published_ids = set(publish_times)
+                integrity = _delivery_integrity(repository, published_ids, generation, observations=rows)
+                backlog_samples.append({"elapsed_seconds": round(time.monotonic() - started, 3),
+                                        "published": len(published_ids), "processed": len(processed),
+                                        "applied": integrity["counts"],
+                                        "pending": {target: len(published_ids) - count for target, count in integrity["counts"].items()}})
+                candidates = sorted((published_ids & measured_ids) - visibility_seen)
+                visible = adapter.visible_document_ids(generation, candidates)
+                now = time.monotonic()
+                for identity in visible:
+                    latencies.add("raw_to_search_ms", (now - publish_times[identity]) * 1000)
+                visibility_seen.update(visible)
+                stop.wait(2)
+        except Exception as exc:
+            failures.append("observer:" + type(exc).__name__)
+        finally:
+            adapter.close()
+
+    observer: threading.Thread | None = None
     query_probe: threading.Thread | None = None
     workspace_info: dict[str, Any] | None = None
     raw_started_at: float | None = None
@@ -631,20 +717,31 @@ def run_acceptance(*, mode: str = "smoke", disposable_stack: bool = False, outpu
         # Seed the bounded backlog before the measured rate windows.  Every
         # record still uses raw Kafka, but the preseed is excluded from paced
         # throughput accounting and leaves no unpaced tail after the burst.
-        preseed_documents = documents[:plan.backlog_documents]
+        preseed_documents = documents[:warmup_count]
         for document in preseed_documents:
             if raw_started_at is None:
                 raw_started_at = time.monotonic()
             publish_times[document.id] = time.monotonic()
             publisher.publish("raw.documents.v1", raw_event_from_document(document, producer="b5-acceptance", correlation_id=run_id))
             published += 1
-        probe_documents = documents[:min(200, len(documents))]
+        probe_documents = documents[:min(200,warmup_count)]
         if not _wait_for_canonical_documents(repository, [document.id for document in probe_documents], timeout=min(180.0, float(plan.drain_seconds))):
             raise RuntimeError("canonical_probe_documents_not_persisted")
         workspace_info = persist_acceptance_investigation(repository, run_id, probe_documents)
-        query_probe = threading.Thread(target=_api_probe, kwargs={"stop": stop, "api_url": os.getenv("B5_API_URL", "http://127.0.0.1:8000"), "investigation_id": workspace_info["investigation_id"], "from_document_id": probe_documents[0].id, "to_document_id": probe_documents[1].id if len(probe_documents) > 1 else probe_documents[0].id, "latency": latencies, "errors": query_errors, "clients": plan.query_clients, "raw_started_at": raw_started_at}, name="b5-acceptance-api-probes", daemon=True)
+        warmup_deadline = time.monotonic() + max(180, plan.drain_seconds)
+        while True:
+            document_ready = _delivery_integrity(repository, {document.id for document in preseed_documents}, generation)["all_targets_applied"]
+            graph_ready = repository.coverage([workspace_info["snapshot"]], generation).get("neo4j", {}).get("pending", 1) == 0
+            if document_ready and graph_ready:
+                break
+            if time.monotonic() >= warmup_deadline or failures:
+                raise RuntimeError("warmup_projection_timeout")
+            time.sleep(2)
+        observer = threading.Thread(target=observe, name="b5-projection-observer", daemon=True)
+        observer.start()
+        query_probe = threading.Thread(target=_api_probe, kwargs={"stop": stop, "api_url": os.getenv("B5_API_URL", "http://127.0.0.1:8000"), "investigation_id": workspace_info["investigation_id"], "from_document_id": probe_documents[0].id, "to_document_id": probe_documents[1].id if len(probe_documents) > 1 else probe_documents[0].id, "latency": latencies, "errors": query_errors, "clients": plan.query_clients}, name="b5-acceptance-api-probes", daemon=True)
         query_probe.start()
-        paced_offset = plan.backlog_documents
+        paced_offset = warmup_count
         for phase in plan.phases:
             phase_documents = documents[paced_offset:paced_offset + phase.count]
             phase_started = time.monotonic()
@@ -660,22 +757,26 @@ def run_acceptance(*, mode: str = "smoke", disposable_stack: bool = False, outpu
                 paced_offset += 1
                 if failures:
                     raise RuntimeError(failures[0])
+            # Complete the entire specified rate window, including its final interval.
+            stop.wait(max(0, phase_started + len(phase_documents) * 60 / phase.rate_per_minute - time.monotonic()))
+            phase_windows.append({"name": phase.name, "count": len(phase_documents), "rate_per_minute": phase.rate_per_minute,
+                                  "started_elapsed_seconds": phase_started - started, "duration_seconds": time.monotonic() - phase_started})
     except Exception as exc:
-        failures.append(f"{type(exc).__name__}:{exc}")
+        failures.append(type(exc).__name__)
     finally:
         deadline = time.monotonic() + plan.drain_seconds
         next_integrity_check = 0.0
         while time.monotonic() < deadline and not failures:
-            for document_id in list(processed):
-                _sample_target_delivery(repository, document_id, generation, latencies, delivery_seen)
-            if len(processed) >= published and time.monotonic() >= next_integrity_check and _delivery_integrity(repository, set(processed), generation)["all_targets_applied"]:
-                break
-            next_integrity_check = time.monotonic() + 2.0
+            if time.monotonic() >= next_integrity_check:
+                if len(processed) >= published and _delivery_integrity(repository, set(processed), generation)["all_targets_applied"] and measured_ids.issubset(visibility_seen):
+                    break
+                next_integrity_check = time.monotonic() + 2
             time.sleep(0.5)
-        for document_id in list(processed):
-            _sample_target_delivery(repository, document_id, generation, latencies, delivery_seen)
+        _sample_deliveries(repository.delivery_observations(generation), measured_ids, latencies, delivery_seen)
         stop.set()
         collector.join(timeout=5)
+        if observer is not None:
+            observer.join(timeout=5)
         if query_probe is not None:
             query_probe.join(timeout=5)
         consumer.close()
@@ -700,7 +801,7 @@ def run_acceptance(*, mode: str = "smoke", disposable_stack: bool = False, outpu
     duplicate_semantic_relations = _duplicate_semantic_relation_probe(settings, workspace_info["investigation_id"], [document.id for document in documents[:200]], generation) if workspace_info else None
     oom_events = _oom_probe()
     latency_report = latencies.report()
-    latency_ok = all(latency_report[key]["p95_ms"] is not None and latency_report[key]["p95_ms"] <= limit for key, limit in (("target_freshness_ms", 30_000), ("search_ms", 1_000), ("graph_ms", 1_000), ("path_ms", 2_000)))
+    latency_ok = all(latency_report[key]["p95_ms"] is not None and latency_report[key]["p95_ms"] <= limit for key, limit in (("target_freshness_ms", 30_000), ("lexical_ms", 1_000), ("hybrid_ms", 2_000), ("graph_ms", 1_000), ("path_ms", 2_000)))
     cache_metrics = latency_report["cache_observations"]
     cache_ok = cache_metrics["unknown"] == 0 and latency_report["cache_hit_ms"]["count"] > 0 and latency_report["cache_miss_ms"]["count"] > 0
     target_ok = all(
@@ -712,14 +813,22 @@ def run_acceptance(*, mode: str = "smoke", disposable_stack: bool = False, outpu
     )
     kafka_health = health.get("kafka", {}) if isinstance(health.get("kafka"), dict) else {}
     broker_dlq_total = kafka_health.get("dlq_total")
+    flink_health = health.get("flink", {})
+    flink_checkpoints_ok = flink_health.get("status") == "healthy" and flink_health.get("checkpoint_health", {}).get("status") == "healthy"
     integrity_ok = broker_dlq_total == 0 and delivery_integrity["all_targets_applied"] if broker_dlq_total is not None else False
-    backlog_drained = expected_ids == processed_ids
+    backlog_drained = expected_ids == processed_ids and delivery_integrity["all_targets_applied"] and measured_ids.issubset(visibility_seen)
+    sustained_growth = _sustained_backlog_growth(backlog_samples, phase_windows)
     required_measures_known = (
         latency_ok
         and cache_ok
         and duplicate_semantic_relations is False
-        and oom_events is not None
+        and oom_events == 0
         and broker_dlq_total is not None
+        and sustained_growth is False
+        and len(delivery_seen) == len(measured_ids) * 3
+        and measured_ids.issubset(visibility_seen)
+        and len(phase_windows) == len(plan.phases)
+        and flink_checkpoints_ok
     )
     run_ok = no_loss and backlog_drained and not failures and not query_errors and target_ok and integrity_ok
     load_qualified = plan.mode == "load" and run_ok and required_measures_known
@@ -729,14 +838,16 @@ def run_acceptance(*, mode: str = "smoke", disposable_stack: bool = False, outpu
         "mode": plan.mode,
         "run_id": run_id,
         "plan": {**asdict(plan), "phases": [asdict(phase) for phase in plan.phases]},
-        "seed": {"requested": plan.seed_documents, "preseeded": plan.backlog_documents, "paced_published": paced_published, "published": published, "processed": len(processed), "canonical": len(canonical_ids), "lost_document_ids": sorted(expected_ids - processed_ids)[:100], "unexpected_document_ids": sorted(processed_ids - expected_ids)[:100]},
+        "seed": {"requested": plan.seed_documents, "preseeded": warmup_count, "paced_published": paced_published, "published": published, "processed": len(processed), "canonical": len(canonical_ids), "lost_document_ids": sorted(expected_ids - processed_ids)[:100], "unexpected_document_ids": sorted(processed_ids - expected_ids)[:100]},
         "latency": latency_report,
+        "phase_windows": phase_windows,
+        "backlog_samples": backlog_samples,
         "targets": target_probe,
         "recovery": recovery,
-        "integrity": {"no_lost_canonical_documents": no_loss, "delivery_integrity": delivery_integrity, "duplicate_semantic_relations": duplicate_semantic_relations, "oom_events": oom_events, "broker_dlq_total": broker_dlq_total, "backlog_drained": backlog_drained, "latency_thresholds_met": latency_ok, "cache_metrics_complete": cache_ok, "targets_match_canonical": target_ok, "delivery_errors": failures},
+        "integrity": {"no_lost_canonical_documents": no_loss, "delivery_integrity": delivery_integrity, "duplicate_semantic_relations": duplicate_semantic_relations, "oom_events": oom_events, "broker_dlq_total": broker_dlq_total, "backlog_drained": backlog_drained, "sustained_backlog_growth": sustained_growth, "freshness_samples_complete": len(delivery_seen) == len(measured_ids) * 3, "raw_to_search_samples_complete": measured_ids.issubset(visibility_seen), "latency_thresholds_met": latency_ok, "cache_metrics_complete": cache_ok, "targets_match_canonical": target_ok, "delivery_errors": failures},
         "health": health,
         "runtime": {"executed": True, "elapsed_seconds": round(time.monotonic() - started, 2), "failures": failures, "probe_seconds": probe_seconds, "concurrent_query_clients": plan.query_clients, "query_errors": query_errors[:100]},
-        "limitations": [reason for reason, missing in (("cache hit/miss classification unavailable", not cache_ok), ("duplicate semantic relation probe unavailable", duplicate_semantic_relations is None), ("container OOM probe unavailable; set B5_COMPOSE_PROJECT", oom_events is None), ("Kafka DLQ health unavailable", broker_dlq_total is None)) if missing],
+        "limitations": [reason for reason, missing in (("cache hit/miss classification unavailable", not cache_ok), ("duplicate semantic relation probe unavailable", duplicate_semantic_relations is None), ("container OOM probe unavailable; use the host qualification supervisor", oom_events is None), ("Kafka DLQ health unavailable", broker_dlq_total is None), ("Flink completed checkpoint evidence unavailable", not flink_checkpoints_ok)) if missing],
     }
     if output:
         Path(output).write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
@@ -753,7 +864,7 @@ def main() -> int:
     args = parser.parse_args()
     result = run_acceptance(mode=args.mode, disposable_stack=args.disposable_stack, output=args.output, drain_seconds=args.drain_seconds, probe_seconds=args.probe_seconds)
     print(json.dumps(result, sort_keys=True))
-    return 0 if result.get("status") == "skipped" or result.get("qualified") else 1
+    return 0 if result.get("status") == "skipped" or (result.get("status") == "passed" and (args.mode == "smoke" or result.get("qualified"))) else 1
 
 
 if __name__ == "__main__":

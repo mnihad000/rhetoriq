@@ -3,9 +3,10 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import Header from "../components/layout/Header";
 import InvestigationWorkspace from "../components/investigation-workspace/InvestigationWorkspace";
 import { Waves } from "../components/ui/wave-background";
-import { ApiError, getInvestigationWorkspace, getResearchEventsUrl, runInvestigation, verifyInvestigationClaims } from "../lib/api";
+import { ApiError, getInvestigationWorkspace, runInvestigation, verifyInvestigationClaims } from "../lib/api";
 import { buildInvestigationExperienceFromWorkspace, getStageLabel } from "../lib/liveInvestigation";
 import { getMockInvestigationWorkspace, isMockInvestigationRequest } from "../lib/mockInvestigation";
+import { isResearchActive, watchResearchEvents } from "../lib/researchStream";
 import type { LiveInvestigationWorkspace } from "../types/rhetoriq";
 
 const WORKSPACE_EVENTS = ["run.started", "node.completed", "action.completed", "artifact.updated", "budget.updated", "gate.evaluated", "run.completed", "run.failed"];
@@ -53,28 +54,26 @@ export default function InvestigationPage() {
   }, [id, isMockRequest, query]);
 
   useEffect(() => {
-    if (!id || isMockRequest || !workspace || workspace.research_loop) return;
+    const run = workspace?.research_run;
+    if (!id || isMockRequest || !run || !isResearchActive(run.status)) return;
     let cancelled = false;
-    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
-    const refresh = async () => {
-      try {
+    const stop = watchResearchEvents({
+      investigationId: id,
+      runId: run.run_id,
+      eventTypes: WORKSPACE_EVENTS,
+      debounceMs: 220,
+      fallbackMs: 8000,
+      refresh: async () => {
         const next = await getInvestigationWorkspace(id);
-        if (cancelled) return;
+        if (cancelled) return false;
         startTransition(() => setWorkspace(next));
-        if (next.research_loop) setIsRunning(false);
-      } catch { /* Stream retries; fallback remains conservative. */ }
-    };
-    const queueRefresh = () => {
-      if (refreshTimer) return;
-      refreshTimer = setTimeout(() => { refreshTimer = null; void refresh(); }, 220);
-    };
-    const source = new EventSource(getResearchEventsUrl(id));
-    WORKSPACE_EVENTS.forEach((eventName) => source.addEventListener(eventName, queueRefresh));
-    source.onerror = () => { if (!fallbackTimer) fallbackTimer = setInterval(() => void refresh(), 8000); };
-    source.onopen = () => { if (fallbackTimer) { clearInterval(fallbackTimer); fallbackTimer = null; } };
-    return () => { cancelled = true; source.close(); if (refreshTimer) clearTimeout(refreshTimer); if (fallbackTimer) clearInterval(fallbackTimer); };
-  }, [id, isMockRequest, workspace?.research_loop]);
+        const terminal = !!next.research_run && !isResearchActive(next.research_run.status);
+        if (terminal) setIsRunning(false);
+        return terminal;
+      },
+    });
+    return () => { cancelled = true; stop(); };
+  }, [id, isMockRequest, workspace?.research_run?.run_id, workspace?.research_run?.status]);
 
   async function handleReverify() {
     if (!workspace || isReverifying) return;

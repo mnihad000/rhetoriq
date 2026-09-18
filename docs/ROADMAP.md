@@ -429,6 +429,8 @@ See [B5 sprint](B5_SPRINT.md), [acceptance evidence](B5_ACCEPTANCE.md), and [ope
 
 **Estimate: 2–4 weeks**
 
+Preparation: [software, environment variables, technology overview, and disposable B3–B5 acceptance](PRE_B6_GUIDE.md).
+
 #### Goals
 
 - Create manifests or Helm charts for connectors, Kafka consumers, Flink jobs, backend API, frontend, and required data services.

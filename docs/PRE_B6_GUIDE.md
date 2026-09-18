@@ -1,0 +1,385 @@
+# Before B6: Setup, Technologies, and Runtime Acceptance
+
+Prepared: 2026-09-17.
+
+This guide collects the software prerequisites, environment configuration, technology overview, architecture flow, and explanation of disposable B3–B5 acceptance before Kubernetes deployment.
+
+B6 is **local Kubernetes deployment**. The repository contains the B3 Kafka backbone, B4 Flink processing, and B5 specialized retrieval implementations, but their actual runtime acceptance remains pending. Implementation and unit-test results alone do not close those milestones.
+
+The detailed sources of truth are the [roadmap](ROADMAP.md), [B4 operations](B4_OPERATIONS.md), [B5 operations and B6 handoff](B5_OPERATIONS.md), and [B5 acceptance record](B5_ACCEPTANCE.md). This guide does not claim that acceptance has been performed.
+
+## 1. Software to Install or Verify
+
+The following inventory is a snapshot of commands available on the development machine on the preparation date. Availability on PATH does not prove that a service is running.
+
+| Software | Observed setup | Purpose and next action |
+| --- | --- | --- |
+| Git | Installed | Source control and identifying deployment versions. |
+| Docker Desktop / Compose | Installed; Compose v5.3.1 | Build images and rehearse the complete stack. The Docker engine could not be reached during the check; verify Docker Desktop is running. |
+| WSL | Command installed; status check denied | Linux environment used by Docker on Windows. Operational state is unverified. |
+| Node.js / npm | Node v22.23.2 installed | Frontend dependency installation, development, and builds. |
+| Python | v3.13.3 installed | Backend development and tests. |
+| kubectl | v1.36.1 installed | Inspect and control Kubernetes workloads. Match its version appropriately to the chosen cluster. |
+| kind | Not found on PATH | Recommended local Kubernetes cluster tool for B6. |
+| minikube | Not found on PATH | Alternative to kind; choose one local cluster tool. |
+| Helm | Not found on PATH | Needed if B6 uses Helm charts; plain Kubernetes manifests do not require it. |
+| Terraform / AWS CLI | Not found on PATH | Later cloud infrastructure work; not required for local B6. |
+
+### Recommended immediate installation
+
+The [kind quick-start guide](https://kind.sigs.k8s.io/docs/user/quick-start/) lists this Windows installation option:
+
+```powershell
+winget install Kubernetes.kind
+```
+
+Use Docker Desktop with **Linux containers and the WSL 2 backend**. Verify hardware virtualization and WSL requirements using the [Docker Windows setup guide](https://docs.docker.com/desktop/setup/install/windows-install/).
+
+Useful read-only checks:
+
+```powershell
+docker version
+docker compose version
+docker info
+wsl --status
+wsl --list --verbose
+kind version
+kubectl version --client
+```
+
+### Machine resources and Elasticsearch prerequisite
+
+The B5 operations guide calls for **16 GB RAM and 8 CPUs allocated to Docker/WSL**. Its configured steady-state container memory caps total approximately 13 GiB; these are limits, not measured usage. Kubernetes adds overhead. A machine with 32 GB total RAM is a practical preference, not a measured project requirement.
+
+Elasticsearch requires this Linux kernel setting in the Docker/WSL environment:
+
+```text
+vm.max_map_count=1048576
+```
+
+Verify it survives restarts. Follow [Elastic's Docker production instructions](https://www.elastic.co/docs/deploy-manage/deploy/self-managed/install-elasticsearch-docker-prod) for the applicable Windows/WSL procedure.
+
+Builds need internet access to obtain container images, Python/npm dependencies, the pinned MiniLM weights, and the Flink Kafka connector source.
+
+### What does not need a separate desktop installation
+
+Kafka, Flink, PostgreSQL, Elasticsearch, Neo4j, Redis, Java, and Maven are supplied by our containers or container builds. The Flink image supplies Python 3.12 separately from the backend's Python 3.13 runtime.
+
+Ollama is optional. Choosing it requires installing Ollama and downloading the selected local model. Browser rendering is also optional; its separate renderer image needs browser binaries if enabled.
+
+## 2. Environment Variables and Credentials
+
+An environment variable is a setting passed to a process: for example, a service address, feature switch, password, or API key.
+
+Start local configuration from [`.env.production.example`](../.env.production.example). Use separate untracked files for ordinary local execution and disposable acceptance. Actual acceptance must use fresh test credentials, test volumes, and a local test database, with no production Neon connection or developer provider keys.
+
+### Service secrets and model access
+
+| Variables | What to supply |
+| --- | --- |
+| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Database name, account, and fresh password. Compose constructs the local `DATABASE_URL`. Disposable B5 acceptance uses `POSTGRES_DB=rhetoriq_b5_test`. |
+| `SEARXNG_SECRET` | Long random secret for our self-hosted search service; it is not a paid search API key. |
+| `ELASTICSEARCH_PASSWORD` | B5 full-text service password. |
+| `NEO4J_PASSWORD` | B5 graph database password. |
+| `REDIS_PASSWORD` | B5 cache password. |
+| `GEMINI_API_KEY` | Google model access. Live B4 enrichment needs Gemini, including its embedding API. |
+| `GROQ_API_KEY` | Backup model access for extraction and investigation work. |
+| `GEMINI_MODEL`, `GROQ_MODEL` | Optional model overrides; defaults exist. |
+
+Gemini, Groq, and database variables were present in the local environment files during the preparation check. Presence does not establish validity, quota, or successful connectivity. No secret values belong in this guide.
+
+URL-encode special characters in passwords used within a PostgreSQL connection URL. Keep hosted database TLS settings. The local B5 overlay additionally configures verified TLS and generated local certificate trust.
+
+### Application and service configuration
+
+| Variables | Purpose and intended use |
+| --- | --- |
+| `DATABASE_URL` | Database connection for API and workers. Use a local disposable database for acceptance; the existing Neon connection belongs to the hosted topology. |
+| `DEPLOYMENT_ENV=production`, `DEMO_MODE=false` | Require production persistence and select live application behavior. |
+| `RESEARCH_RUNTIME=langgraph`, `RESEARCH_EXECUTION_MODE=kafka` | Graph workflow launched by Kafka investigation consumers. Execution is Kafka-only. |
+| `KAFKA_BOOTSTRAP_SERVERS` | Kafka broker address. |
+| `KAFKA_SCHEMA_REGISTRY_URL` | Apicurio schema API address. |
+| `KAFKA_CLIENT_ID`, `KAFKA_CONSUMER_GROUP_PREFIX` | Client identity and consumer-group naming. |
+| `KAFKA_SECURITY_PROTOCOL`, `KAFKA_SASL_MECHANISM`, `KAFKA_SASL_USERNAME`, `KAFKA_SASL_PASSWORD` | Broker security configuration when the chosen broker requires it. The local rehearsal uses plaintext Kafka on its private network. |
+| `SEARXNG_BASE_URL` | Private search-service address. |
+| `CORS_ALLOW_ORIGINS` | Frontend origins permitted to call the API. |
+| `PUBLIC_API_BASE_URL` | API address read by the deployed frontend at container startup. |
+| `VITE_API_BASE_URL` | API address for local Vite development; root Compose also uses it to populate the frontend runtime address. |
+| `ENABLE_B5_RETRIEVAL` | Enable B5 retrieval after initialization, backfill, and acceptance. Enable it explicitly for the intended B5 test deployment. |
+| `ENABLE_POSTGRES_VECTOR_SEARCH` | Enable corpus semantic retrieval after preparation. The B5 overlay sets this to true. |
+| `EMBEDDING_LOCAL_ONLY` | Load embedding weights from the local cache. The B5 image preloads MiniLM and enables local-only runtime loading. |
+| `ENABLE_FLINK_TRENDING`, `FLINK_AUTO_INVESTIGATE` | Keep false until the relevant runtime gates pass. |
+| `BROWSER_RENDERING_ENABLED` | False for the initial public deployment. |
+| `BROWSER_SERVICE_URL`, `BROWSER_SERVICE_TOKEN` | Address and authentication for an optional browser-renderer deployment. |
+| `CLAIM_VERIFIER_ENABLED`, `CLAIM_VERIFIER_LOCAL_ONLY` | Optional A3 verification and local model-loading policy. If enabled, make its NLI weights available in that deployment. |
+| `REQUEST_RATE_LIMIT_PER_MINUTE`, `INVESTIGATION_START_LIMIT_PER_HOUR` | Bound API usage. Current template values are 120 requests/minute and five investigation starts/hour. |
+| `REQUEST_RATE_LIMIT_MAX_CLIENTS` | Bounds the in-process client counter map; template value is 10,000. |
+| `TRUST_PROXY_HEADERS` | Enable only when requests arrive through the intended trusted proxy. |
+
+The B5 overlay supplies `ELASTICSEARCH_URL`, `ELASTICSEARCH_USERNAME`, `ELASTICSEARCH_CA_CERT`, `NEO4J_URL`, `NEO4J_USERNAME`, `NEO4J_CA_CERT`, `REDIS_URL`, and `REDIS_CA_CERT`. B6 must translate internal addresses to Kubernetes Services and mount the appropriate public CA trust.
+
+The full settings inventory is in [`backend/config.py`](../backend/config.py). Most budgets, timeouts, and retrieval limits have defaults; not every setting needs a manual override.
+
+### Live enrichment startup requirement
+
+The live B4 hosted-enrichment worker requires explicit positive values for all five settings:
+
+```text
+ENRICHMENT_REQUEST_BUDGET
+ENRICHMENT_SPEND_BUDGET_MICROS
+ENRICHMENT_INPUT_PRICE_MICROS_PER_MILLION
+ENRICHMENT_OUTPUT_PRICE_MICROS_PER_MILLION
+ENRICHMENT_EMBEDDING_PRICE_MICROS_PER_MILLION
+```
+
+They bound request counts, reserve model spend, and specify pricing ceilings. Monetary values are micro-US dollars: `1000000` means $1. Price ceilings are micro-US dollars per million tokens.
+
+The committed template sets these to zero, so the live worker intentionally refuses to start until they are configured. Verify current provider prices and quotas before choosing values. Recorded-provider acceptance does not require paid model calls or provider credentials. The bounded live canary is a separate acceptance step.
+
+### Where settings are loaded
+
+- The backend settings loader automatically reads `backend/.env`.
+- Root `.env.local` is a separate file; its contents are not automatically loaded by that backend loader.
+- Compose reads its selected environment file and injects variables declared in the service definitions.
+- Kubernetes will use ConfigMaps for ordinary settings and Secrets or an equivalent secret source for credentials and private keys.
+
+A value present in one file does not mean every process receives it. Inject only the settings required by each service.
+
+The local backend environment contains legacy Tavily, SerpAPI, Browserbase, and Arize variables. The current runtime has no corresponding configuration integrations, so those services are not prerequisites. `ANTHROPIC_API_KEY` is declared but has no implemented Claude model-client path.
+
+## 3. What Each Technology Does
+
+The tables cover the principal runtime, development, and planned infrastructure technologies. A component being implemented does not mean its live deployment has passed acceptance.
+
+### Frontend
+
+| Technology | General purpose | RhetoriQ role |
+| --- | --- | --- |
+| React | Interactive browser interfaces. | Dashboard, investigation workspace, reports, evidence, and audit views. |
+| TypeScript | Type checking for JavaScript. | Frontend data contracts and component correctness. |
+| Vite | Development server and browser-asset builds. | Local UI development and production build. |
+| Tailwind CSS | Utility-based styling. | Layout, spacing, colors, and responsive design. |
+| React Router | URL-based application navigation. | Dashboard/workspace routing and addressable report tabs. |
+| React Flow | Interactive node-and-edge diagrams. | Research workflow and narrative/provenance exploration. |
+| Framer Motion | Interface animation. | Transitions and motion behavior. |
+| simplex-noise | Procedural noise generation. | Decorative visuals. |
+| Fontsource / Space Grotesk | Packaged font assets. | Application typography. |
+| Nginx | Static-file serving and HTTP routing. | Serves the compiled frontend in its production container. |
+
+### Backend, Agents, and Acquisition
+
+| Technology | General purpose | RhetoriQ role |
+| --- | --- | --- |
+| Python | Application programming language. | Backend, workers, research services, and operator commands. |
+| FastAPI | HTTP API framework. | Investigation, ingestion, search, receipts, report, and health endpoints. |
+| Uvicorn | ASGI application server. | Runs FastAPI in the backend container. |
+| Pydantic / pydantic-settings / dotenv | Data validation and configuration loading. | Requests, documents, events, and environment settings. |
+| HTTPX | HTTP client. | Source retrieval and provider API calls. |
+| tldextract | Domain parsing. | Publisher/domain identification for evidence handling. |
+| LangGraph | Stateful workflows with checkpoints and conditional steps. | Bounded research supervision, evidence-gap handling, and durable investigation recovery. |
+| Gemini | Hosted model inference and embeddings. | Planning, extraction, analysis, synthesis, optional judging, and B4 embeddings. |
+| Groq | Hosted model inference. | Backup extraction and investigation model provider. |
+| Ollama | Local model serving. | Optional local investigation-model fallback. |
+| Sentence Transformers / MiniLM | Text-to-vector encoding. | Local 384-dimensional corpus embeddings for semantic retrieval. |
+| NumPy | Numerical array operations. | Vector calculations and numerical processing. |
+| DeBERTa NLI model | Textual support/contradiction assessment. | Optional A3 claim–evidence verification. |
+| SearXNG | Self-hosted metasearch. | Public-web discovery leads. Fetched source content and receipts establish evidence. |
+| GDELT | Public news discovery API. | Article candidates and metadata. |
+| HN Algolia | Search API for Hacker News. | Story/discussion discovery candidates. |
+| Federal Register API | First-party government-record access. | Primary-source acquisition. |
+| Playwright | Real-browser automation. | Optional isolated retrieval for JavaScript-rendered public pages. |
+
+The implemented GDELT, HN Algolia, and Federal Register connectors require no API keys. Managed search, browser, and observability SaaS are not required.
+
+### Storage and Event Processing
+
+| Technology | General purpose | RhetoriQ role |
+| --- | --- | --- |
+| PostgreSQL | Durable relational storage and transactions. | Authoritative documents, investigations, receipts, checkpoints, revisions, outbox, and projection state. |
+| Neon | Hosted PostgreSQL provider. | Database for the documented public deployment; local Compose provides its own PostgreSQL. |
+| psycopg | Python PostgreSQL driver. | Database connections and transactions. |
+| pgvector | Vector storage and similarity search in PostgreSQL. | Retrieve corpus evidence by meaning. |
+| SQLite | Lightweight file-based database. | Development and test persistence. |
+| Kafka | Durable event streams. | Decoupled ingestion, processing, investigations, projections, retries, and replay. |
+| confluent-kafka | Kafka client library. | Python event producers and consumers. |
+| Apicurio Registry | Schema storage and compatibility management. | Versioned event contracts through its compatible schema API. |
+| JSON Schema / jsonschema | Define and validate structured messages. | Validate Kafka event shapes across producers and consumers. |
+| Flink / PyFlink | Stateful stream processing with checkpoints. | Document normalization/deduplication, phrase windows, and narrative signals. |
+| Elasticsearch | Indexed full-text and exact-phrase search. | B5 lexical evidence retrieval. |
+| Neo4j | Relationship storage and graph traversal. | B5 explained reference/provenance paths. |
+| Redis | Fast in-memory storage. | Bounded B5 query caching and existing optional cache/memory features. |
+
+The stores answer different questions:
+
+- **PostgreSQL:** What is the authoritative persisted record?
+- **pgvector:** Which evidence has similar meaning?
+- **Elasticsearch:** Which evidence contains these words or phrases?
+- **Neo4j:** How are these documents and evidence relationships connected?
+- **Redis:** Can a complete, validated response be reused briefly?
+
+Elasticsearch and Neo4j are derived projections that can be rebuilt from retained canonical inputs. Redis is disposable cache. B4 Gemini embeddings and B5 MiniLM embeddings belong to different embedding spaces; preserve their model identities rather than mixing vectors because their dimensions match.
+
+### Development, Deployment, and Planned Infrastructure
+
+| Technology | General purpose | RhetoriQ role and status |
+| --- | --- | --- |
+| Docker | Package processes and dependencies into images. | Implemented reproducible service builds. |
+| Docker Compose | Run connected containers locally. | Implemented root topology and B4/B5 overlays. |
+| pytest / pytest-asyncio | Python testing. | Backend regressions and async behavior checks. |
+| Vitest / Testing Library / jsdom | Frontend tests and DOM simulation. | UI logic and component checks. |
+| GitHub Actions | Automated repository workflows. | Existing CI; full image delivery and cloud automation are later work. |
+| Kubernetes | Container orchestration. | Planned B6 deployment, networking, probes, resources, and storage. |
+| kind / minikube | Local Kubernetes clusters. | Planned B6 cluster; choose one. |
+| kubectl | Kubernetes command-line client. | Inspect workloads, configuration, logs, and rollout state. |
+| Helm | Parameterized Kubernetes packaging. | Possible B6 chart format; optional with plain manifests. |
+| Terraform | Infrastructure as code. | Planned B7 cloud resources and ephemeral AWS environment. |
+| Argo CD | Reconcile cluster deployments with Git. | Planned B7 GitOps deployment and rollback flow. |
+| Prometheus | Metrics collection and querying. | Planned B8 throughput, lag, latency, failure, and usage metrics. |
+| Grafana | Operational dashboards. | Planned B8 visualization of service health and performance. |
+| OpenTelemetry | Standard instrumentation and trace export. | Planned cross-service observability; research traces already use controlled storage. |
+| AWS EKS | Managed Kubernetes control plane. | Planned short-lived portfolio demonstration. |
+| Railway / Render | Application hosting platforms. | Railway is the documented public topology; Render is an alternative in the demo strategy. |
+
+The root npm packages `@neon/config` and `@neon/env` support Neon configuration/environment tooling. The Python backend uses psycopg to access PostgreSQL; those npm packages do not run the investigation pipeline.
+
+## 4. How the System Fits Together
+
+```mermaid
+flowchart TD
+    U[User] --> UI[React frontend / Nginx]
+    UI --> API[FastAPI]
+    API --> PG[(PostgreSQL: authoritative state)]
+    PG --> OB[Outbox publisher]
+    OB --> K[Kafka]
+    REG[Apicurio: event schemas] --- K
+
+    SRC[Source connectors] --> PG
+    K --> FL[Flink processing]
+    FL --> K
+    K --> EN[Hosted enrichment worker]
+    EN --> K
+
+    K --> IW[Investigation worker / LangGraph]
+    IW --> WEB[SearXNG / public APIs / page fetcher]
+    IW --> PG
+
+    K --> DW[Document persistence worker]
+    DW --> PG
+    K --> PW[Projection workers]
+    PW --> PV[(pgvector / MiniLM)]
+    PW --> ES[(Elasticsearch)]
+    PW --> NG[(Neo4j)]
+    API --> PV
+    API --> ES
+    API --> NG
+    API --> RD[(Redis cache)]
+    API --> UI
+```
+
+This is a conceptual flow: named Kafka topics connect the individual processing stages. A transactional outbox is a database table written in the same transaction as the accepted application operation; its publisher delivers committed records to Kafka. This prevents an accepted request from being lost between the database write and event publication.
+
+### A User Investigation
+
+1. The frontend sends a question to FastAPI.
+2. FastAPI persists the request and an outbox event together, then returns an accepted response.
+3. The outbox publisher delivers the request event to Kafka.
+4. An investigation worker launches LangGraph under a durable lease.
+5. Research tools find and fetch sources. Evidence acquisition uses the document pipeline, preserving receipts and provenance.
+6. The workflow assesses gaps, performs bounded follow-ups, and builds a cited report or an insufficient-evidence result.
+7. PostgreSQL preserves progress and results. The API streams updates through SSE, with frontend polling fallback.
+8. Projection workers maintain specialized views used to explore persisted evidence.
+
+### Document Ingestion and Signals
+
+1. Connectors acquire public records and stage raw-document events through the outbox.
+2. Kafka feeds the Flink normalization and deduplication branch.
+3. An enrichment worker handles requested extraction and hosted embeddings, recording reusable artifacts.
+4. Flink processes enriched events and computes stateful phrase windows and signals.
+5. Consumers persist canonical documents and maintain retrieval projections.
+6. Signals schedule investigations only when automatic investigation is explicitly enabled.
+
+Kubernetes will deploy these processes and their dependencies. It does not replace their application logic or make their correctness automatic.
+
+## 5. What Disposable B3–B5 Acceptance Means
+
+It means **running the real services in an isolated test environment and collecting proof that they work together**, beyond unit tests.
+
+"Disposable" means a separate Docker Compose project with fresh test databases, named volumes, and passwords. It can be removed after evidence has been exported without affecting the ordinary local environment or production Neon database. Preserve test volumes during recovery exercises.
+
+Most checks use recorded hosted-model responses to avoid paid calls. They still use real Kafka, Flink, PostgreSQL, Elasticsearch, Neo4j, Redis, and actual pinned MiniLM inference. The bounded live canary is separate.
+
+### Startup Checks
+
+- Required containers and initialization jobs start successfully.
+- TLS trust, credentials, migrations, Kafka topics/schemas, ES mappings, and Neo4j constraints initialize correctly.
+- Seeded documents travel through the real pipeline and become searchable.
+- A persisted investigation exposes evidence and graph paths and survives reload.
+- Dependency readiness, consumer lag, and projection coverage are checked; a running process or heartbeat alone is insufficient.
+
+### Recovery and Correctness Checks
+
+- Crash selected workers or services, restart them, and verify correct continuation.
+- Replay events without duplicating canonical results or semantic relationships.
+- Exercise crashes after target writes but before delivery acknowledgement.
+- Check stale revisions, equal-revision conflicts, and out-of-order delivery.
+- Withdraw/restore documents and verify search, graph, and cache behavior, including stopped projection workers.
+- Inject projection drift, detect it, and perform bounded repair.
+- Rebuild isolated generations, catch up concurrent mutations, activate, and roll back consistently.
+- Verify explicit degradation during ES/Neo4j/Redis outages and preserve evidence eligibility rules.
+
+### B5 Load Qualification
+
+The [B5 acceptance record](B5_ACCEPTANCE.md) prescribes:
+
+| Item | Required experiment or target |
+| --- | --- |
+| Corpus | 10,000 distinct seeded documents. |
+| Providers and stores | Recorded hosted enrichment, real Kafka/Flink/stores, and actual pinned MiniLM. |
+| Warm-up | Preload/warm the model and initial corpus before measured windows. |
+| Sustained ingestion | 100 documents/minute for 30 minutes. |
+| Burst ingestion | 500 documents/minute for five minutes. |
+| Query concurrency | Ten concurrent query clients during ingestion. |
+| Integrity | No lost canonical records or duplicate semantic relationships. |
+| Resources | No memory-limit kills. |
+| Backlog | No sustained growth; drain within ten minutes after the measured burst. |
+| Projection freshness | Target p95 processed-persistence-to-projection freshness at most 30 seconds. |
+| Lexical/graph latency | Target uncached p95 at most one second. |
+| Hybrid/path latency | Target p95 at most two seconds. |
+
+Measure persistence and projection rates, not only raw publishing. Record raw-to-search latency separately, including Flink checkpoints, and separate cache-hit/cache-miss distributions. Missing query, memory/OOM, drift, backlog, or embedding-coverage measurements cannot qualify the run.
+
+This demonstrates measured capacity in a controlled experiment. It is not proof of continuous production scale or a daily ingestion claim.
+
+### Acceptance Outputs
+
+Retain JSON reports, container memory/OOM evidence, Kafka offsets/lag/DLQs, Flink job/checkpoint evidence, canonical counts/hashes, projection coverage, repair/rebuild/rollback results, and browser screenshots/traces. Record machine allocation, application image identities, model revision, and generation manifest.
+
+The bounded live canary acquires at most 20 actual documents under explicit provider limits, preserves real acquisition receipts, runs the publication gate, then restarts and reloads the investigation. Record provider usage and failures without credentials.
+
+Use the executable procedures in [B4 operations](B4_OPERATIONS.md) and [B5 operations](B5_OPERATIONS.md). The [B5 acceptance scenario matrix](B5_ACCEPTANCE.md) defines full sign-off; a startup smoke report alone does not complete the milestone.
+
+### Why Complete This Before B6?
+
+Kubernetes adds networking, scheduling, persistent-volume, and rollout concerns. Compose acceptance first establishes that our services and data contracts work before adding those concerns.
+
+This work does not deploy publicly or test against production. Its result is saved evidence that the underlying topology is qualified for B6.
+
+## 6. Readiness Checklist and Deployment Order
+
+- [ ] Make Docker Desktop's Linux engine reachable and verify WSL resources.
+- [ ] Verify the Elasticsearch kernel setting and restart persistence.
+- [ ] Install kind or choose minikube.
+- [ ] Prepare fresh local secrets and a separate disposable acceptance environment.
+- [ ] Build images and verify pinned MiniLM loading.
+- [ ] Complete B3 actual event delivery/replay/recovery checks.
+- [ ] Complete B4 actual Flink delivery/checkpoint/recovery/load checks.
+- [ ] Complete B5 startup, persisted product/browser, failure, repair, rebuild, rollback, and load checks.
+- [ ] Verify provider access and configure explicit budgets for the bounded live canary.
+- [ ] Export acceptance evidence and record gate sign-off.
+- [ ] Begin B6 manifests or charts, service networking, Secrets/ConfigMaps, initialization jobs, storage, probes, shutdown handling, and seeded end-to-end deployment.
+
+The B6 handoff must preserve PostgreSQL data, Kafka logs, Flink checkpoints/savepoints, Elasticsearch data, Neo4j data, and certificate material. Redis remains disposable cache. Public CA trust can be a ConfigMap; private keys require Secrets or equivalent secure provisioning. Load or publish application images into the local cluster and record immutable image identities.
+
+Local B6 requires no AWS account or cloud purchase. Later work adds Terraform/GitOps in B7 and observability in B8. The approved cloud strategy is a short-lived AWS showcase plus an affordable separate public demo; see [the ephemeral AWS strategy](EPHEMERAL_AWS_KUBERNETES_DEMO.md).
+
+The public demo still needs the current Kafka/worker execution dependencies unless a lighter application topology is deliberately implemented. The earlier frontend/API/database-only deployment does not satisfy the current investigation execution contract.

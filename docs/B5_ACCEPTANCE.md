@@ -1,6 +1,6 @@
 # B5 acceptance evidence
 
-Status: **Pending actual runtime acceptance**. No real Kafka/Flink, Elasticsearch, Neo4j, Redis, MiniLM load or browser acceptance result is claimed from offline tests. The local Docker daemon was unavailable during implementation.
+Status: **Pending actual runtime acceptance**. No real Kafka/Flink, Elasticsearch, Neo4j, Redis, MiniLM load or browser acceptance result is claimed from offline tests. Runtime execution is deferred for this closeout at the user's request; no further Docker availability checks are required now.
 
 ## Safety and isolation
 
@@ -10,17 +10,19 @@ Tests do not load developer dotenv or provider credentials. PostgreSQL integrati
 
 | Check | Recorded result |
 | --- | --- |
-| Existing backend suite plus initial B5 repository/graph/reference tests | 287 passed, 19 optional tests skipped |
-| Worker crash/partial-write/recorded-replay and repository/target tests | 13 passed, 2 PostgreSQL tests skipped |
-| B5 search/API/cache after canonical withdrawal review | 12 passed |
-| Reference parser | 5 passed in initial worker checks |
-| Frontend initial product suite and production build | Passed; final expanded result recorded below after integration |
-| Committed event schemas | Regenerated including new projection topics/DLQs and additive reference contract |
-| Merged B5 Compose configuration using template environment | Passed |
-| Python source compilation | Passed in focused checks; final suite recorded below |
+| Complete backend suite (`pytest backend/tests -q`) | **325 passed, 23 optional checks skipped**; disposable PostgreSQL, actual-stack and browser checks remain opt-in |
+| Covered B5 boundaries | Atomic outbox failure; write/ledger crash; recorded semantic replay; withdrawal with stopped workers and cache hits; missing/stale/extra/invalid drift and bounded repair; historical pinned rebuild; literal Unicode offsets; revision conflict; partial bulk failure; bounded API validation |
+| Frontend product suite (`npm test -- --run`) | **17 passed across 7 files**, including observed-only path defaults, accessible edge expansion and pending-to-current graph refresh |
+| Frontend production build | Passed; Vite retains a bundle-size advisory for the main chunk |
+| Committed event schemas (`events.export_schemas --check`) | Passed, including projection topics/DLQs and additive reference contract |
+| Merged B5 and acceptance Compose configuration using template environment | Passed |
+| Python source compilation (`compileall -q backend infra/b5`) | Passed |
+| Installed Python dependencies (`pip check`) | No broken requirements |
 | Runtime image digests | Resolved from public registry manifests; committed in `infra/b5/runtime-lock.json` |
 
 These rows describe offline verification. Disposable PostgreSQL, service startup, encrypted connections, actual model inference and runtime failure drills are separate requirements.
+
+The acceptance runner has a durable seeded investigation with recorded document hyperlinks for an observed path, exact paced windows, batch revision/hash delivery checks, excluded warm-up, refreshed ES visibility samples, concurrent uncached lexical/hybrid/graph/path probes, classified cache measurements, and minute backlog traces. The host supervisor at `infra/b5/qualify.py` adds aggregate memory/restart/OOM evidence without a Docker socket in the application containers. None of that tooling is itself passing runtime evidence.
 
 ## Executable checks
 

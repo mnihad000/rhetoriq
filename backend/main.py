@@ -15,6 +15,7 @@ from api.research import router as research_router
 from api.trending import router as trending_router
 from api.trending import _service as trending_service
 from config import get_settings
+from services.research_stream import ResearchStreamHub, StreamOptions, StreamReader
 from middleware.request_limits import RequestLimitMiddleware, SlidingWindowLimiter
 
 settings = get_settings()
@@ -52,8 +53,16 @@ def _start_background_services() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    _start_background_services()
-    yield
+    options = StreamOptions.from_settings(settings)
+    hub = ResearchStreamHub(StreamReader(settings.persistence_target, options.workers), options)
+    try:
+        await hub.start()
+        _app.state.research_stream_hub = hub
+        _start_background_services()
+        yield
+    finally:
+        await hub.close()
+        _app.state.research_stream_hub = None
 
 
 app = FastAPI(

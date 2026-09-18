@@ -25,6 +25,7 @@ def test_atomic_snapshot_dispatch_and_redelivery(tmp_path):
     first = repo.record_document(doc(),source_event_id="source-1")
     replay = repo.record_document(doc(),source_event_id="source-1")
     assert first==replay
+    assert first["data"]["projection_methods"]["graph"] == "b5-graph-v1"
     assert repo.high_watermark()==1
     pending = repo.events.pending()
     assert len(pending)==1 and pending[0].topic==CORPUS_PROJECTIONS_TOPIC

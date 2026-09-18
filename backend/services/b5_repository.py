@@ -18,6 +18,7 @@ from models.events import (CORPUS_PROJECTIONS_TOPIC, INVESTIGATION_PROJECTIONS_T
                            CorpusProjectionEvent, InvestigationProjectionEvent, ProjectionPayload)
 from services.database import connect, ensure_parent_dir, is_postgres_database
 from services.event_store import EventStore
+from services.b5_versions import projection_methods
 
 MINILM_REVISION = "c9745ed1d9f207416be6d2e6f8de32d1f16199bf"
 MINILM_IDENTITY = "sentence-transformers/all-MiniLM-L6-v2@" + MINILM_REVISION
@@ -93,7 +94,19 @@ class ProjectionRepository:
         with nullcontext(connection) if connection is not None else connect(self.target) as db:
             return self._decode(db.execute("SELECT * FROM b5_snapshots WHERE snapshot_id=?", (snapshot_id,)).fetchone())
 
-    def documents(self, ids: list[str] | None = None, limit: int = 10000) -> list[dict]:
+    def get_snapshots(self,snapshot_ids: list[str]) -> list[dict]:
+        results = []
+        with connect(self.target) as db:
+            for start in range(0,len(snapshot_ids),500):
+                batch = list(dict.fromkeys(snapshot_ids[start:start+500]))
+                if not batch:
+                    continue
+                rows = db.execute("SELECT * FROM b5_snapshots WHERE snapshot_id IN ("+",".join("?" for _ in batch)+")",batch).fetchall()
+                results.extend(self._decode(row) for row in rows)
+        ordered = {snapshot["snapshot_id"]:snapshot for snapshot in results}
+        return [ordered[identity] for identity in snapshot_ids if identity in ordered]
+
+    def documents(self, ids: list[str] | None = None, limit: int = 10000, *, after_id: str = "") -> list[dict]:
         if ids is not None and not ids:
             return []
         with connect(self.target) as db:
@@ -105,10 +118,13 @@ class ProjectionRepository:
                     unique = sorted(set(ids))
                     results = []
                     for start in range(0, len(unique), 500):
-                        results.extend(self.documents(unique[start:start+500], limit=500))
+                        results.extend(self.documents(unique[start:start+500], limit=500,after_id=after_id))
                     return results[:limit]
                 query += " AND c.domain_id IN (" + ",".join("?" for _ in ids) + ")"
                 parameters.extend(ids)
+            if after_id:
+                query += " AND c.domain_id>?"
+                parameters.append(after_id)
             query += " ORDER BY c.domain_id LIMIT ?"
             parameters.append(min(max(0, limit), 100000))
             return [self._decode(row) for row in db.execute(query, parameters).fetchall()]
@@ -119,6 +135,17 @@ class ProjectionRepository:
             if kind:
                 query += " WHERE c.kind=?"
             return [self._decode(row) for row in db.execute(query+" ORDER BY s.kind,s.domain_id", (kind,) if kind else ()).fetchall()]
+
+    def delivery_observations(self, generation: str) -> list[dict]:
+        """Read current document delivery identities in one consistent query."""
+        with connect(self.target) as db:
+            rows = db.execute(
+                "SELECT s.domain_id,s.created_at,s.revision,s.semantic_hash,d.target,"
+                "d.status,d.applied_at,d.revision AS applied_revision,d.semantic_hash AS applied_hash "
+                "FROM b5_current c JOIN b5_snapshots s ON s.snapshot_id=c.snapshot_id "
+                "LEFT JOIN b5_deliveries d ON d.kind=c.kind AND d.domain_id=c.domain_id AND d.generation=? "
+                "WHERE c.kind='document'", (generation,)).fetchall()
+            return [dict(row) for row in rows]
 
     def _write(self, db, *, kind, domain_id, data, source_event_id, eligible, operation="upsert") -> dict:
         self._lock(db, kind, domain_id)
@@ -168,6 +195,7 @@ class ProjectionRepository:
                 "processing": processing.model_dump(mode="json") if hasattr(processing, "model_dump") else processing or {},
                 "source_kind": source_kind, "withdrawn": False}
         data["model_identities"] = {"semantic": MINILM_IDENTITY}
+        data["projection_methods"] = projection_methods()
         eligible = source_kind != "discovery" and (document.metadata or {}).get("acquisition_receipt_valid") is True
         with nullcontext(connection) if connection is not None else connect(self.target) as db:
             self._lock(db, "document", document.id)
@@ -257,7 +285,8 @@ class ProjectionRepository:
                 if terminal_decision not in {"published", "completed"}:
                     raw["report"] = None
             data = {"workspace": _material(raw), "run_id": run_id, "terminal_decision": terminal_decision,
-                    "document_snapshot_ids": snapshot_ids,"limitations":historical_limitations}
+                    "document_snapshot_ids": snapshot_ids,"limitations":historical_limitations,
+                    "projection_methods": projection_methods()}
             result = self._write(db, kind="investigation", domain_id=domain_id, data=data,
                                  source_event_id=source_event_id, eligible=raw.get("report") is not None)
             db.execute("UPDATE b5_source_operations SET input_hash=? WHERE kind='investigation' AND domain_id=? AND source_event_id=?",
@@ -308,6 +337,26 @@ class ProjectionRepository:
             row = db.execute("SELECT * FROM b5_deliveries WHERE target=? AND generation=? AND kind=? AND domain_id=?",
                              (target, generation, kind, domain_id)).fetchone()
             return dict(row) if row else None
+
+    def coverage(self,snapshots: list[dict],generation: str) -> dict:
+        ids = sorted({item["domain_id"] for item in snapshots})
+        deliveries = {}
+        with connect(self.target) as db:
+            for start in range(0,len(ids),500):
+                batch = ids[start:start+500]
+                rows = db.execute("SELECT * FROM b5_deliveries WHERE generation=? AND domain_id IN ("+",".join("?" for _ in batch)+")",[generation,*batch]).fetchall()
+                deliveries.update({(row["target"],row["kind"],row["domain_id"]):dict(row) for row in rows})
+        result = {}
+        for target in ("elasticsearch","neo4j","minilm"):
+            eligible = [item for item in snapshots if target=="neo4j" or item["kind"]=="document"]
+            applied = []
+            for item in eligible:
+                delivery = deliveries.get((target,item["kind"],item["domain_id"]))
+                if delivery and delivery["status"]=="applied" and (delivery["revision"],delivery["semantic_hash"])==(item["revision"],item["semantic_hash"]):
+                    applied.append(delivery)
+            result[target] = {"total":len(eligible),"applied":len(applied),"pending":len(eligible)-len(applied),
+                "last_applied_at":max((item["applied_at"] for item in applied),default=None)}
+        return result
 
     def mark_delivery(self, target, snapshot, generation="live", *, error=None):
         with connect(self.target) as db:
@@ -379,8 +428,11 @@ class ProjectionRepository:
                 targets[target] = {"pending": len(pending), "total": len(rows), "oldest_pending_seconds": max(ages,default=0),
                     "applied": len(rows)-len(pending), "last_successful_application": max(applied,default=None)}
             validations = [dict(row) for row in db.execute("SELECT generation,status,validated_at,validation_json FROM b5_generations").fetchall()]
+            for row in validations:
+                raw_validation = row.pop("validation_json")
+                row["validation"] = json.loads(raw_validation) if raw_validation else None
         return {"manifest": manifest, "high_watermark": self.high_watermark(), "counts": {row["kind"]:row["n"] for row in counts}, "targets": targets,
-                "generations": [{**row,"validation":json.loads(row.pop("validation_json")) if row.get("validation_json") else None} for row in validations],
+                "generations": validations,
                 "workers": workers, "failed_deliveries": failures, "recorded_embeddings": embeddings}
 
     def create_generation(self, generation: str) -> dict:

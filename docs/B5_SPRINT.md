@@ -24,6 +24,7 @@ One persisted investigation must expose MiniLM/pgvector semantic recall, Elastic
 | Recovery | Audited withdrawal/restore, bounded bootstrap, drift checks/repair, isolated rebuild, manifest cutover and rollback |
 | Cache | Redis TTL and item bounds, generation/revision keys, canonical validation, failure fallthrough and counters |
 | Runtime | Authenticated encrypted stores, image/model locks, private store ports, initialization jobs, probes and memory caps |
+| Qualification tooling | Recorded-provider 10,000-document runner, exact paced windows, warm-up and scoped query probes, batch delivery/ES visibility traces, host memory/restart/OOM supervisor |
 
 ## Authoritative write rules
 

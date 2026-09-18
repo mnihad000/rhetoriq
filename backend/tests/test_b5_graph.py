@@ -1,6 +1,7 @@
 import os
 import sys
 from datetime import datetime, timezone
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -45,6 +46,9 @@ def test_withdrawn_document_retains_tombstone_node_without_edges():
     assert [node["id"] for node in graph["nodes"]] == [DEMO_DOCUMENTS[0].id]
     assert graph["nodes"][0]["withdrawn"] is True
     assert graph["edges"] == []
+    snapshot["data"]["projection_methods"] = {"graph": "unsupported"}
+    with pytest.raises(ValueError, match="versions are unsupported"):
+        build_document_graph(snapshot)
 
 
 def test_investigation_claim_ids_are_scoped_and_inferred_paths_are_opt_in():
@@ -62,3 +66,33 @@ def test_investigation_claim_ids_are_scoped_and_inferred_paths_are_opt_in():
     assert "claim:inv-1:claim-1" in {node["id"] for node in graph["nodes"]}
     assert any(edge["relationship"] == "supported_by" and edge["evidence_class"] == "observed" for edge in graph["edges"])
     assert provenance_paths(graph, DEMO_DOCUMENTS[0].id, DEMO_DOCUMENTS[1].id) == []
+
+
+def test_recorded_links_resolve_in_scope_and_cycles_yield_simple_observed_paths():
+    from events.b5_acceptance import build_seed_documents
+    documents = build_seed_documents("run", 3)
+    snapshots = [_document_snapshot(document, domain_id=document.id) for document in documents]
+    investigation = {"snapshot_id": "investigation", "kind": "investigation", "domain_id": "inv",
+                     "revision": 1, "semantic_hash": "hash", "operation": "upsert", "eligible": True,
+                     "data": {"workspace": {"investigation_id": "inv"}, "run_id": "run", "terminal_decision": "published",
+                              "document_snapshot_ids": [snapshot["snapshot_id"] for snapshot in snapshots]}}
+    graph = build_investigation_graph(investigation, snapshots)
+    paths = provenance_paths(graph, documents[0].id, documents[1].id)
+    assert paths and all(step["relationship"] == "references" for path in paths for step in path["steps"])
+    assert all(len(path["document_ids"]) == len(set(path["document_ids"])) for path in paths)
+    assert all(not node.get("placeholder") for node in graph["nodes"] if node.get("kind") == "document")
+    partial = build_investigation_graph(investigation, snapshots[:1])
+    assert any(node.get("unresolved") for node in partial["nodes"] if node["kind"] == "reference_target")
+    assert provenance_paths(partial, documents[0].id, documents[1].id) == []
+
+
+def test_invalid_mentions_and_historical_reference_coverage_remain_visible():
+    document = DEMO_DOCUMENTS[0].model_copy(update={"phrases": [], "entities": [], "metadata": {"reference_limitations": ["Historical HTML unavailable"]}})
+    snapshot = _document_snapshot(document)
+    snapshot["data"]["enrichment"] = {"artifact_id": "artifact", "input_hash": "input", "output_hash": "output", "provider": "recorded", "model": "recorded",
+                                      "prompt_version": "v1", "schema_version": "v1", "embedding": [0.1] * 384,
+                                      "canonical_phrases": [{"phrase": "invented", "surface_form": "invented", "evidence": {"surface_form": "invented", "start": 999999, "end": 1000007}}]}
+    graph = build_document_graph(snapshot)
+    assert not any(edge["relationship"] == "mentions_phrase" for edge in graph["edges"])
+    assert "Historical HTML unavailable" in graph["limitations"]
+    assert len(graph["limitations"]) > 1

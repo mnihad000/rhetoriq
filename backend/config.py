@@ -1,4 +1,5 @@
 from functools import lru_cache
+import math
 from pathlib import Path
 
 from pydantic import model_validator
@@ -68,6 +69,16 @@ class Settings(BaseSettings):
     DEPLOYMENT_ENV: str = "development"
     DATABASE_URL: str = ""
     INVESTIGATION_DB_PATH: str = "investigations.sqlite3"
+    # SSE resources are bounded per API process; database reads are shared per run.
+    RESEARCH_STREAM_WORKERS: int = 4
+    RESEARCH_STREAM_MAX_RUNS: int = 64
+    RESEARCH_STREAM_MAX_SUBSCRIBERS: int = 256
+    RESEARCH_STREAM_CACHE_EVENTS: int = 512
+    RESEARCH_STREAM_CACHE_RUN_BYTES: int = 1024 * 1024
+    RESEARCH_STREAM_CACHE_TOTAL_BYTES: int = 16 * 1024 * 1024
+    RESEARCH_STREAM_POLL_SECONDS: float = 1.0
+    RESEARCH_STREAM_HEARTBEAT_SECONDS: float = 15.0
+    RESEARCH_STREAM_SEND_TIMEOUT_SECONDS: float = 15.0
     CORS_ALLOW_ORIGINS: str = ""
     # The first production deployment has one API instance, so an in-process
     # limiter is sufficient. A multi-instance deployment must replace it with
@@ -206,6 +217,11 @@ class Settings(BaseSettings):
             raise ValueError("FLINK_HEARTBEAT_MAX_AGE_SECONDS must be between 1 and 1800")
         if self.KAFKA_PROCESSED_WAIT_SECONDS < 0:
             raise ValueError("KAFKA_PROCESSED_WAIT_SECONDS cannot be negative")
+        for name in type(self).model_fields:
+            if name.startswith("RESEARCH_STREAM_") and (
+                getattr(self, name) <= 0 or not math.isfinite(getattr(self, name))
+            ):
+                raise ValueError(f"{name} must be positive and finite")
         if self.DATABASE_URL:
             return self
         db_path = Path(self.INVESTIGATION_DB_PATH)

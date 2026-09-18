@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -42,7 +42,7 @@ def _filters(
     include_unknown_dates: bool,
     include_leads: bool,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "source_id": source_id,
         "source_type": source_type,
         "language": language,
@@ -53,16 +53,25 @@ def _filters(
         "include_unknown_dates": include_unknown_dates,
         "include_leads": include_leads,
     }
+    for prefix in ("published", "collected"):
+        after, before = result[f"{prefix}_after"], result[f"{prefix}_before"]
+        if after and before:
+            def utc(value):
+                parsed = datetime.fromisoformat(value)
+                return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+            if utc(after) > utc(before):
+                raise HTTPException(status_code=422, detail=f"{prefix}_after must precede {prefix}_before")
+    return result
 
 
 @router.get("/investigations/{investigation_id}/search")
 def investigation_search(
     investigation_id: str,
-    q: str | None = Query(default=None, min_length=1),
-    query: str | None = Query(default=None, min_length=1),
-    mode: str = Query(default="hybrid"),
+    q: str | None = Query(default=None, min_length=1, max_length=2000),
+    query: str | None = Query(default=None, min_length=1, max_length=2000),
+    mode: Literal["hybrid", "lexical", "fulltext", "phrase", "semantic"] = Query(default="hybrid"),
     limit: int = Query(default=25, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    offset: int = Query(default=0, ge=0, le=10000),
     source_id: str | None = Query(default=None),
     source_type: str | None = Query(default=None),
     language: str | None = Query(default=None),
@@ -72,6 +81,7 @@ def investigation_search(
     collected_before: str | None = Query(default=None),
     include_unknown_dates: bool = Query(default=False),
     include_leads: bool = Query(default=False),
+    use_cache: bool = Query(default=True),
 ) -> dict[str, Any]:
     search_query = q or query
     if not search_query:
@@ -84,7 +94,7 @@ def investigation_search(
                 published_before, collected_after, collected_before,
                 include_unknown_dates, include_leads,
             ),
-            limit=limit, offset=offset,
+            limit=limit, offset=offset, use_cache=use_cache,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Investigation not found.") from exc
@@ -96,12 +106,13 @@ def investigation_search(
 def investigation_graph(
     investigation_id: str,
     include_inferred: bool = Query(default=True),
-    relationships: list[str] | None = Query(default=None),
+    relationships: list[Literal["published", "exact_duplicate_of", "mentions_phrase", "mentions_entity", "enriched_by", "references", "has_run", "includes_document", "contains_claim", "supported_by", "countered_by", "cites", "has_evidence", "evidence_from", "verified_by", "contradicted_by", "has_receipt", "receipt_from", "receipted_by", "counter_receipted_by", "mutation", "phrase_reuse", "amplifies", "temporal_adjacency", "entity_overlap"]] | None = Query(default=None, max_length=25),
+    use_cache: bool = Query(default=True),
 ) -> dict[str, Any]:
     try:
         return get_b5_service().graph(
             investigation_id, include_inferred=include_inferred,
-            relationships=relationships,
+            relationships=relationships,use_cache=use_cache,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Investigation not found.") from exc
@@ -116,11 +127,12 @@ def investigation_paths(
     to_document_id: str = Query(..., min_length=1),
     max_depth: int = Query(default=4, ge=1, le=6),
     include_inferred: bool = Query(default=False),
+    use_cache: bool = Query(default=True),
 ) -> dict[str, Any]:
     try:
         return get_b5_service().paths(
             investigation_id, from_document_id, to_document_id,
-            max_depth=max_depth, include_inferred=include_inferred,
+            max_depth=max_depth, include_inferred=include_inferred,use_cache=use_cache,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Investigation not found.") from exc

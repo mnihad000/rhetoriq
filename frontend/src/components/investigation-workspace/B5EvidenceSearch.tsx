@@ -4,11 +4,12 @@ import type { B5EvidenceResult, B5SearchMode } from "../../types/rhetoriq";
 
 type B5EvidenceSearchProps = {
   investigationId: string;
+  refreshKey?: string;
   sourceTypes?: string[];
   onOpenSource: (documentId: string, span?: { start: number; end: number; text: string }) => void;
 };
 
-export default function B5EvidenceSearch({ investigationId, sourceTypes = [], onOpenSource }: B5EvidenceSearchProps) {
+export default function B5EvidenceSearch({ investigationId, refreshKey, sourceTypes = [], onOpenSource }: B5EvidenceSearchProps) {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<B5SearchMode>("fulltext");
   const [sourceType, setSourceType] = useState("");
@@ -27,10 +28,12 @@ export default function B5EvidenceSearch({ investigationId, sourceTypes = [], on
   const [meta, setMeta] = useState<{ fallback: boolean; pending: boolean; complete: boolean; limitations: string[] }>({ fallback: false, pending: false, complete: true, limitations: [] });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     let current = true;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     if (!query.trim()) {
       setResults([]);
       setTotal(0);
@@ -60,26 +63,29 @@ export default function B5EvidenceSearch({ investigationId, sourceTypes = [], on
       signal: controller.signal,
     }).then((response) => {
       if (!current) return;
-      setResults((previous) => offset ? [...previous, ...response.results] : response.results);
+      setResults((previous) => offset ? Array.from(new Map([...previous, ...response.results].map((result) => [result.document_id, result])).values()) : response.results);
       setTotal(response.total);
       setNextOffset(response.next_offset);
       setMeta({ fallback: response.fallback_active, pending: response.pending, complete: response.complete, limitations: response.limitations });
+      if (response.pending || response.fallback_active) retryTimer = setTimeout(() => setRetry((value) => value + 1), 5000);
     }).catch((reason: unknown) => {
       if (!current || (reason instanceof DOMException && reason.name === "AbortError")) return;
       setError(reason instanceof ApiError ? reason.message : "Evidence search is unavailable right now.");
       setResults([]);
+      if (!(reason instanceof ApiError) || reason.status >= 500) retryTimer = setTimeout(() => setRetry((value) => value + 1), 10000);
     }).finally(() => {
       if (current) setLoading(false);
     });
     return () => {
       current = false;
+      clearTimeout(retryTimer);
       controller.abort();
     };
-  }, [investigationId, query, mode, sourceType, sourceId, language, publishedAfter, publishedBefore, collectedAfter, collectedBefore, includeUnknownDates, includeLeads, offset]);
+  }, [investigationId, refreshKey, retry, query, mode, sourceType, sourceId, language, publishedAfter, publishedBefore, collectedAfter, collectedBefore, includeUnknownDates, includeLeads, offset]);
 
   useEffect(() => {
     setOffset(0);
-  }, [investigationId, query, mode, sourceType, sourceId, language, publishedAfter, publishedBefore, collectedAfter, collectedBefore, includeUnknownDates, includeLeads]);
+  }, [investigationId, refreshKey, query, mode, sourceType, sourceId, language, publishedAfter, publishedBefore, collectedAfter, collectedBefore, includeUnknownDates, includeLeads]);
 
   const sourceTypeOptions = useMemo(() => Array.from(new Set(sourceTypes)).sort(), [sourceTypes]);
 
@@ -117,13 +123,13 @@ export default function B5EvidenceSearch({ investigationId, sourceTypes = [], on
         <label className="inline-flex items-center gap-2"><input type="checkbox" checked={includeUnknownDates} onChange={(event) => setIncludeUnknownDates(event.target.checked)} />Include unknown dates</label>
         <label className="inline-flex items-center gap-2"><input type="checkbox" checked={includeLeads} onChange={(event) => setIncludeLeads(event.target.checked)} />Include lead records</label>
       </div>
-      {meta.fallback ? <p role="status" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">Search is using the deterministic fallback index.</p> : null}
+      {meta.fallback ? <p role="status" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">Search is using a limited canonical fallback.</p> : null}
       {meta.pending ? <p role="status" className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-950">The canonical index is still updating; results may be incomplete.</p> : null}
       {error ? <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-950">{error}</p> : null}
       {meta.limitations.length ? <p className="mt-4 text-xs leading-5 text-[var(--muted)]">{meta.limitations.slice(0, 2).join(" ")}</p> : null}
       <div className="mt-5 space-y-3" aria-live="polite">
         {results.map((result) => <EvidenceResultCard key={`${result.document_id}-${result.revision}`} result={result} onOpenSource={onOpenSource} />)}
-        {!loading && !error && !results.length ? <p className="rounded-xl border border-dashed border-[var(--border)] p-4 text-sm text-[var(--muted)]">No canonical evidence matched this search.</p> : null}
+        {!loading && !error && !results.length ? <p className="rounded-xl border border-dashed border-[var(--border)] p-4 text-sm text-[var(--muted)]">{meta.pending ? "Evidence projections are catching up; matching results may appear shortly." : "No canonical evidence matched this search."}</p> : null}
       </div>
       {nextOffset !== null ? <button type="button" className="mt-5 rounded-xl border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold text-[var(--ink)] hover:border-[var(--accent)]" onClick={() => setOffset(nextOffset)} aria-label="More evidence results are available">More results available</button> : null}
       {!meta.complete ? <p className="mt-3 text-xs text-[var(--muted)]">This result set is still being assembled.</p> : null}

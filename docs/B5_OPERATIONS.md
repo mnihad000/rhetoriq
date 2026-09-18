@@ -65,7 +65,7 @@ python -m events.b5_ops rebuild --generation rebuild-20260917 --batch-size 100
 python -m events.b5_ops check --generation rebuild-20260917
 python -m events.b5_ops activate --generation rebuild-20260917 --operation-id UNIQUE_ID
 python -m events.b5_ops rollback --operation-id NEW_UNIQUE_ID
-python -m events.b5_ops semantic-replay --batch-size 100
+python -m events.b5_ops semantic-replay --after-id "" --batch-size 100
 ```
 
 Bootstrap reports `next_after_id`; repeat with that cursor until `complete=true`. It reads processed lineage, canonical corpus, research/retrieved/discovery artifacts and persisted investigations. Receipt-bearing content has precedence. Active investigations are skipped until terminal. Historical documents lacking retained HTML remain unqualified for source-reference extraction; no links or offsets are invented.
@@ -85,11 +85,21 @@ ES failure retains semantic recall and an explicitly limited canonical lexical s
 Use a fresh project name and an untracked environment file with `POSTGRES_DB=rhetoriq_b5_test`, disposable passwords, B5 enabled, and no provider credentials:
 
 ```powershell
-docker compose --project-name rhetoriq_b5_test --env-file .env.b5.test -f compose.yml -f infra/b5/compose.b5.yml -f infra/b5/compose.acceptance.yml --profile b5 --profile acceptance up -d
+docker compose --project-name rhetoriq_b5_test --env-file .env.b5.test -f compose.yml -f infra/b5/compose.b5.yml -f infra/b5/compose.acceptance.yml --profile b5 up -d
 docker compose --project-name rhetoriq_b5_test --env-file .env.b5.test -f compose.yml -f infra/b5/compose.b5.yml -f infra/b5/compose.acceptance.yml --profile b5 --profile acceptance run --rm b5-acceptance python -m events.b5_acceptance --mode smoke --disposable-stack --output /reports/b5-smoke.json
 ```
 
 Run B3/B4 actual Kafka/Flink acceptance and recovery first. B5 load mode executes the prescribed measured windows with ten query clients. Preserve report volume contents and container memory/OOM evidence. Browser acceptance uses the persisted seeded investigation and explicit local opt-in. The [acceptance record](B5_ACCEPTANCE.md) defines every additional failure drill and the provider-budgeted live canary. Do not mark the milestone complete from a smoke report alone.
+
+For load qualification, use a **fresh** disposable project/volumes after the smoke run. Once all services and the B4 Flink job are ready, run the host supervisor:
+
+```powershell
+python infra/b5/qualify.py --env-file .env.b5.test --project rhetoriq_b5_load_test --output artifacts/b5-qualification.json
+```
+
+Start that project with the same three Compose files first. The supervisor invokes the load reporter, samples aggregate container memory and restarts, retains its log/report, and queries Docker OOM events over the run. Allocate exactly eight Docker CPUs and 16 GB (decimal or GiB) to reproduce the chosen machine budget. Qualification stays false on missing samples, allocation mismatch, exceeded 14 GB working set, restarts, OOM, missing freshness/visibility samples, sustained backlog growth, or failed query/cache thresholds. The reporter container has no Docker socket; its own load report deliberately cannot qualify without host resource evidence. Warm-up waits for every initial document and the investigation graph to apply. The measured backlog rule flags three consecutive minute-average increases exceeding 10% of the current input rate; the full trace is retained for review. Raw-to-search is sampled through refreshed Elasticsearch visibility every two seconds, so it includes that polling uncertainty.
+
+Rebuild recovery can be requested separately with the reporter's `--probe-seconds 1` opt-in; this flag enables the drill rather than imposing a one-second deadline. It replays recorded history into two isolated generations, validates semantic payloads and graph relationships, and exercises withdrawal/restore. Run the full scenario matrix and browser/live-canary checks separately; load qualification does not close those gates.
 
 ## B6 handoff
 

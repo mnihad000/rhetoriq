@@ -166,6 +166,18 @@ class ElasticsearchTarget:
         source = payload.get("_source")
         return source if isinstance(source, dict) else None
 
+    def visible_document_ids(self, generation: str, document_ids: list[str]) -> set[str]:
+        """Bounded refreshed-search visibility probe used by acceptance tooling."""
+        visible = set()
+        for offset in range(0, len(document_ids), 1000):
+            batch = document_ids[offset:offset + 1000]
+            response = self._request("POST", f"/{self._index(generation)}/_search", json={
+                "size": len(batch), "_source": ["document_id"],
+                "query": {"bool": {"filter": [{"terms": {"document_id": batch}}, {"term": {"eligible": True}}]}}})
+            response.raise_for_status()
+            visible.update(hit["_source"]["document_id"] for hit in self._json(response).get("hits", {}).get("hits", []))
+        return visible
+
     @staticmethod
     def _mentions(graph: dict[str, Any]) -> list[dict[str, Any]]:
         mentions: list[dict[str, Any]] = []
@@ -356,7 +368,10 @@ class ElasticsearchTarget:
         for key, op in (("published_after", "gte"), ("published_before", "lte"), ("collected_after", "gte"), ("collected_before", "lte")):
             if (filters or {}).get(key):
                 field = "published_at" if key.startswith("published") else "collected_at"
-                clauses.append({"range": {field: {op: filters[key]}}})
+                bound = {"range": {field: {op: filters[key]}}}
+                if field == "published_at" and filters.get("include_unknown_dates"):
+                    bound = {"bool":{"should":[bound,{"bool":{"must_not":[{"exists":{"field":field}}]}}],"minimum_should_match":1}}
+                clauses.append(bound)
         if not (filters or {}).get("include_unknown_dates", False):
             if (filters or {}).get("published_after") or (filters or {}).get("published_before"):
                 clauses.append({"exists": {"field": "published_at"}})
@@ -413,7 +428,7 @@ class ElasticsearchTarget:
             response = self._request("GET", "/")
             return {"status": "healthy" if response.status_code < 400 else "unhealthy", "target": "elasticsearch", "status_code": response.status_code, "details": self._json(response)}
         except Exception as exc:
-            return {"status": "unhealthy", "target": "elasticsearch", "error": str(exc)}
+            return {"status": "unhealthy", "target": "elasticsearch", "error": type(exc).__name__}
 
     def close(self) -> None:
         if self._owned_client and self._client is not None:
@@ -794,7 +809,7 @@ class Neo4jTarget:
                 verifier()
             return {"status": "healthy", "target": "neo4j"}
         except Exception as exc:
-            return {"status": "unhealthy", "target": "neo4j", "error": str(exc)}
+            return {"status": "unhealthy", "target": "neo4j", "error": type(exc).__name__}
 
     def close(self) -> None:
         if self._owned_driver and self._driver is not None:

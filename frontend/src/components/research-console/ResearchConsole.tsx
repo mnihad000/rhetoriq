@@ -12,10 +12,10 @@ import {
 import "@xyflow/react/dist/style.css";
 import { startTransition, useEffect, useMemo, useState } from "react";
 import {
-  getResearchEventsUrl,
   getResearchTrail,
   replayResearchRun,
 } from "../../lib/api";
+import { isResearchActive, watchResearchEvents } from "../../lib/researchStream";
 import type {
   LivePublicationCheck,
   LiveResearchAction,
@@ -117,48 +117,32 @@ export default function ResearchConsole({ investigationId, initialRun }: Researc
   const [selectedNode, setSelectedNode] = useState(initialRun.active_node);
   const [isReplaying, setIsReplaying] = useState(false);
 
+  const streamRunId = trail.run?.run_id ?? initialRun.run_id;
+
+  useEffect(() => {
+    setTrail({ run: initialRun, events: [], actions: [], evaluation: null,
+      replay_comparison: null, next_sequence: 0 });
+    setSelectedNode(initialRun.active_node);
+  }, [initialRun.run_id]);
+
   useEffect(() => {
     let cancelled = false;
-    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
-
     const refresh = async () => {
-      try {
-        const next = await getResearchTrail(investigationId);
-        if (!cancelled) startTransition(() => setTrail(next));
-      } catch {
-        // The workspace poll remains the final fallback.
-      }
+      const next = await getResearchTrail(investigationId);
+      if (cancelled) return false;
+      startTransition(() => setTrail(next));
+      return !!next.run && !isResearchActive(next.run.status);
     };
-
-    const scheduleRefresh = () => {
-      if (refreshTimer) return;
-      refreshTimer = setTimeout(() => {
-        refreshTimer = null;
-        void refresh();
-      }, 180);
-    };
-
-    void refresh();
-    const source = new EventSource(getResearchEventsUrl(investigationId));
-    EVENT_TYPES.forEach((eventType) => source.addEventListener(eventType, scheduleRefresh));
-    source.onerror = () => {
-      if (!fallbackTimer) fallbackTimer = setInterval(() => void refresh(), 5000);
-    };
-    source.onopen = () => {
-      if (fallbackTimer) {
-        clearInterval(fallbackTimer);
-        fallbackTimer = null;
-      }
-    };
-
-    return () => {
-      cancelled = true;
-      source.close();
-      if (refreshTimer) clearTimeout(refreshTimer);
-      if (fallbackTimer) clearInterval(fallbackTimer);
-    };
-  }, [investigationId]);
+    const currentRun = trail.run ?? initialRun;
+    const stop = isResearchActive(currentRun.status) ? watchResearchEvents({
+      investigationId, runId: streamRunId, eventTypes: EVENT_TYPES,
+      debounceMs: 180, fallbackMs: 5000, refresh, refreshImmediately: true,
+    }) : (() => {
+      void refresh().catch(() => { /* Retry on a later visit. */ });
+      return () => {};
+    })();
+    return () => { cancelled = true; stop(); };
+  }, [investigationId, streamRunId]);
 
   const completedNodes = useMemo(() => {
     const completed = new Set<string>();

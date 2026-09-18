@@ -80,18 +80,6 @@ export async function getTrendingFeed(limit = 6) {
   return request<LiveTrendingFeed>(`/api/trending?limit=${limit}`);
 }
 
-export async function getTrendingStatus() {
-  return request<{
-    state: string;
-    source: string;
-    fallback_active: boolean;
-    pipeline_evaluated_at?: string | null;
-    flink: Record<string, unknown>;
-    enrichment: Record<string, unknown>;
-    signals: Record<string, unknown>;
-  }>("/api/trending/status");
-}
-
 export async function getRecentInvestigations(limit = 12) {
   return request<LiveRecentInvestigationSummary[]>(
     `/api/investigations?limit=${limit}`,
@@ -163,9 +151,6 @@ export async function searchInvestigationEvidence(
   );
 }
 
-// Alias kept short for callers that treat the endpoint as a search service.
-export const getEvidenceSearch = searchInvestigationEvidence;
-
 export type InvestigationGraphOptions = {
   includeInferred?: boolean;
   relationships?: string[] | string;
@@ -229,82 +214,13 @@ export async function getResearchTrail(investigationId: string, afterSequence = 
   );
 }
 
-export function getResearchEventsUrl(investigationId: string) {
-  return `${API_BASE_URL}/api/investigations/${investigationId}/events`;
+export function getResearchEventsUrl(investigationId: string, runId?: string) {
+  const query = runId ? `?run_id=${encodeURIComponent(runId)}` : "";
+  return `${API_BASE_URL}/api/investigations/${encodeURIComponent(investigationId)}/events${query}`;
 }
 
 export async function replayResearchRun(investigationId: string, runId: string) {
   return request(`/api/investigations/${investigationId}/runs/${runId}/replay`, {
-    method: "POST",
-  });
-}
-
-export async function runRetrieval(investigationId: string) {
-  return request(`/api/investigations/${investigationId}/retrieve`, {
-    body: {},
-    method: "POST",
-  });
-}
-
-export async function runTimeline(investigationId: string) {
-  return request(`/api/investigations/${investigationId}/timeline`, {
-    body: {},
-    method: "POST",
-  });
-}
-
-export async function runSourceDiversity(investigationId: string) {
-  return request(`/api/investigations/${investigationId}/source-diversity`, {
-    body: {},
-    method: "POST",
-  });
-}
-
-export async function runCounterNarratives(investigationId: string) {
-  return request(`/api/investigations/${investigationId}/counter-narratives`, {
-    body: {},
-    method: "POST",
-  });
-}
-
-export async function runNarrativeFamily(investigationId: string) {
-  return request(`/api/investigations/${investigationId}/family`, {
-    body: {},
-    method: "POST",
-  });
-}
-
-export async function runAnalyst(investigationId: string) {
-  return request(`/api/investigations/${investigationId}/analyst`, {
-    body: {},
-    method: "POST",
-  });
-}
-
-export async function runClaimCounterpoints(investigationId: string) {
-  return request(`/api/investigations/${investigationId}/claim-counterpoints`, {
-    body: {},
-    method: "POST",
-  });
-}
-
-export async function runReceipts(investigationId: string) {
-  return request(`/api/investigations/${investigationId}/receipts`, {
-    body: {},
-    method: "POST",
-  });
-}
-
-export async function runAgentDebate(investigationId: string) {
-  return request(`/api/investigations/${investigationId}/agent-debate`, {
-    body: {},
-    method: "POST",
-  });
-}
-
-export async function runReport(investigationId: string) {
-  return request(`/api/investigations/${investigationId}/report`, {
-    body: {},
     method: "POST",
   });
 }

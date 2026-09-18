@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getInvestigationGraph, getProvenancePaths } from "../../lib/api";
 import type { B5GraphResponse, B5ProvenancePath, B5ProvenancePathsResponse } from "../../types/rhetoriq";
@@ -30,7 +30,7 @@ function pathResponse(paths: B5ProvenancePath[]): B5ProvenancePathsResponse {
 }
 
 describe("B5NarrativeGraph", () => {
-  afterEach(() => cleanup());
+  afterEach(() => { cleanup(); vi.useRealTimers(); });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getInvestigationGraph).mockResolvedValue(graph);
@@ -65,7 +65,7 @@ describe("B5NarrativeGraph", () => {
     fireEvent.change(screen.getByLabelText("To document"), { target: { value: "doc-b" } });
     fireEvent.click(screen.getByRole("button", { name: "Find path" }));
     expect(await screen.findByText("Document path is bounded to acquired evidence.")).toBeInTheDocument();
-    expect(getProvenancePaths).toHaveBeenCalledWith("inv-1", expect.objectContaining({ fromDocumentId: "doc-a", toDocumentId: "doc-b", maxDepth: 4 }));
+    expect(getProvenancePaths).toHaveBeenCalledWith("inv-1", expect.objectContaining({ fromDocumentId: "doc-a", toDocumentId: "doc-b", maxDepth: 4, includeInferred: false }));
   });
 
   it("announces pending, fallback limitations, and an empty path", async () => {
@@ -83,6 +83,29 @@ describe("B5NarrativeGraph", () => {
     vi.mocked(getInvestigationGraph).mockRejectedValue(new Error("offline"));
     render(<B5NarrativeGraph investigationId="inv-1" fallbackData={{ title: "Fallback", query: "q", currentNodeId: "doc-a", nodes: [], edges: [] }} onOpenSource={() => undefined} />);
     expect(await screen.findByText(/stored timeline view/i)).toBeInTheDocument();
+  });
+
+  it("refreshes a pending graph until the projection becomes current", async () => {
+    vi.useFakeTimers();
+    vi.mocked(getInvestigationGraph).mockResolvedValueOnce({ ...graph, pending: true, complete: false })
+      .mockResolvedValue({ ...graph, source: "neo4j", pending: false, complete: true, fallback_active: false });
+    render(<B5NarrativeGraph investigationId="inv-1" onOpenSource={() => undefined} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(getInvestigationGraph).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(getInvestigationGraph).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(getInvestigationGraph).toHaveBeenCalledTimes(2);
+  });
+
+  it("makes all bounded relationships accessible through the edge list", async () => {
+    const edges = Array.from({ length: 51 }, (_, index) => ({ ...graph.edges[0], id: `edge-${index}` }));
+    vi.mocked(getInvestigationGraph).mockResolvedValue({ ...graph, edges });
+    render(<B5NarrativeGraph investigationId="inv-1" onOpenSource={() => undefined} />);
+    const more = await screen.findByRole("button", { name: "Show more graph edges (1 remaining)" });
+    fireEvent.click(more);
+    expect(screen.queryByRole("button", { name: /Show more graph edges/ })).toBeNull();
+    expect(screen.getAllByRole("button").filter((button) => button.textContent === "referencesobserved")).toHaveLength(51);
   });
 });
 

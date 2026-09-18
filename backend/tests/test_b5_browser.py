@@ -109,7 +109,10 @@ def test_b5_dashboard_phrase_span_graph_path_reload_keyboard() -> None:
             page.keyboard.press("Enter")
         response = path_response.value
         assert response.ok
-        assert "paths" in response.json()
+        payload = response.json()
+        assert payload.get("source") == "neo4j" and not payload.get("fallback_active")
+        assert payload.get("paths"), "The seeded recorded-reference pair must have an observed path."
+        assert all(step["evidence_class"] == "observed" for path in payload["paths"] for step in path["steps"])
         page.get_by_text("Inspect a provenance path", exact=False).wait_for(state="visible")
 
         page.reload(wait_until="networkidle")

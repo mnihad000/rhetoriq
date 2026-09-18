@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import asyncio
-import json
-from typing import AsyncIterator
-
 import httpx
-from fastapi import APIRouter, Header, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi.responses import Response
 
 from config import get_settings
 from demo_data import ALL_DOCUMENTS
@@ -15,6 +11,7 @@ from services.autonomous_research import get_research_manager, get_research_repo
 from services.event_store import EventStore
 from services.signal_repository import SignalRepository
 from services.flink_health import get_flink_health
+from services.research_stream import ResearchStreamResponse, parse_cursor
 
 router = APIRouter(prefix="/api")
 
@@ -159,40 +156,21 @@ def research_trail(
     return get_research_repository().get_trail(investigation_id, after_sequence, limit)
 
 
-@router.get("/investigations/{investigation_id}/events")
+@router.get("/investigations/{investigation_id}/events", response_model=None)
 async def research_events(
+    request: Request,
     investigation_id: str,
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
-) -> StreamingResponse:
-    if get_research_repository().get_latest_run(investigation_id) is None:
-        raise HTTPException(status_code=404, detail="Research run not found.")
-    try:
-        after = int(last_event_id or 0)
-    except ValueError:
-        after = 0
-
-    async def stream() -> AsyncIterator[str]:
-        cursor = after
-        idle_ticks = 0
-        while True:
-            trail = get_research_repository().get_trail(investigation_id, cursor, 100)
-            for event in trail.events:
-                cursor = event.sequence
-                yield f"id: {event.sequence}\nevent: {event.event_type}\ndata: {json.dumps(event.model_dump(mode='json'))}\n\n"
-                idle_ticks = 0
-            run = trail.run
-            if run and run.status not in {"queued", "running"} and not trail.events:
-                break
-            await asyncio.sleep(1)
-            idle_ticks += 1
-            if idle_ticks >= 15:
-                yield ": heartbeat\n\n"
-                idle_ticks = 0
-
-    return StreamingResponse(
-        stream(), media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    run_id: str | None = Query(default=None),
+) -> Response:
+    selected_run, after = parse_cursor(last_event_id, run_id)
+    hub = getattr(request.app.state, "research_stream_hub", None)
+    if hub is None:
+        raise HTTPException(503, "Research streams unavailable.", headers={"Retry-After": "5"})
+    subscription = await hub.subscribe(investigation_id, selected_run, after)
+    if subscription is None:
+        return Response(status_code=204, headers={"Cache-Control": "no-cache"})
+    return ResearchStreamResponse(subscription)
 
 
 @router.get("/investigations/{investigation_id}/runs/{run_id}/checkpoints")

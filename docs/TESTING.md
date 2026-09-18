@@ -1,6 +1,6 @@
 # RhetoriQ Testing
 
-The verification baseline is backend tests, Python compilation, schema snapshots, secret scanning, PostgreSQL migration tests, Kafka/Apicurio integration, frontend tests/build, Compose validation, and live B2 provider canaries. Flink, Elasticsearch, Neo4j, Kubernetes, and browser rendering remain outside B2/B3.
+The verification baseline is backend tests, Python compilation, schema snapshots, secret scanning, PostgreSQL migration tests, Kafka/Apicurio integration, frontend tests/build, Compose validation, and live B2 provider canaries. B4/B5 now add Flink replay, immutable projection transactions, specialized-store/search/graph/cache tests, disposable PostgreSQL checks and opt-in mock-free browser acceptance. Runtime evidence remains distinct from offline tests; Kubernetes is B6. See [B5 acceptance](B5_ACCEPTANCE.md).
 
 ## Backend tests
 
@@ -103,4 +103,4 @@ Use `--write` after an intentional fixture or evaluator change. The committed [A
 
 ## Remaining future test layers
 
-B4 and later add deterministic Flink replay, specialized-store consistency, Kubernetes deployment, load, failure-injection, and restore tests with those features.
+B4/B5 include deterministic replay, projection consistency, crash boundaries, withdrawal/cache checks and opt-in load/browser tooling. Run the complete disposable service stack to establish acceptance evidence. Kubernetes deployment tests begin in B6.

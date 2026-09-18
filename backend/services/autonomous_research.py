@@ -1062,13 +1062,10 @@ class ResearchRunManager:
         )
         configuration_error = self._model_configuration_error()
         if configuration_error:
-            self.audit.update_run(
+            self.audit.finish_run(
                 run.run_id, status="configuration_missing", terminal_decision="configuration_missing",
-                warnings=[configuration_error],
-            )
-            self.audit.append_event(
-                run.run_id, "run.completed",
-                {"status": "configuration_missing", "decision": "configuration_missing"},
+                warnings=[configuration_error], event_type="run.completed",
+                payload={"status": "configuration_missing", "decision": "configuration_missing"},
             )
             return self.audit.get_run(run.run_id)  # type: ignore[return-value]
         return run
@@ -1193,8 +1190,9 @@ class ResearchRunManager:
                 })
         except Exception as exc:
             logger.exception("Autonomous research run failed: %s", run_id)
-            self.audit.update_run(run_id, status="failed", terminal_decision="failed", warnings=[str(exc)[:500]])
-            self.audit.append_event(run_id, "run.failed", {"error": str(exc)[:300]})
+            self.audit.finish_run(run_id, status="failed", terminal_decision="failed",
+                                  warnings=[str(exc)[:500]], event_type="run.failed",
+                                  payload={"error": str(exc)[:300]})
         finally:
             self.audit.heartbeat_worker(self.worker_id, "kafka")
 

@@ -154,7 +154,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-Kafka, Apicurio, topic initialization, the outbox publisher, all event workers, PostgreSQL, SearXNG, API, and frontend are defined in the root Compose file. Flink, Elasticsearch, Neo4j, and Kubernetes remain later milestones.
+Kafka, Apicurio, topic initialization, the outbox publisher, all event workers, PostgreSQL, SearXNG, API, and frontend are defined in the root Compose file. B4 supplies Flink processing; B5 adds Elasticsearch, Neo4j, pinned MiniLM/pgvector, Redis query caching and independent projection workers through `infra/b5/compose.b5.yml`. Actual runtime acceptance remains pending. Kubernetes belongs to B6. See [B5 operations](B5_OPERATIONS.md) for encrypted connections, initialization, health, recovery and resource limits.
 
 ## Health and observability
 

@@ -117,6 +117,7 @@ class SearchService:
         filters: dict[str, Any] | None = None,
         limit: int = _DEFAULT_LIMIT,
         offset: int = 0,
+        use_cache: bool = True,
     ) -> dict[str, Any]:
         query = str(query or "").strip()
         if not query:
@@ -137,7 +138,7 @@ class SearchService:
         limitations = list(context["limitations"])
         cache_kind = self._cache_kind(query, public_mode, filters)
         cache_revision, cache_hash = self._context_revision_hash(context)
-        if self.cache and not pending:
+        if use_cache and self.cache and not pending:
             try:
                 cached = self.cache.get(
                     cache_kind, investigation_id, self.target, generation,
@@ -152,11 +153,11 @@ class SearchService:
                         "complete": cached.get("complete", True),
                         "limitations": cached.get("limitations", []),
                     }
-                    return cached
+                    return {**cached,"cached":True}
             except Exception:
                 logger.debug("B5 cache read failed", exc_info=True)
         if not docs:
-            return self._search_response(
+            return self._annotate_projection(self._search_response(
                 investigation_id, query, mode, [], 0, offset, generation,
                 source="empty" if not pending else "canonical",
                 fallback_active=bool(pending or context["fallback"]),
@@ -164,7 +165,7 @@ class SearchService:
                 complete=not pending,
                 limitations=limitations,
                 snapshot_id=context.get("snapshot_id"),
-            )
+            ),context,["minilm"] if public_mode=="semantic" else ["elasticsearch","minilm"] if public_mode=="hybrid" else ["elasticsearch"])
 
         by_id = {doc.id: doc for doc in docs}
         snap_by_id = {str(s.get("data", {}).get("document", {}).get("id") or s.get("snapshot_id")): s for s in snapshots}
@@ -257,7 +258,8 @@ class SearchService:
         # Cache healthy, complete responses only.  Cache validation below still
         # checks the canonical context, so a hit can never resurrect a stale
         # revision or a withdrawn document.
-        if self.cache and not fallback and complete and offset == 0:
+        result = self._annotate_projection(result,context,["minilm"] if public_mode=="semantic" else ["elasticsearch","minilm"] if public_mode=="hybrid" else ["elasticsearch"])
+        if use_cache and self.cache and not fallback and result["complete"] and offset == 0:
             cache_key_revision, cache_hash = self._context_revision_hash(context)
             try:
                 if self._canonical_token_matches(context, investigation_id, generation):
@@ -399,14 +401,14 @@ class SearchService:
     # Graph/provenance API
     # ------------------------------------------------------------------
     @_measure_query
-    def graph(self, investigation_id: str, include_inferred: bool = True, relationships: Any = None) -> dict[str, Any]:
+    def graph(self, investigation_id: str, include_inferred: bool = True, relationships: Any = None, use_cache: bool = True) -> dict[str, Any]:
         context = self._canonical_context(investigation_id, {})
         docs = context["docs"]
         limitations = list(context["limitations"])
         relationships_key = json.dumps(relationships, sort_keys=True, default=str)
         graph_kind = "graph:" + hashlib.sha256(f"{include_inferred}\0{relationships_key}".encode()).hexdigest()[:24]
         cache_revision, cache_hash = self._context_revision_hash(context)
-        if self.cache and not context["pending"]:
+        if use_cache and self.cache and not context["pending"]:
             try:
                 cached = self.cache.get(
                     graph_kind, investigation_id, self.target, context["generation"],
@@ -424,17 +426,17 @@ class SearchService:
                     target_limitations = list(payload.get("limitations", []))
                     unavailable = any("unavailable" in str(item).lower() or "not configured" in str(item).lower() for item in target_limitations)
                     if not unavailable:
-                        return self._graph_response(
+                        return self._annotate_projection(self._graph_response(
                             investigation_id, [], [], context,
                             list(dict.fromkeys(limitations + target_limitations)),
                             source="neo4j", fallback_active=False, truncated=False,
-                        )
+                        ),context,["neo4j"])
                 except Exception:
                     logger.debug("B5 empty graph target unavailable", exc_info=True)
-            return self._graph_response(
+            return self._annotate_projection(self._graph_response(
                 investigation_id, [], [], context, limitations,
                 source="canonical", fallback_active=True, truncated=False,
-            )
+            ),context,["neo4j"])
         document_ids = [doc.id for doc in docs]
         nodes: list[Any] = []
         edges: list[Any] = []
@@ -477,12 +479,14 @@ class SearchService:
         if truncated:
             limitations.append("Graph response truncated to the bounded node and edge limits.")
         nodes = nodes[:200]
-        edges = edges[:500]
+        visible = {str(node["id"]) for node in nodes}
+        edges = [edge for edge in edges if str(edge.get("source")) in visible and str(edge.get("target")) in visible][:500]
         response = self._graph_response(
             investigation_id, nodes, edges, context, list(dict.fromkeys(limitations)),
             source=source, fallback_active=fallback, truncated=truncated,
         )
-        if self.cache and response["complete"] and not response["fallback_active"] and not response["pending"]:
+        response = self._annotate_projection(response,context,["neo4j"])
+        if use_cache and self.cache and response["complete"] and not response["fallback_active"] and not response["pending"]:
             if self._canonical_token_matches(context, investigation_id, context["generation"]):
                 self.cache.set(
                     graph_kind, investigation_id, self.target, context["generation"], response,
@@ -498,6 +502,7 @@ class SearchService:
         to_document_id: str,
         max_depth: int = 4,
         include_inferred: bool = False,
+        use_cache: bool = True,
     ) -> dict[str, Any]:
         max_depth = min(6, max(1, int(max_depth)))
         context = self._canonical_context(investigation_id, {})
@@ -506,7 +511,7 @@ class SearchService:
         limitations = list(context["limitations"])
         paths_kind = "paths:" + hashlib.sha256(f"{from_document_id}\0{to_document_id}\0{max_depth}\0{include_inferred}".encode()).hexdigest()[:24]
         cache_revision, cache_hash = self._context_revision_hash(context)
-        if self.cache and not context["pending"]:
+        if use_cache and self.cache and not context["pending"]:
             try:
                 cached = self.cache.get(
                     paths_kind, investigation_id, self.target, context["generation"],
@@ -518,13 +523,14 @@ class SearchService:
             except Exception:
                 logger.debug("B5 paths cache read failed", exc_info=True)
         if from_document_id not in allowed or to_document_id not in allowed:
-            return self._paths_response(
+            return self._annotate_projection(self._paths_response(
                 investigation_id, [], context, limitations + ["Path endpoints are outside acquired evidence."],
                 source="canonical", fallback_active=True,
-            )
+            ),context,["neo4j"])
         source = "canonical"
         fallback = bool(context["fallback"])
         paths: list[Any] = []
+        path_stats: dict[str,Any] = {}
         target_attempted = False
         target_failed = False
         if self.neo4j is not None:
@@ -542,7 +548,7 @@ class SearchService:
                     paths = provenance_paths(
                         {"nodes": nodes, "edges": edges},
                         from_document_id, to_document_id,
-                        max_depth=max_depth, include_inferred=include_inferred, limit=10,
+                        max_depth=max_depth, include_inferred=include_inferred, limit=10,stats=path_stats,
                     )
                 except Exception:
                     paths = self._paths_from_edges(edges, from_document_id, to_document_id, max_depth)
@@ -561,7 +567,7 @@ class SearchService:
                     graph_nodes,graph_edges = self._validate_graph_payload(graph,allowed,include_inferred,None)
                     paths = provenance_paths(
                         {"nodes":graph_nodes,"edges":graph_edges}, from_document_id, to_document_id,
-                        max_depth=max_depth, include_inferred=include_inferred, limit=10,
+                        max_depth=max_depth, include_inferred=include_inferred, limit=10,stats=path_stats,
                     )
                     limitations.extend(graph.get("limitations", []))
                 else:
@@ -577,7 +583,12 @@ class SearchService:
             list(dict.fromkeys(limitations)), source=source,
             fallback_active=fallback,
         )
-        if self.cache and response["complete"] and not response["fallback_active"] and not response["pending"]:
+        response["truncated"] = bool(path_stats.get("truncated"))
+        response["traversal"] = path_stats
+        if response["truncated"]:
+            response["limitations"].append("Path count or traversal work limit reached.")
+        response = self._annotate_projection(response,context,["neo4j"])
+        if use_cache and self.cache and response["complete"] and not response["fallback_active"] and not response["pending"]:
             if self._canonical_token_matches(context, investigation_id, context["generation"]):
                 self.cache.set(
                     paths_kind, investigation_id, self.target, context["generation"], response,
@@ -632,7 +643,7 @@ class SearchService:
         if self.repository is not None:
             try:
                 if ids and hasattr(self.repository, "get_snapshot"):
-                    snapshots = [
+                    snapshots = self.repository.get_snapshots(ids) if hasattr(self.repository,"get_snapshots") else [
                         snapshot for snapshot in
                         (self.repository.get_snapshot(snapshot_id) for snapshot_id in ids)
                         if snapshot is not None
@@ -646,16 +657,17 @@ class SearchService:
             # later canonical withdrawal or ineligibility decision removes it
             # from every user-visible surface.
             current_snapshots: list[dict[str, Any]] = []
+            current_by_id = {self._snapshot_document_id(snapshot):snapshot for snapshot in self.repository.documents(ids=[self._snapshot_document_id(item) for item in snapshots],limit=len(snapshots))}
             for snapshot in snapshots:
                 document_id = self._snapshot_document_id(snapshot)
                 try:
-                    current = self.repository.current("document", document_id) if document_id else None
+                    current = current_by_id.get(document_id)
                 except Exception:
                     current = None
                 if current is None:
                     continue
                 current_data = current.get("data") or {}
-                if current.get("eligible") is False or current_data.get("withdrawn") or current.get("operation") in {"withdraw", "withdrawal"}:
+                if (current.get("eligible") is False and not filters.get("include_leads")) or current_data.get("withdrawn") or current.get("operation") in {"withdraw", "withdrawal"}:
                     continue
                 current_snapshots.append(snapshot)
             snapshots = current_snapshots
@@ -983,12 +995,23 @@ class SearchService:
         starts: list[int] = []
         ends: list[int] = []
         pending_space: tuple[int, int] | None = None
-        for index, char in enumerate(text):
+        # Normalize composing sequences together and retain their original span.
+        # This also handles Hangul Jamo, whose combining class is zero.
+        clusters = []
+        index = 0
+        while index < len(text):
+            end = index + 1
+            while end < len(text) and (unicodedata.combining(text[end]) or
+                    unicodedata.normalize("NFC", text[index:end + 1]) != unicodedata.normalize("NFC", text[index:end]) + unicodedata.normalize("NFC", text[end])):
+                end += 1
+            clusters.append((index, end, text[index:end]))
+            index = end
+        for index, end, char in clusters:
             if char.isspace():
                 if chars and pending_space is None:
                     pending_space = (index, index + 1)
                 continue
-            folded = unicodedata.normalize("NFKC", char).casefold()
+            folded = unicodedata.normalize("NFC", char).casefold()
             if not folded:
                 continue
             if pending_space is not None:
@@ -999,7 +1022,7 @@ class SearchService:
             for folded_char in folded:
                 chars.append(folded_char)
                 starts.append(index)
-                ends.append(index + 1)
+                ends.append(end)
         return "".join(chars), starts, ends
 
     @classmethod
@@ -1073,7 +1096,7 @@ class SearchService:
             for doc in docs
         ]
         edges: list[dict[str, Any]] = []
-        ordered = sorted(docs, key=lambda doc: doc.published_at or datetime.max.replace(tzinfo=getattr(doc.published_at, "tzinfo", None)))
+        ordered = sorted(docs,key=lambda doc:(doc.published_at.replace(tzinfo=timezone.utc) if doc.published_at and not doc.published_at.tzinfo else doc.published_at) or datetime.max.replace(tzinfo=timezone.utc))
         for left, right in zip(ordered, ordered[1:]):
             edges.append({
                 "id": f"canonical:{left.id}:{right.id}",
@@ -1093,6 +1116,23 @@ class SearchService:
         if snapshot and "revision" in payload and (payload.get("revision"),payload.get("semantic_hash")) != (snapshot["revision"],snapshot["semantic_hash"]):
             context["pending"] = True
             raise RuntimeError("Neo4j investigation projection is pending or stale")
+
+    def _annotate_projection(self,response: dict[str,Any],context: dict[str,Any],targets: list[str]) -> dict[str,Any]:
+        if self.repository is not None and hasattr(self.repository,"coverage"):
+            snapshots = list(context.get("snapshots",[]))
+            if "neo4j" in targets and context.get("investigation_snapshot"):
+                snapshots.append(context["investigation_snapshot"])
+            coverage = self.repository.coverage(snapshots,context["generation"])
+            response["coverage"] = {target:coverage[target] for target in targets}
+            if any(coverage[target]["pending"] for target in targets):
+                response["pending"] = True
+                response["complete"] = False
+                response["limitations"] = list(dict.fromkeys([*response["limitations"],"Required projection coverage has not reached the current canonical revision."]))
+        response["freshness"] = {"state":"stale" if any("stale" in str(item).lower() for item in response["limitations"]) else "pending" if response["pending"] else "fallback" if response["fallback_active"] else "current",
+            "generation":context["generation"],"snapshot_id":context.get("snapshot_id")}
+        if response["fallback_active"]:
+            response["complete"] = False
+        return response
 
     @staticmethod
     def _validate_graph_payload(payload: Any, allowed: set[str], include_inferred: bool, relationships: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -1141,6 +1181,8 @@ class SearchService:
     def _paths_from_edges(edges: list[dict[str, Any]], start: str, goal: str, max_depth: int) -> list[list[str]]:
         adjacency: dict[str, list[str]] = defaultdict(list)
         for edge in edges:
+            if edge.get("relationship") not in {"references","exact_duplicate_of","mutation","phrase_reuse","amplifies"} or edge.get("evidence_class") != "observed":
+                continue
             adjacency[str(edge.get("source"))].append(str(edge.get("target")))
         found: list[list[str]] = []
         stack: list[tuple[str, list[str]]] = [(start, [start])]
@@ -1165,6 +1207,7 @@ class SearchService:
             "results": results,
             "total": total,
             "next_offset": offset + len(results) if offset + len(results) < total else None,
+            "cached": False,
             "source": source,
             "fallback_active": fallback_active,
             "pending": pending,
@@ -1184,6 +1227,7 @@ class SearchService:
             "pending": context["pending"], "complete": not context["pending"],
             "limitations": limitations, "truncated": truncated,
             "generation": context["generation"],
+            "cached": False,
         }
         if context.get("snapshot_id") is not None:
             response["snapshot_id"] = context["snapshot_id"]
@@ -1197,6 +1241,7 @@ class SearchService:
             "pending": context["pending"], "complete": not context["pending"],
             "limitations": limitations, "truncated": len(paths) > 10,
             "generation": context["generation"],
+            "cached": False,
         }
         if context.get("snapshot_id") is not None:
             response["snapshot_id"] = context["snapshot_id"]

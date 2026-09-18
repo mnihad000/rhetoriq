@@ -8,6 +8,7 @@ does not mutate persisted Pydantic models or depend on a database client.
 from __future__ import annotations
 
 from datetime import datetime
+from collections import deque
 import re
 from typing import Any, Iterable
 from urllib.parse import urlparse
@@ -16,11 +17,10 @@ from flink.contracts import canonical_json, semantic_hash, stable_id, utc
 from models.document import Document
 from models.events import EnrichmentReceipt
 from services.mutation_detection import MutationDetector
+from services.b5_versions import (GRAPH_METHOD_VERSION, MUTATION_METHOD_VERSION,
+                                 AMPLIFICATION_METHOD_VERSION, projection_methods)
 
 
-GRAPH_METHOD_VERSION = "b5-graph-v1"
-MUTATION_METHOD_VERSION = "b5-mutation-v1"
-AMPLIFICATION_METHOD_VERSION = "b5-timeline-amplification-v1"
 MAX_PAIRWISE_DOCUMENTS = 200
 MAX_PATH_DEPTH = 6
 
@@ -44,6 +44,8 @@ def _snapshot_data(snapshot: dict[str, Any]) -> dict[str, Any]:
     data = snapshot.get("data")
     if not isinstance(data, dict):
         raise ValueError("graph snapshot data must be an object")
+    if data.get("projection_methods", projection_methods()) != projection_methods():
+        raise ValueError("Recorded projection-method versions are unsupported by this worker")
     return data
 
 
@@ -229,6 +231,7 @@ def build_document_graph(snapshot: dict[str, Any], known_documents: dict[str, di
 
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
+    graph_limitations = list((document.get("metadata") or {}).get("reference_limitations") or [])
     node_ids: set[str] = set()
 
     def add_node(value: dict[str, Any]) -> None:
@@ -289,6 +292,7 @@ def build_document_graph(snapshot: dict[str, Any], known_documents: dict[str, di
         phrase_id = stable_id("phrase", phrase, length=16)
         evidence, limitations = _offset_evidence(text, item)
         if evidence is None:
+            graph_limitations.extend(limitations)
             continue
         add_node(_node(phrase_id, "phrase", phrase, phrase=phrase))
         add_edge(_edge(document_id, phrase_id, "mentions_phrase", evidence_class="observed", method="document.phrases" if not item.get("evidence") else "b4.enrichment", snapshot_hash_value=snapshot_hash_value, document_id=document_id, evidence={**evidence,"phrase":phrase}, limitations=limitations))
@@ -309,6 +313,7 @@ def build_document_graph(snapshot: dict[str, Any], known_documents: dict[str, di
         entity_id = _entity_id(entity)
         evidence, limitations = _offset_evidence(text, item)
         if evidence is None:
+            graph_limitations.extend(limitations)
             continue
         add_node(_node(entity_id, "entity", entity, entity=entity))
         add_edge(_edge(document_id, entity_id, "mentions_entity", evidence_class="observed", method="document.entities" if not item.get("evidence") else "b4.enrichment", snapshot_hash_value=snapshot_hash_value, document_id=document_id, evidence={**evidence,"entity":entity}, limitations=limitations))
@@ -322,6 +327,7 @@ def build_document_graph(snapshot: dict[str, Any], known_documents: dict[str, di
     for reference in _references(document):
         valid, limitations = _reference_is_valid(reference, text)
         if not valid:
+            graph_limitations.extend(limitations)
             continue
         target = str(reference["target_url"]).strip()
         acquired = (known_documents or {}).get(target)
@@ -334,7 +340,7 @@ def build_document_graph(snapshot: dict[str, Any], known_documents: dict[str, di
         evidence = {key: reference[key] for key in ("target_url", "anchor_text", "context", "start", "end", "extraction_version", "reference_kind") if key in reference}
         add_edge(_edge(document_id, target_id, "references", evidence_class="observed", method="b4.source_link", snapshot_hash_value=snapshot_hash_value, document_id=document_id, evidence=evidence, limitations=limitations))
 
-    return {"nodes": nodes, "edges": edges}
+    return {"nodes": nodes, "edges": edges,"limitations":sorted(set(graph_limitations))}
 
 
 def _workspace_value(workspace: dict[str, Any], *path: str) -> Any:
@@ -472,6 +478,7 @@ def build_investigation_graph(snapshot: dict[str, Any], document_snapshots: list
         except Exception:
             continue
         child = build_document_graph(doc_snapshot,known_documents)
+        limitations.extend(child.get("limitations",[]))
         graphs_by_doc[document_id] = child
         for node in child["nodes"]:
             if node["id"] in node_ids and node.get("kind")=="document" and not node.get("placeholder"):
@@ -628,7 +635,7 @@ def build_investigation_graph(snapshot: dict[str, Any], document_snapshots: list
 _PATH_RELATIONSHIPS = {"exact_duplicate_of", "references", "mutation", "phrase_reuse", "amplifies"}
 
 
-def provenance_paths(graph: dict[str, Any], from_document_id: str, to_document_id: str, max_depth: int = 4, include_inferred: bool = False, limit: int = 10) -> list[dict[str, Any]]:
+def provenance_paths(graph: dict[str, Any], from_document_id: str, to_document_id: str, max_depth: int = 4, include_inferred: bool = False, limit: int = 10, stats: dict[str,Any] | None = None) -> list[dict[str, Any]]:
     """Return bounded deterministic document provenance paths.
 
     Traversal intentionally ignores source/phrase/entity hubs so a popular
@@ -639,7 +646,7 @@ def provenance_paths(graph: dict[str, Any], from_document_id: str, to_document_i
     limit = max(0, min(int(limit), 10))
     if limit == 0:
         return []
-    edges = [edge for edge in graph.get("edges", []) if isinstance(edge, dict) and edge.get("relationship") in _PATH_RELATIONSHIPS and (include_inferred or edge.get("evidence_class") != "inferred")]
+    edges = [edge for edge in graph.get("edges", []) if isinstance(edge, dict) and edge.get("relationship") in _PATH_RELATIONSHIPS and edge.get("evidence_class") in ({"observed","inferred"} if include_inferred else {"observed"})]
     adjacency: dict[str, list[dict[str, Any]]] = {}
     document_ids = {str(node.get("id")) for node in graph.get("nodes", []) if isinstance(node, dict) and node.get("kind") == "document"}
     for edge in edges:
@@ -649,9 +656,23 @@ def provenance_paths(graph: dict[str, Any], from_document_id: str, to_document_i
     for value in adjacency.values():
         value.sort(key=lambda edge: (str(edge.get("target")), str(edge.get("relationship")), str(edge.get("id"))))
     paths: list[dict[str, Any]] = []
-    queue: list[tuple[str, list[dict[str, Any]], set[str]]] = [(str(from_document_id), [], {str(from_document_id)})]
-    while queue and len(paths) < limit:
-        current, trail, visited = queue.pop(0)
+    reverse: dict[str,set[str]] = {}
+    for source,neighbors in adjacency.items():
+        for edge in neighbors:
+            reverse.setdefault(str(edge["target"]),set()).add(source)
+    distance = {str(to_document_id):0}
+    frontier = {str(to_document_id)}
+    for depth in range(1,max_depth+1):
+        frontier = {source for target in frontier for source in reverse.get(target,set()) if source not in distance}
+        distance.update({source:depth for source in frontier})
+    queue = deque([(str(from_document_id), [], {str(from_document_id)})])
+    expansions = 0
+    truncated = False
+    while queue and len(paths) < limit and expansions<10000:
+        current, trail, visited = queue.popleft()
+        expansions += 1
+        if current not in distance or len(trail)+distance[current]>max_depth:
+            continue
         if current == str(to_document_id):
             paths.append({"from_document_id": str(from_document_id), "to_document_id": str(to_document_id), "document_ids": [str(from_document_id), *[str(edge["target"]) for edge in trail]], "steps": [{"relationship": edge["relationship"], "source": edge["source"], "target": edge["target"], "evidence_class": edge["evidence_class"], "method": edge["method"], "method_version": edge["method_version"], "evidence": edge.get("evidence", {}), "limitations": edge.get("limitations", [])} for edge in trail], "explanation": " → ".join([str(from_document_id), *[f"{edge['relationship']} → {edge['target']}" for edge in trail]])})
             continue
@@ -661,5 +682,12 @@ def provenance_paths(graph: dict[str, Any], from_document_id: str, to_document_i
             target = str(edge["target"])
             if target in visited:
                 continue
+            if target not in distance or len(trail)+1+distance[target]>max_depth:
+                continue
+            if len(queue)>=10000:
+                truncated = True
+                continue
             queue.append((target, [*trail, edge], {*visited, target}))
+    if stats is not None:
+        stats.update({"truncated":truncated or bool(queue),"expanded":expansions,"expansion_limit":10000})
     return paths

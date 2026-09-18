@@ -62,9 +62,10 @@ def reconcile(repository, targets, generation=None, *, repair=False, repair_limi
             if reasons:
                 record = {"target":target_name,"kind":snapshot["kind"],"domain_id":snapshot["domain_id"],"reasons":sorted(set(reasons))}
                 if repair and repaired<repair_limit and not validate_input(snapshot) and "missing_recorded_document" not in reasons:
-                    adapter.repair(snapshot,generation,document_snapshots=documents)
-                    repository.mark_delivery(target_name,snapshot,generation)
-                    record["repaired"] = True
+                    result = adapter.repair(snapshot,generation,document_snapshots=documents)
+                    successful = result.get("status") in {"repaired","applied"} and not result.get("blocked")
+                    repository.mark_delivery(target_name,snapshot,generation,error=None if successful else "RepairBlocked")
+                    record["repaired"] = successful
                     repaired += 1
                 drift.append(record)
         for key in sorted(set(inventory)-set(expected)):
@@ -99,7 +100,9 @@ def rebuild(repository, targets, generation, *, after=0, batch_size=100):
             for name,adapter in targets.items():
                 if name!="neo4j" and snapshot["kind"]!="document":
                     continue
-                adapter.apply(snapshot,generation,document_snapshots=documents)
+                result = adapter.apply(snapshot,generation,document_snapshots=documents)
+                if result.get("status") not in {"applied","stale","skipped"}:
+                    raise RuntimeError("Rebuild target did not confirm application")
                 repository.mark_delivery(name,snapshot,generation)
             cursor = snapshot["sequence_id"]
             count += 1
@@ -131,6 +134,9 @@ def bootstrap(repository, *, after_id="", batch_size=100):
     processed = 0
     for item in sorted((x for x in candidates if x[0] in selected),key=lambda x:(x[0],x[1],x[2])):
         doc = Document.model_validate_json(item[2])
+        if not doc.references and not (doc.metadata or {}).get("reference_extraction"):
+            doc = doc.model_copy(update={"metadata":{**(doc.metadata or {}),"reference_extraction":"historical_unqualified",
+                "reference_limitations":["Retained canonical HTML unavailable; historical source-link extraction is unqualified."]}})
         enrichment = json.loads(item[3]) if len(item)>3 and item[3] else None
         source_event_id = json.loads(item[4]).get("event_id") if len(item)>4 else None
         repository.record_document(doc,source_kind=item[1],enrichment=enrichment,
@@ -189,14 +195,18 @@ def main():
     elif args.action=="semantic-replay":
         handler = ProjectionHandlers("minilm",settings=settings,repository=repository,recorded_only=True)
         result = {"processed":0}
-        for snapshot in repository.documents(limit=args.batch_size):
+        batch = repository.documents(limit=args.batch_size,after_id=args.after_id)
+        for snapshot in batch:
             handler.apply(snapshot,repository.manifest()["generation"])
             result["processed"] += 1
+        result.update({"next_after_id":batch[-1]["domain_id"] if batch else args.after_id,"complete":not batch})
     else:
         from services.b5_targets import ElasticsearchTarget, Neo4jTarget
         targets = {"elasticsearch":ElasticsearchTarget(settings),"neo4j":Neo4jTarget(settings)}
+        generation = args.generation or repository.manifest()["generation"]
+        job_id = args.operation_id or f"b5_{args.action}_{uuid4().hex}"
+        repository.events.create_replay_job(job_id,f"b5:{args.action}",correlation_id=generation,partition=None,start_offset=args.after,end_offset=repository.high_watermark())
         try:
-            generation = args.generation or repository.manifest()["generation"]
             if args.action=="rebuild":
                 if not args.generation:
                     parser.error("Rebuild requires an isolated --generation")
@@ -210,9 +220,10 @@ def main():
                 if args.action in {"activate","rollback"}:
                     repository.activate_generation(generation,result)
             # Existing replay audit table supplies a persistent admin audit trail.
-            job_id = args.operation_id or f"b5_{args.action}_{uuid4().hex}"
-            repository.events.create_replay_job(job_id,f"b5:{args.action}",correlation_id=generation,partition=None,start_offset=args.after,end_offset=result.get("high_watermark"))
             repository.events.finish_replay_job(job_id,processed_count=result.get("processed",result.get("repaired",0)),skipped_count=len(result.get("drift",[])))
+        except BaseException as exc:
+            repository.events.finish_replay_job(job_id,processed_count=0,skipped_count=0,error=type(exc).__name__)
+            raise
         finally:
             for adapter in targets.values():
                 if hasattr(adapter,"close"):

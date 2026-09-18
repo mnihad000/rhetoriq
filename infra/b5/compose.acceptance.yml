@@ -9,6 +9,7 @@ services:
       GEMINI_API_KEY: ""
       GROQ_API_KEY: ""
       B5_RUNTIME_TESTS: "true"
+      B5_RECORDED_PROVIDER_FIXTURE: /fixtures/provider.json
       EMBEDDING_LOCAL_ONLY: "true"
 
   b5-acceptance:
@@ -40,9 +41,11 @@ services:
       B5_GENERATION: "${B5_GENERATION:-live}"
       B5_COMPOSE_PROJECT: "${B5_COMPOSE_PROJECT:-rhetoriq_b5_test}"
       B5_API_URL: "http://api:8000"
+      B5_RECORDED_PROVIDER_FIXTURE: /fixtures/provider.json
     volumes:
       - b5-acceptance-reports:/reports
       - b5-ca-public:/etc/rhetoriq/ca:ro
+      - ./infra/flink/recorded-provider.json:/fixtures/provider.json:ro
     depends_on:
       api:
         condition: service_started

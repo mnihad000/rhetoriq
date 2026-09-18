@@ -220,6 +220,17 @@ class ResearchRepository:
                 ),
             )
 
+    def finish_run(self, run_id: str, *, status: str, terminal_decision: str,
+                   warnings: list[str], event_type: str, payload: dict[str, Any]) -> None:
+        """Publish a terminal state and its final event in one transaction."""
+        if status in {"queued", "running"}:
+            raise ValueError("finish_run requires a terminal status")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self.update_run(run_id, status=status, terminal_decision=terminal_decision,
+                            warnings=warnings, connection=conn)
+            self.append_event(run_id, event_type, payload, connection=conn)
+
     def append_event(self, run_id: str, event_type: str, payload: dict[str, Any], *, connection=None) -> ResearchEvent:
         created = _now()
         with nullcontext(connection) if connection is not None else self._connect() as conn:

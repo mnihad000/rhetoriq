@@ -8,6 +8,14 @@ from models.document import Document
 from services.b5_search import SearchService
 
 
+def test_literal_unicode_composition_preserves_original_offsets_without_stemming():
+    text = "A cafe\u0301\t\npolicy and \u1100\u1161 records changed."
+    spans = SearchService._spans(text, "CAFÉ policy")
+    assert spans == [{"start": 2, "end": 15, "text": "cafe\u0301\t\npolicy"}]
+    assert SearchService._spans(text, "가 records")[0]["text"] == "\u1100\u1161 records"
+    assert SearchService._spans(text, "record change") == []
+
+
 def _document(doc_id: str, text: str, *, lead: bool = False, published_at=None) -> Document:
     return Document(
         id=doc_id,
@@ -149,7 +157,8 @@ def test_include_leads_can_surface_canonical_ineligible_documents():
     repo = FakeRepository([lead_snapshot], inv)
     service = SearchService(repository=repo)
     result = service.search("housing", investigation_id="inv_1", filters={"include_leads": True})
-    assert result["results"] == []
+    assert [item["document_id"] for item in result["results"]] == ["d2"]
+    assert result["results"][0]["citable"] is False
 
 
 def test_internal_search_adds_bounded_canonical_graph_context_and_filters_withdrawn():
