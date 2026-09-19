@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import B5EvidenceSearch from "./B5EvidenceSearch";
 import B5NarrativeGraph from "./B5NarrativeGraph";
 import {
-  buildInvestigationExperienceFromWorkspace,
+  buildInvestigationFlowchartData,
   getClaimLedgerEntries,
   getOpenGaps,
   getPassHistory,
@@ -208,7 +208,8 @@ function EvidenceView({ workspace, onOpenSource }: { workspace: LiveInvestigatio
 
 function NarrativeView({ workspace, isLoading, onOpenSource, onOpenAudit }: { workspace: LiveInvestigationWorkspace; isLoading: boolean; onOpenSource: (id: string) => void; onOpenAudit: () => void }) {
   const events = workspace.timeline?.timeline_events ?? [];
-  return <div role="tabpanel" className="space-y-6"><header className="workspace-panel p-7 sm:p-8"><p className="eyebrow">Narrative trace</p><h2 className="mt-4 text-3xl font-semibold tracking-[-0.04em] text-[var(--ink)]">How the narrative developed.</h2><p className="mt-3 max-w-3xl leading-7 text-[var(--muted)]">The provenance path is limited to what was observed in this dataset; it is not a claim about the whole web.</p></header><B5NarrativeGraph investigationId={workspace.investigation_id} refreshKey={workspace.updated_at} fallbackData={buildInvestigationExperienceFromWorkspace(workspace).flowchartData} timeline={events} onOpenSource={onOpenSource} onOpenAudit={onOpenAudit} />{isLoading ? <p role="status" className="sr-only">Narrative graph is updating.</p> : null}</div>;
+  const fallbackData = useMemo(() => buildInvestigationFlowchartData(workspace), [workspace]);
+  return <div role="tabpanel" className="space-y-6"><header className="workspace-panel p-7 sm:p-8"><p className="eyebrow">Narrative trace</p><h2 className="mt-4 text-3xl font-semibold tracking-[-0.04em] text-[var(--ink)]">How the narrative developed.</h2><p className="mt-3 max-w-3xl leading-7 text-[var(--muted)]">The provenance path is limited to what was observed in this dataset; it is not a claim about the whole web.</p></header><B5NarrativeGraph investigationId={workspace.investigation_id} refreshKey={workspace.updated_at} fallbackData={fallbackData} timeline={events} onOpenSource={onOpenSource} onOpenAudit={onOpenAudit} />{isLoading ? <p role="status" className="sr-only">Narrative graph is updating.</p> : null}</div>;
 }
 
 function MethodView({ workspace, isReverifying, onReverify }: { workspace: LiveInvestigationWorkspace; isReverifying: boolean; onReverify: () => void }) {

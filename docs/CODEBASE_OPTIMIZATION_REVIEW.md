@@ -1,7 +1,7 @@
 # Codebase optimization and complexity review
 
 Reviewed: 2026-09-17  
-Status: Finding 1 has been implemented with targeted and regression checks; real PostgreSQL qualification is pending CI. Other findings remain open.
+Status: Findings 1, 2, and 7 have been implemented with targeted and regression checks; real PostgreSQL qualification for Findings 1 and 2 is pending CI. Other findings remain open.
 
 Implementation details: [Research event streams](RESEARCH_STREAMS.md).
 
@@ -50,25 +50,27 @@ Suggested improvement:
 
 Validate with existing stream tests, terminal-state behavior, concurrent connections, and measurements of queries per tick and event-loop responsiveness.
 
-## 2. Workspace and dashboard loading multiply queries
+## 2. Workspace and dashboard loading multiply queries — Completed
+
+**Ticket completed:** Workspace loading now reads every artifact through one joined query and retrieves documents with one additional query on the same consistent snapshot. Recent-investigation cards use a compact persisted summary projection maintained in the artifact write transactions.
 
 Relevant code:
 
 - [Investigation repository](../backend/services/investigation_repository.py): `get_investigation_workspace` and `get_recent_investigations`.
 - [Workspace endpoint](../backend/api/narratives.py): `get_investigation_workspace`.
 
-Workspace construction loads individual artifacts through separate repository calls. Recent-investigation loading performs one list query followed by five artifact queries per result: retrieval, report, analyst, timeline, and receipts. Returning 12 summaries therefore requires **61 SQL queries** in that repository path.
+Previously, workspace construction loaded individual artifacts through separate repository calls. Recent-investigation loading performed one list query followed by five artifact queries per result: retrieval, report, analyst, timeline, and receipts. Returning 12 summaries therefore required **61 SQL queries** in that repository path.
 
-The summary response also requires loading and parsing full artifacts to extract a small amount of display data. Workspace caching can reduce some reads, but it does not remove the underlying query multiplication.
+The optimized repository path now uses one connection and two SELECTs for an uncached workspace, and one lightweight SELECT for up to 12 recent summaries. The recent query no longer transfers or parses retrieval, report, analyst, timeline, or receipts JSON.
 
-Suggested improvement:
+Implemented solution:
 
-- Batch artifact reads for multiple investigations.
-- Reuse a connection and a consistent transaction for related workspace reads.
-- Persist or project compact summary fields such as title, summary, source count, and receipt count.
-- Avoid transferring full report JSON when only summary fields are needed.
+- Batches workspace artifact reads through LEFT JOINs while preserving optional artifacts.
+- Reuses one connection with a repeatable read snapshot for workspace metadata, artifacts, and documents.
+- Persists compact title, summary, source-count, and receipt-count projections transactionally.
+- Backfills legacy SQLite and PostgreSQL data idempotently without rewriting authoritative artifacts.
 
-Validate response compatibility, summary fallback behavior, cache invalidation, and query counts for uncached workspaces and 12-item lists.
+SQLite query-count and compatibility tests pass. PostgreSQL migration and response-parity coverage runs when POSTGRES_TEST_DATABASE_URL is available in CI.
 
 ## 3. Trending reads the entire signal history before applying its limit
 
@@ -156,24 +158,24 @@ These exports expand the apparent client API without supporting current applicat
 
 Suggested improvement: remove unused client exports unless a concrete consumer requires them. Their lack of frontend callers does not establish that the corresponding backend endpoints are unused externally.
 
-## 7. Investigation display data is constructed repeatedly
+## 7. Investigation display data is constructed repeatedly — Completed
+
+**Ticket completed:** The display adapter is now split into lightweight header and flowchart builders. The page checks `workspace` directly, and the narrative fallback graph is memoized per workspace update. Frontend adapter tests cover the header and graph fallback behavior.
 
 Relevant code:
 
 - [Investigation page](../frontend/src/pages/InvestigationPage.tsx).
-- [Workspace display adapter](../frontend/src/lib/liveInvestigation.ts): `buildInvestigationExperienceFromWorkspace`.
+- [Workspace display adapter](../frontend/src/lib/liveInvestigation.ts): `buildInvestigationHeaderFromWorkspace` and `buildInvestigationFlowchartData`.
 - [Investigation workspace](../frontend/src/components/investigation-workspace/InvestigationWorkspace.tsx): narrative trace fallback construction.
 
-The page builds the full investigation experience just to check whether it exists. The header builds it again. The experience builder also constructs flowchart data even when the caller only needs header fields; the narrative trace view constructs the experience again for its graph fallback.
+Previously, the page built the full investigation experience just to check whether it existed, and both the header and narrative fallback repeated that work. This has been resolved by deriving header fields and graph data independently.
 
-Suggested improvement:
+Implemented solution:
 
-- Check `workspace` directly when only existence matters.
-- Derive shared display data once per workspace update.
-- Separate lightweight header derivation from graph construction where useful.
-- Use memoization only where it avoids meaningful repeated work.
-
-Validate rendered header values and graph fallback behavior against the existing frontend checks.
+- Checks `workspace` directly when only existence matters.
+- Separates lightweight header derivation from flowchart construction.
+- Memoizes fallback graph data only within the narrative view, per workspace update.
+- Covers header values and graph fallback data with dedicated frontend adapter tests.
 
 ## 8. Decorative animations do continuous work
 

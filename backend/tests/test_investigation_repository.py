@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime, timezone
 
+import services.investigation_repository as investigation_repository_module
 from models.document import Document
 from models.investigation import (
     AnalystResult,
@@ -270,3 +271,122 @@ def test_get_recent_investigations_respects_limit(tmp_path):
 
     results = repo.get_recent_investigations(limit=2)
     assert len(results) == 2
+
+
+def test_recent_investigations_uses_one_connection_and_one_select(tmp_path, monkeypatch):
+    repo = InvestigationRepository(str(tmp_path / "investigations.sqlite3"))
+
+    for index in range(12):
+        investigation_id = f"inv_query_count_{index}"
+        plan = _plan(f"query count topic {index}")
+        repo.save_plan(investigation_id, plan.query_text, plan)
+        repo.save_retrieval_result(_retrieval(investigation_id, plan), _documents())
+
+    real_connect = investigation_repository_module.connect
+    connections = []
+    selects: list[str] = []
+
+    def traced_connect(target):
+        connection = real_connect(target)
+        connections.append(connection)
+        connection.set_trace_callback(
+            lambda statement: selects.append(statement)
+            if statement.lstrip().upper().startswith("SELECT")
+            else None
+        )
+        return connection
+
+    monkeypatch.setattr(investigation_repository_module, "connect", traced_connect)
+
+    results = repo.get_recent_investigations(limit=12)
+
+    assert len(results) == 12
+    assert len(connections) == 1
+    assert len(selects) == 1
+    assert "retrieval_results" not in selects[0]
+    assert "final_report_results" not in selects[0]
+
+
+def test_workspace_uses_one_connection_and_two_selects(tmp_path, monkeypatch):
+    repo = InvestigationRepository(str(tmp_path / "investigations.sqlite3"))
+    plan = _plan()
+    repo.save_plan("inv_workspace_count", plan.query_text, plan)
+    repo.save_retrieval_result(_retrieval("inv_workspace_count", plan), _documents())
+    repo.save_timeline_result(_timeline("inv_workspace_count", plan, "Workspace timeline."))
+    repo.save_analyst_result(_analyst("inv_workspace_count", plan, "Workspace analyst."))
+    repo.save_receipts_result(_receipts("inv_workspace_count", plan))
+    repo.save_final_report_result(_report("inv_workspace_count", plan))
+
+    real_connect = investigation_repository_module.connect
+    connections = []
+    selects: list[str] = []
+
+    def traced_connect(target):
+        connection = real_connect(target)
+        connections.append(connection)
+        connection.set_trace_callback(
+            lambda statement: selects.append(statement)
+            if statement.lstrip().upper().startswith("SELECT")
+            else None
+        )
+        return connection
+
+    monkeypatch.setattr(investigation_repository_module, "connect", traced_connect)
+
+    workspace = repo.get_investigation_workspace("inv_workspace_count")
+
+    assert workspace is not None
+    assert workspace.report is not None
+    assert workspace.report.report_title == "Hidden Energy Tax Investigation"
+    assert workspace.analyst is not None
+    assert workspace.timeline is not None
+    assert len(workspace.retrieved_documents) == 2
+    assert len(connections) == 1
+    assert len(selects) == 2
+
+
+def test_recent_summary_backfills_legacy_sqlite_database_idempotently(tmp_path):
+    database_path = str(tmp_path / "investigations.sqlite3")
+    repo = InvestigationRepository(database_path)
+    plan = _plan()
+    repo.save_plan("inv_legacy", plan.query_text, plan)
+    repo.save_retrieval_result(_retrieval("inv_legacy", plan), _documents())
+    repo.save_timeline_result(_timeline("inv_legacy", plan, "Legacy timeline."))
+    repo.save_analyst_result(_analyst("inv_legacy", plan, "Legacy analyst."))
+    repo.save_receipts_result(_receipts("inv_legacy", plan))
+    repo.save_final_report_result(_report("inv_legacy", plan))
+
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("DROP TABLE investigation_recent_summaries")
+
+    migrated = InvestigationRepository(database_path)
+    summary = migrated.get_recent_investigations(limit=1)[0]
+    assert summary.report_title == "Hidden Energy Tax Investigation"
+    assert summary.report_summary == "Final persisted report summary."
+    assert summary.source_count == 2
+    assert summary.receipt_count == 1
+
+    InvestigationRepository(database_path)
+    with sqlite3.connect(database_path) as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) FROM investigation_recent_summaries WHERE investigation_id = ?",
+            ("inv_legacy",),
+        ).fetchone()[0]
+    assert count == 1
+
+
+def test_deleting_report_restores_summary_fallbacks(tmp_path):
+    repo = InvestigationRepository(str(tmp_path / "investigations.sqlite3"))
+    plan = _plan()
+    repo.save_plan("inv_report_delete", plan.query_text, plan)
+    repo.save_retrieval_result(_retrieval("inv_report_delete", plan), _documents())
+    repo.save_timeline_result(_timeline("inv_report_delete", plan, "Timeline fallback."))
+    repo.save_analyst_result(_analyst("inv_report_delete", plan, "Analyst fallback."))
+    repo.save_final_report_result(_report("inv_report_delete", plan))
+
+    repo.delete_final_report_result("inv_report_delete")
+
+    summary = repo.get_recent_investigations(limit=1)[0]
+    assert summary.report_title == "Hidden Energy Tax Investigation"
+    assert summary.report_summary == "Analyst fallback."
+    assert summary.source_count == 2

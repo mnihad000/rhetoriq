@@ -40,6 +40,7 @@ class InvestigationRepository:
             run_migrations(db_path)
         else:
             self._init_schema()
+        self._backfill_recent_summaries()
 
     def save_plan(self, investigation_id: str, query_text: str, plan: InvestigationPlan) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -67,6 +68,15 @@ class InvestigationRepository:
                     now,
                 ),
             )
+            conn.execute(
+                """
+                INSERT INTO investigation_recent_summaries (investigation_id, fallback_title)
+                VALUES (?, ?)
+                ON CONFLICT(investigation_id) DO UPDATE SET
+                    fallback_title=excluded.fallback_title
+                """,
+                (investigation_id, self._derive_recent_title(plan, query_text)),
+            )
 
     def get_plan(self, investigation_id: str) -> InvestigationPlan | None:
         with self._connect() as conn:
@@ -91,17 +101,70 @@ class InvestigationRepository:
         investigation_id: str,
     ) -> InvestigationWorkspace | None:
         with self._connect() as conn:
+            if is_postgres_database(self._db_path):
+                conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            else:
+                conn.execute("BEGIN")
             row = conn.execute(
                 """
-                SELECT investigation_id, query_text, status, current_stage, created_at, updated_at
-                FROM investigations
-                WHERE investigation_id = ?
+                SELECT
+                    i.investigation_id,
+                    i.query_text,
+                    i.status,
+                    i.current_stage,
+                    i.created_at,
+                    i.updated_at,
+                    i.plan_json,
+                    retrieval.result_json AS retrieval_json,
+                    source_diversity.result_json AS source_diversity_json,
+                    timeline.result_json AS timeline_json,
+                    counter_narratives.result_json AS counter_narratives_json,
+                    narrative_family.result_json AS narrative_family_json,
+                    gap_analysis.result_json AS gap_analysis_json,
+                    skeptic_review.result_json AS skeptic_review_json,
+                    claim_ledger.result_json AS claim_ledger_json,
+                    gap_ledger.result_json AS gap_ledger_json,
+                    provenance_trace.result_json AS provenance_trace_json,
+                    research_loop.result_json AS research_loop_json,
+                    analyst.result_json AS analyst_json,
+                    claim_counterpoints.result_json AS claim_counterpoints_json,
+                    receipts.result_json AS receipts_json,
+                    claim_verification.result_json AS claim_verification_json,
+                    agent_debate.result_json AS agent_debate_json,
+                    report.result_json AS report_json
+                FROM investigations AS i
+                LEFT JOIN retrieval_results AS retrieval USING (investigation_id)
+                LEFT JOIN source_diversity_results AS source_diversity USING (investigation_id)
+                LEFT JOIN timeline_results AS timeline USING (investigation_id)
+                LEFT JOIN counter_narrative_results AS counter_narratives USING (investigation_id)
+                LEFT JOIN narrative_family_results AS narrative_family USING (investigation_id)
+                LEFT JOIN gap_analysis_results AS gap_analysis USING (investigation_id)
+                LEFT JOIN skeptic_review_results AS skeptic_review USING (investigation_id)
+                LEFT JOIN claim_ledger_results AS claim_ledger USING (investigation_id)
+                LEFT JOIN gap_ledger_results AS gap_ledger USING (investigation_id)
+                LEFT JOIN provenance_trace_results AS provenance_trace USING (investigation_id)
+                LEFT JOIN research_loop_results AS research_loop USING (investigation_id)
+                LEFT JOIN analyst_results AS analyst USING (investigation_id)
+                LEFT JOIN claim_counterpoint_results AS claim_counterpoints USING (investigation_id)
+                LEFT JOIN receipts_results AS receipts USING (investigation_id)
+                LEFT JOIN claim_verification_results AS claim_verification USING (investigation_id)
+                LEFT JOIN agent_debate_results AS agent_debate USING (investigation_id)
+                LEFT JOIN final_report_results AS report USING (investigation_id)
+                WHERE i.investigation_id = ?
                 """,
                 (investigation_id,),
             ).fetchone()
-
-        if not row:
-            return None
+            if not row:
+                return None
+            document_rows = conn.execute(
+                """
+                SELECT document_json
+                FROM retrieved_documents
+                WHERE investigation_id = ?
+                ORDER BY doc_id
+                """,
+                (investigation_id,),
+            ).fetchall()
 
         return InvestigationWorkspace(
             investigation_id=row["investigation_id"],
@@ -110,80 +173,81 @@ class InvestigationRepository:
             current_stage=row["current_stage"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
-            plan=self.get_plan(investigation_id),
-            retrieval=self.get_retrieval_result(investigation_id),
-            retrieved_documents=self.get_retrieved_documents(investigation_id),
-            source_diversity=self.get_source_diversity_result(investigation_id),
-            timeline=self.get_timeline_result(investigation_id),
-            counter_narratives=self.get_counter_narrative_result(investigation_id),
-            narrative_family=self.get_narrative_family_result(investigation_id),
-            gap_analysis=self.get_gap_analysis_result(investigation_id),
-            skeptic_review=self.get_skeptic_review_result(investigation_id),
-            claim_ledger=self.get_claim_ledger_result(investigation_id),
-            gap_ledger=self.get_gap_ledger_result(investigation_id),
-            provenance_trace=self.get_provenance_trace_result(investigation_id),
-            research_loop=self.get_research_loop_run_result(investigation_id),
-            analyst=self.get_analyst_result(investigation_id),
-            claim_counterpoints=self.get_claim_counterpoint_result(investigation_id),
-            receipts=self.get_receipts_result(investigation_id),
-            claim_verification=self.get_claim_verification_result(investigation_id),
-            agent_debate=self.get_agent_debate_result(investigation_id),
-            report=self.get_final_report_result(investigation_id),
+            plan=self._validate_optional_json(row["plan_json"], InvestigationPlan),
+            retrieval=self._validate_optional_json(row["retrieval_json"], RetrievalResult),
+            retrieved_documents=[
+                Document.model_validate_json(document_row["document_json"])
+                for document_row in document_rows
+            ],
+            source_diversity=self._validate_optional_json(
+                row["source_diversity_json"], SourceDiversityResult
+            ),
+            timeline=self._validate_optional_json(row["timeline_json"], TimelineResult),
+            counter_narratives=self._validate_optional_json(
+                row["counter_narratives_json"], CounterNarrativeResult
+            ),
+            narrative_family=self._validate_optional_json(
+                row["narrative_family_json"], NarrativeFamilyResult
+            ),
+            gap_analysis=self._validate_optional_json(row["gap_analysis_json"], GapAnalysisResult),
+            skeptic_review=self._validate_optional_json(
+                row["skeptic_review_json"], SkepticReviewResult
+            ),
+            claim_ledger=self._validate_optional_json(row["claim_ledger_json"], ClaimLedgerResult),
+            gap_ledger=self._validate_optional_json(row["gap_ledger_json"], GapLedgerResult),
+            provenance_trace=self._validate_optional_json(
+                row["provenance_trace_json"], ProvenanceTraceResult
+            ),
+            research_loop=self._validate_optional_json(
+                row["research_loop_json"], ResearchLoopRunResult
+            ),
+            analyst=self._validate_optional_json(row["analyst_json"], AnalystResult),
+            claim_counterpoints=self._validate_optional_json(
+                row["claim_counterpoints_json"], ClaimCounterpointResult
+            ),
+            receipts=self._validate_optional_json(row["receipts_json"], ReceiptsResult),
+            claim_verification=self._validate_optional_json(
+                row["claim_verification_json"], ClaimVerificationResult
+            ),
+            agent_debate=self._validate_optional_json(row["agent_debate_json"], AgentDebateResult),
+            report=self._validate_optional_json(row["report_json"], FinalReportResult),
         )
 
     def get_recent_investigations(self, limit: int = 6) -> list[RecentInvestigationSummary]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT investigation_id, query_text, status, updated_at, plan_json
-                FROM investigations
-                WHERE investigation_id LIKE 'inv_%' AND status != 'planning_completed'
-                ORDER BY updated_at DESC
+                SELECT
+                    i.investigation_id,
+                    i.query_text,
+                    i.status,
+                    i.updated_at,
+                    COALESCE(s.report_title, s.fallback_title, i.query_text) AS report_title,
+                    COALESCE(s.report_summary, s.analyst_summary, s.timeline_summary) AS report_summary,
+                    COALESCE(s.receipt_count, 0) AS receipt_count,
+                    COALESCE(s.source_count, 0) AS source_count
+                FROM investigations AS i
+                LEFT JOIN investigation_recent_summaries AS s USING (investigation_id)
+                WHERE i.investigation_id LIKE 'inv_%' AND i.status != 'planning_completed'
+                ORDER BY i.updated_at DESC
                 LIMIT ?
                 """,
                 (limit,),
             ).fetchall()
 
-        results: list[RecentInvestigationSummary] = []
-        for row in rows:
-            investigation_id = row["investigation_id"]
-            plan = (
-                InvestigationPlan.model_validate_json(row["plan_json"])
-                if row["plan_json"]
-                else None
+        return [
+            RecentInvestigationSummary(
+                investigation_id=row["investigation_id"],
+                query_text=row["query_text"],
+                status=row["status"],
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+                report_title=row["report_title"],
+                report_summary=row["report_summary"],
+                receipt_count=row["receipt_count"],
+                source_count=row["source_count"],
             )
-            retrieval = self.get_retrieval_result(investigation_id)
-            report = self.get_final_report_result(investigation_id)
-            analyst = self.get_analyst_result(investigation_id)
-            timeline = self.get_timeline_result(investigation_id)
-            receipts = self.get_receipts_result(investigation_id)
-
-            report_title = (
-                report.report_title
-                if report is not None
-                else self._derive_recent_title(plan, row["query_text"])
-            )
-            report_summary = None
-            if report is not None:
-                report_summary = report.report_summary
-            elif analyst is not None:
-                report_summary = analyst.draft_report_sections.executive_summary
-            elif timeline is not None:
-                report_summary = timeline.timeline_summary
-
-            results.append(
-                RecentInvestigationSummary(
-                    investigation_id=investigation_id,
-                    query_text=row["query_text"],
-                    status=row["status"],
-                    updated_at=datetime.fromisoformat(row["updated_at"]),
-                    report_title=report_title,
-                    report_summary=report_summary,
-                    receipt_count=self._count_receipts(receipts),
-                    source_count=self._count_sources(retrieval),
-                )
-            )
-        return results
+            for row in rows
+        ]
 
     def save_retrieval_result(self, result: RetrievalResult, documents: list[Document]) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -259,6 +323,11 @@ class InvestigationRepository:
                         now,
                     ),
                 )
+            self._update_recent_summary(
+                conn,
+                result.investigation_id,
+                source_count=self._count_sources(result),
+            )
 
         # The serialized retrieval artifact remains authoritative. Corpus
         # indexing is additive and may fail without rolling back that artifact.
@@ -330,6 +399,11 @@ class InvestigationRepository:
                     updated_at=excluded.updated_at
                 """,
                 (result.investigation_id, result.model_dump_json(), now, now),
+            )
+            self._update_recent_summary(
+                conn,
+                result.investigation_id,
+                timeline_summary=result.timeline_summary,
             )
 
     def get_timeline_result(self, investigation_id: str) -> TimelineResult | None:
@@ -599,6 +673,11 @@ class InvestigationRepository:
                 """,
                 (result.investigation_id, result.model_dump_json(), now, now),
             )
+            self._update_recent_summary(
+                conn,
+                result.investigation_id,
+                analyst_summary=result.draft_report_sections.executive_summary,
+            )
 
     def get_analyst_result(self, investigation_id: str) -> AnalystResult | None:
         with self._connect() as conn:
@@ -640,6 +719,12 @@ class InvestigationRepository:
                     updated_at=excluded.updated_at
                 """,
                 (result.investigation_id, result.model_dump_json(), now, now),
+            )
+            self._update_recent_summary(
+                conn,
+                result.investigation_id,
+                report_title=result.report_title,
+                report_summary=result.report_summary,
             )
 
     def save_claim_counterpoint_result(self, result: ClaimCounterpointResult) -> None:
@@ -694,6 +779,11 @@ class InvestigationRepository:
                     updated_at=excluded.updated_at
                 """,
                 (result.investigation_id, result.model_dump_json(), now, now),
+            )
+            self._update_recent_summary(
+                conn,
+                result.investigation_id,
+                receipt_count=self._count_receipts(result),
             )
 
     def get_receipts_result(self, investigation_id: str) -> ReceiptsResult | None:
@@ -757,6 +847,12 @@ class InvestigationRepository:
     def delete_final_report_result(self, investigation_id: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM final_report_results WHERE investigation_id = ?", (investigation_id,))
+            self._update_recent_summary(
+                conn,
+                investigation_id,
+                report_title=None,
+                report_summary=None,
+            )
 
     def _save_json_artifact(self, table_name: str, investigation_id: str, payload: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -789,6 +885,104 @@ class InvestigationRepository:
         if not row:
             return None
         return model_cls.model_validate_json(row["result_json"])
+
+    @staticmethod
+    def _validate_optional_json(payload: str | None, model_cls):
+        if not payload:
+            return None
+        return model_cls.model_validate_json(payload)
+
+    def _update_recent_summary(self, conn, investigation_id: str, **fields) -> None:
+        allowed_fields = {
+            "fallback_title",
+            "timeline_summary",
+            "analyst_summary",
+            "report_title",
+            "report_summary",
+            "source_count",
+            "receipt_count",
+        }
+        if not fields or not set(fields).issubset(allowed_fields):
+            raise ValueError("Invalid recent-investigation summary update.")
+        assignments = ", ".join(f"{field} = ?" for field in fields)
+        conn.execute(
+            f"""
+            UPDATE investigation_recent_summaries
+            SET {assignments}
+            WHERE investigation_id = ?
+            """,
+            (*fields.values(), investigation_id),
+        )
+
+    def _backfill_recent_summaries(self, batch_size: int = 100) -> None:
+        while True:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT
+                        i.investigation_id,
+                        i.query_text,
+                        i.plan_json,
+                        retrieval.result_json AS retrieval_json,
+                        timeline.result_json AS timeline_json,
+                        analyst.result_json AS analyst_json,
+                        receipts.result_json AS receipts_json,
+                        report.result_json AS report_json
+                    FROM investigations AS i
+                    LEFT JOIN investigation_recent_summaries AS summary USING (investigation_id)
+                    LEFT JOIN retrieval_results AS retrieval USING (investigation_id)
+                    LEFT JOIN timeline_results AS timeline USING (investigation_id)
+                    LEFT JOIN analyst_results AS analyst USING (investigation_id)
+                    LEFT JOIN receipts_results AS receipts USING (investigation_id)
+                    LEFT JOIN final_report_results AS report USING (investigation_id)
+                    WHERE summary.investigation_id IS NULL
+                    ORDER BY i.investigation_id
+                    LIMIT ?
+                    """,
+                    (batch_size,),
+                ).fetchall()
+                if not rows:
+                    return
+
+                for row in rows:
+                    plan = self._validate_optional_json(row["plan_json"], InvestigationPlan)
+                    retrieval = self._validate_optional_json(
+                        row["retrieval_json"], RetrievalResult
+                    )
+                    timeline = self._validate_optional_json(row["timeline_json"], TimelineResult)
+                    analyst = self._validate_optional_json(row["analyst_json"], AnalystResult)
+                    receipts = self._validate_optional_json(row["receipts_json"], ReceiptsResult)
+                    report = self._validate_optional_json(row["report_json"], FinalReportResult)
+                    conn.execute(
+                        """
+                        INSERT INTO investigation_recent_summaries (
+                            investigation_id,
+                            fallback_title,
+                            timeline_summary,
+                            analyst_summary,
+                            report_title,
+                            report_summary,
+                            source_count,
+                            receipt_count
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(investigation_id) DO NOTHING
+                        """,
+                        (
+                            row["investigation_id"],
+                            self._derive_recent_title(plan, row["query_text"]),
+                            timeline.timeline_summary if timeline is not None else None,
+                            (
+                                analyst.draft_report_sections.executive_summary
+                                if analyst is not None
+                                else None
+                            ),
+                            report.report_title if report is not None else None,
+                            report.report_summary if report is not None else None,
+                            self._count_sources(retrieval),
+                            self._count_receipts(receipts),
+                        ),
+                    )
 
     def _connect(self):
         return connect(self._db_path)
@@ -983,6 +1177,17 @@ class InvestigationRepository:
                     result_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS investigation_recent_summaries (
+                    investigation_id TEXT PRIMARY KEY,
+                    fallback_title TEXT NOT NULL,
+                    timeline_summary TEXT,
+                    analyst_summary TEXT,
+                    report_title TEXT,
+                    report_summary TEXT,
+                    source_count INTEGER NOT NULL DEFAULT 0,
+                    receipt_count INTEGER NOT NULL DEFAULT 0
                 );
                 """
             )

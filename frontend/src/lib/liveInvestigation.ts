@@ -26,9 +26,11 @@ const TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   minute: "2-digit",
 });
 
-export function buildInvestigationExperienceFromWorkspace(
+export type InvestigationHeaderData = Omit<InvestigationExperience, "flowchartData">;
+
+export function buildInvestigationHeaderFromWorkspace(
   workspace: LiveInvestigationWorkspace,
-): InvestigationExperience {
+): InvestigationHeaderData {
   const report = workspace.report;
   const loopConfidence =
     workspace.research_loop?.confidence_dimensions.synthesis_confidence.score;
@@ -57,7 +59,6 @@ export function buildInvestigationExperienceFromWorkspace(
         "unknown",
     ),
     firstObserved: getFirstObservedLabel(workspace),
-    flowchartData: buildFlowchartData(workspace),
     generatedAt: `Updated ${formatDateTime(workspace.updated_at)}`,
     id: workspace.investigation_id,
     kicker: "Live investigation workspace",
@@ -210,7 +211,7 @@ export function formatClaimConfidence(claim: LiveFinalReportClaim) {
   return `${Math.round(claim.confidence_score * 100)}% confidence`;
 }
 
-function buildFlowchartData(
+export function buildInvestigationFlowchartData(
   workspace: LiveInvestigationWorkspace,
 ): InvestigationFlowchartData {
   const currentNodeId = "current-narrative";

@@ -8,6 +8,7 @@ import pytest
 
 from migrations.runner import run_migrations
 from models.document import Document
+from models.investigation import InvestigationPlan, InvestigationPlanTimeWindow, TimelineResult
 from services.database import connect
 from services.investigation_repository import InvestigationRepository
 from services.postgres_corpus import (
@@ -43,10 +44,73 @@ def test_postgres_migration_creates_all_repository_tables() -> None:
     assert {
         "schema_migrations",
         "investigations",
+        "investigation_recent_summaries",
         "research_runs",
         "discovery_runs",
         "checkpoints",
     }.issubset(tables)
+
+
+@pytest.mark.integration
+def test_postgres_workspace_and_recent_summary_queries() -> None:
+    database_url = _postgres_url()
+    investigation_id = f"inv_p2_{uuid4().hex}"
+    plan = InvestigationPlan(
+        query_text="Trace the compact dashboard projection",
+        topic="compact dashboard projection",
+        canonical_phrase="compact dashboard projection",
+        intent="origin",
+        search_queries=["compact dashboard projection"],
+        semantic_queries=["compact dashboard projection"],
+        target_source_types=["national_news"],
+        requested_outputs=["timeline"],
+        time_window=InvestigationPlanTimeWindow(label="all_time"),
+        retrieval_mode="broad",
+        risk_notes=[],
+        uncertainty_requirements=[],
+    )
+    repository = InvestigationRepository(database_url)
+    try:
+        repository.save_plan(investigation_id, plan.query_text, plan)
+        repository.save_timeline_result(
+            TimelineResult(
+                investigation_id=investigation_id,
+                plan_snapshot=plan,
+                timeline_events=[],
+                first_observed_doc_id=None,
+                timeline_summary="PostgreSQL timeline fallback.",
+                limitations=[],
+                confidence_score=0.4,
+                confidence_label="medium",
+            )
+        )
+
+        workspace = repository.get_investigation_workspace(investigation_id)
+        assert workspace is not None
+        assert workspace.timeline is not None
+        assert workspace.timeline.timeline_summary == "PostgreSQL timeline fallback."
+
+        summary = next(
+            item
+            for item in repository.get_recent_investigations(limit=1000)
+            if item.investigation_id == investigation_id
+        )
+        assert summary.report_title == "Compact Dashboard Projection Investigation"
+        assert summary.report_summary == "PostgreSQL timeline fallback."
+    finally:
+        with connect(database_url) as connection:
+            connection.execute(
+                "DELETE FROM investigation_recent_summaries WHERE investigation_id = ?",
+                (investigation_id,),
+            )
+            connection.execute(
+                "DELETE FROM timeline_results WHERE investigation_id = ?",
+                (investigation_id,),
+            )
+            connection.execute(
+                "DELETE FROM investigations WHERE investigation_id = ?",
+                (investigation_id,),
+            )
 
 
 def _postgres_url() -> str:
