@@ -1,6 +1,6 @@
 # Before B6: Setup, Technologies, and Runtime Acceptance
 
-Prepared: 2026-09-17.
+Prepared: 2026-09-19. Last verified against this Windows development machine.
 
 This guide collects the software prerequisites, environment configuration, technology overview, architecture flow, and explanation of disposable B3–B5 acceptance before Kubernetes deployment.
 
@@ -15,11 +15,11 @@ The following inventory is a snapshot of commands available on the development m
 | Software | Observed setup | Purpose and next action |
 | --- | --- | --- |
 | Git | Installed | Source control and identifying deployment versions. |
-| Docker Desktop / Compose | Installed; Compose v5.3.1 | Build images and rehearse the complete stack. The Docker engine could not be reached during the check; verify Docker Desktop is running. |
+| Docker Desktop / Compose | Docker client v29.6.2 is installed; the Linux engine was unreachable during the 2026-09-19 check. | Start Docker Desktop and select Linux containers with the WSL 2 backend. `docker version` must show both client and server before any Compose or kind command can work. |
 | WSL | Command installed; status check denied | Linux environment used by Docker on Windows. Operational state is unverified. |
 | Node.js / npm | Node v22.23.2 installed | Frontend dependency installation, development, and builds. |
 | Python | v3.13.3 installed | Backend development and tests. |
-| kubectl | v1.36.1 installed | Inspect and control Kubernetes workloads. Match its version appropriately to the chosen cluster. |
+| kubectl | Installed; no current Kubernetes context. | Inspect and control Kubernetes workloads. Create the local cluster, then verify `kubectl config current-context`. Match its version appropriately to the chosen cluster. |
 | kind | Not found on PATH | Recommended local Kubernetes cluster tool for B6. |
 | minikube | Not found on PATH | Alternative to kind; choose one local cluster tool. |
 | Helm | Not found on PATH | Needed if B6 uses Helm charts; plain Kubernetes manifests do not require it. |
@@ -45,7 +45,35 @@ wsl --status
 wsl --list --verbose
 kind version
 kubectl version --client
+kubectl config current-context
 ```
+
+### Current machine blockers and exact next actions
+
+The 2026-09-19 verification found no running Docker Linux engine, no active
+Kubernetes context, and no `kind`, `minikube`, or `helm` executable on PATH.
+Complete these steps in order:
+
+1. Start Docker Desktop, enable its WSL 2 / Linux-container backend, and
+   confirm `docker version` reports a server version.
+2. Verify WSL is healthy with `wsl --status` and `wsl --list --verbose`.
+3. Install **one** local cluster tool. `kind` is the preferred B6 choice:
+
+   ```powershell
+   winget install Kubernetes.kind
+   ```
+
+4. Create a local cluster only after Docker is healthy. Confirm that
+   `kubectl config current-context`, `kubectl get nodes`, and
+   `kubectl get pods -A` succeed.
+5. Install Helm only if B6 is implemented as a Helm chart. Plain Kubernetes
+   manifests do not need Helm.
+6. Do not install Terraform, AWS CLI, Argo CD, Prometheus, or Grafana for
+   local B6. They belong to later cloud/GitOps/observability work.
+
+The repository currently has no Kubernetes manifests or Helm chart. Creating
+the B6 deployment artifacts is therefore required work after the runtime gates
+below; installing a cluster tool alone cannot deploy this project.
 
 ### Machine resources and Elasticsearch prerequisite
 
@@ -72,6 +100,32 @@ Ollama is optional. Choosing it requires installing Ollama and downloading the s
 An environment variable is a setting passed to a process: for example, a service address, feature switch, password, or API key.
 
 Start local configuration from [`.env.production.example`](../.env.production.example). Use separate untracked files for ordinary local execution and disposable acceptance. Actual acceptance must use fresh test credentials, test volumes, and a local test database, with no production Neon connection or developer provider keys.
+
+### Required local Compose file
+
+Root Compose reads `.env`, not the existing root `.env.local`. The current
+Compose validation fails because `POSTGRES_PASSWORD` is missing. Before a
+local rehearsal, create an untracked root `.env` from the template and replace
+all placeholder secrets with fresh local-only values:
+
+```powershell
+Copy-Item .env.production.example .env
+```
+
+For the base stack, `.env` must set:
+
+```text
+POSTGRES_DB=rhetoriq
+POSTGRES_USER=rhetoriq
+POSTGRES_PASSWORD=<fresh-local-password>
+SEARXNG_SECRET=<long-random-secret>
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+Do not reuse `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, or provider credentials
+from `.env.local` for disposable Compose or B6 acceptance. The root Compose
+file constructs its own local PostgreSQL URL from the three `POSTGRES_*`
+variables. Do not commit `.env` or copy real credentials into this guide.
 
 ### Service secrets and model access
 
@@ -144,6 +198,12 @@ The committed template sets these to zero, so the live worker intentionally refu
 - Kubernetes will use ConfigMaps for ordinary settings and Secrets or an equivalent secret source for credentials and private keys.
 
 A value present in one file does not mean every process receives it. Inject only the settings required by each service.
+
+For B6, put ordinary non-secret values in ConfigMaps and passwords, API keys,
+SASL credentials, and private certificates in Kubernetes Secrets. B6 must
+replace Compose hostnames with in-cluster Service DNS names for PostgreSQL,
+Kafka, Apicurio, SearXNG, Flink, Elasticsearch, Neo4j, and Redis. Do not make
+those data services publicly accessible merely to satisfy internal traffic.
 
 The local backend environment contains legacy Tavily, SerpAPI, Browserbase, and Arize variables. The current runtime has no corresponding configuration integrations, so those services are not prerequisites. `ANTHROPIC_API_KEY` is declared but has no implemented Claude model-client path.
 
@@ -366,17 +426,20 @@ This work does not deploy publicly or test against production. Its result is sav
 
 ## 6. Readiness Checklist and Deployment Order
 
-- [ ] Make Docker Desktop's Linux engine reachable and verify WSL resources.
-- [ ] Verify the Elasticsearch kernel setting and restart persistence.
-- [ ] Install kind or choose minikube.
-- [ ] Prepare fresh local secrets and a separate disposable acceptance environment.
-- [ ] Build images and verify pinned MiniLM loading.
-- [ ] Complete B3 actual event delivery/replay/recovery checks.
-- [ ] Complete B4 actual Flink delivery/checkpoint/recovery/load checks.
+- [ ] Start Docker Desktop's Linux engine and verify WSL 2, `docker version`, and `docker info`.
+- [ ] Allocate 8 Docker CPUs and 16 GB RAM; verify the Elasticsearch kernel setting survives restart.
+- [ ] Install kind (preferred) or minikube, create a cluster, and verify the kubectl context and nodes.
+- [ ] Create untracked `.env` from `.env.production.example`; provide fresh `POSTGRES_PASSWORD` and `SEARXNG_SECRET` at minimum.
+- [ ] Use fresh local-only credentials, volumes, and database state; do not use the Neon URLs in `.env.local`.
+- [ ] Build the root Compose images and verify pinned MiniLM loading. Internet is required for image/dependency/model downloads.
+- [ ] Complete B3 actual event delivery, replay, and recovery checks.
+- [ ] Complete B4 actual Flink delivery, checkpoint, recovery, and load checks.
 - [ ] Complete B5 startup, persisted product/browser, failure, repair, rebuild, rollback, and load checks.
-- [ ] Verify provider access and configure explicit budgets for the bounded live canary.
+- [ ] If the live enrichment canary is in scope, configure a valid Gemini key and all five positive `ENRICHMENT_*` budget/pricing settings; use Groq only if desired as the backup provider.
 - [ ] Export acceptance evidence and record gate sign-off.
-- [ ] Begin B6 manifests or charts, service networking, Secrets/ConfigMaps, initialization jobs, storage, probes, shutdown handling, and seeded end-to-end deployment.
+- [ ] Build and record immutable backend, frontend, Flink, and B5 image digests; make them available to kind's nodes or a local registry.
+- [ ] Implement B6 manifests or Helm charts: namespaces, ConfigMaps, Secrets, Services, persistent volumes/claims, initialization Jobs, Deployments/StatefulSets, resource requests/limits, startup/readiness/liveness probes, worker shutdown grace, ingress, scheduling, and rollout policy.
+- [ ] Deploy the seeded end-to-end topology to the local cluster and collect the same health, replay, persistence, search/path, reload, and recovery evidence.
 
 The B6 handoff must preserve PostgreSQL data, Kafka logs, Flink checkpoints/savepoints, Elasticsearch data, Neo4j data, and certificate material. Redis remains disposable cache. Public CA trust can be a ConfigMap; private keys require Secrets or equivalent secure provisioning. Load or publish application images into the local cluster and record immutable image identities.
 
