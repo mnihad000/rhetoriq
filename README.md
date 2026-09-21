@@ -6,7 +6,10 @@ The product deliberately distinguishes **first observed in the available dataset
 
 ## What the current repository implements
 
-Everything described in this README and the project roadmap has been implemented. The components below are available as part of the complete RhetoriQ platform.
+The product, Kafka/Flink pipeline, and B5 projection code are implemented in
+the repository. Actual-stack qualification, public deployment evidence, and
+Kubernetes/cloud work are tracked separately; code presence is not presented as
+proof that those gates have passed.
 
 - FastAPI endpoints for ingestion, trending topics, investigations, timelines, graphs, mutations, receipts, and reports.
 - GDELT DOC 2.0 ingestion for news discovery.
@@ -15,12 +18,21 @@ Everything described in this README and the project roadmap has been implemented
 - A durable LangGraph research runtime with budgets, leases, checkpoints, idempotent actions, replay, SSE progress, and a deterministic publication gate.
 - Self-hosted SearXNG discovery plus GDELT, Hacker News, canonical HTTP, internal-corpus, and an isolated Playwright adapter for local research only.
 - Federal Register first-party research with policy-aware receipts, retries, pagination, deduplication, and visible limitations.
-- Apache Kafka KRaft and Apicurio Registry with six versioned JSON Schema topics, DLQs, transactional outbox, idempotent consumers, controlled replay, and Kafka-only investigation dispatch.
-- In-memory and SQLite-backed development storage, with optional Redis caching, vector search, and agent memory.
+- Apache Kafka KRaft and Apicurio Registry with 12 versioned primary topics and
+  matching DLQs, a transactional outbox, idempotent consumers, controlled
+  replay, and Kafka-only investigation dispatch.
+- SQLite-backed development storage and PostgreSQL/pgvector production
+  persistence, with optional Redis capabilities.
 - A React and TypeScript investigation interface with a live graph, research rail, evidence gate, and replay controls.
-- Production container definitions for the Railway API/frontend deployment, committed PostgreSQL migrations, and CI checks for backend, frontend, documentation, and PostgreSQL migration compatibility.
+- Flink document processing and narrative signals plus B5 Elasticsearch,
+  Neo4j, MiniLM/pgvector, and Redis projections behind acceptance-gated flags.
+- Production containers, committed PostgreSQL migrations, and CI checks for
+  backend, frontend, schemas, documentation, and migration compatibility.
 
-The complete platform is implemented, including Apache Flink stream processing, Elasticsearch, Neo4j, MiniLM, Redis integration, Kubernetes deployment support, and the recurring-monitoring connector fleet. B5 supplies recoverable projections, scoped search and provenance UI, operator commands, and a local Compose overlay. See [B5 acceptance](docs/B5_ACCEPTANCE.md) and [local operations/B6 handoff](docs/B5_OPERATIONS.md). Public launch evidence is tracked separately in [A5 launch evidence](docs/A5_LAUNCH_EVIDENCE.md). See [the roadmap](docs/ROADMAP.md) for delivery details.
+Kubernetes manifests, Terraform/GitOps, production observability, and the
+recurring-monitoring connector fleet remain roadmap work. See the
+[documentation index](docs/README.md) and [roadmap](docs/ROADMAP.md) for current
+status and acceptance boundaries.
 
 ## Research strategy
 
@@ -52,7 +64,10 @@ flowchart LR
     A --> U[React frontend]
 ```
 
-The implemented flow uses durable Kafka replay and PostgreSQL persistence, with recurring monitoring connectors, stream processing, and specialized search and graph stores built around the normalized document contract.
+The implemented flow uses durable Kafka replay, PostgreSQL authority, Flink
+processing, and optional specialized search and graph projections built around
+the normalized document contract. Recurring monitoring connectors remain
+future work.
 
 ## Repository layout
 
@@ -84,6 +99,12 @@ uvicorn main:app --reload
 
 The API is available at `http://127.0.0.1:8000`; interactive documentation is at `/docs`.
 
+The running OpenAPI document is the authoritative endpoint reference. The API
+includes health, ingestion, narratives, trending, investigations, research
+events/replay, evidence search, and provenance-path routes. Accepted ingestion
+and investigation work is Kafka-only; the API commits an outbox record and
+returns without executing the job synchronously.
+
 ### Frontend
 
 ```powershell
@@ -92,9 +113,15 @@ npm install
 npm run dev
 ```
 
-### Full B2/B3 stack
+Vite normally serves `http://127.0.0.1:5173`. Routes are `/`, `/dashboard`, and
+`/investigation/:id`. The production Nginx image reads `PUBLIC_API_BASE_URL` at
+container startup; local Vite development uses `VITE_API_BASE_URL`.
 
-The root Compose stack supplies PostgreSQL/pgvector, Kafka, Apicurio Registry, SearXNG, topic initialization, the outbox publisher, event workers, API, and frontend:
+### Full local stack
+
+The root Compose stack supplies PostgreSQL/pgvector, Kafka, Apicurio Registry,
+SearXNG, topic initialization, the outbox publisher, role-scoped workers,
+Flink, API, and frontend:
 
 ```powershell
 $env:POSTGRES_PASSWORD="<local-secret>"
@@ -103,7 +130,8 @@ docker compose up --build -d
 docker compose ps
 ```
 
-See [Autonomous Research](docs/AUTONOMOUS_RESEARCH.md) for worker mode, model configuration, budgets, replay, and security boundaries.
+See [Architecture](docs/ARCHITECTURE.md) for research and service boundaries and
+[Operations](docs/OPERATIONS.md) for startup, replay, and recovery.
 
 ### Tests
 
@@ -152,17 +180,13 @@ Connector credentials are configured only for approved deployments. Reddit acces
 | Document | Purpose |
 |---|---|
 | [SYSTEM_DESIGN.md](SYSTEM_DESIGN.md) | Concise system principles and investigation lifecycle. |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Current and target architecture, including collection boundaries. |
+| [Documentation index](docs/README.md) | Entry point for all durable project documentation. |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Current topology, services, research workflow, processing, and storage boundaries. |
 | [DATA_SOURCES.md](docs/DATA_SOURCES.md) | Source hierarchy, provider status, and compliance requirements. |
-| [SERVICES.md](docs/SERVICES.md) | Implemented service boundaries and planned connectors. |
 | [KAFKA.md](docs/KAFKA.md) | Implemented replayable event contracts and operations. |
-| [OPERATIONS.md](docs/OPERATIONS.md) | Kafka/outbox health, failure recovery, replay, retention, and secret runbook. |
-| [INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | Current deployment status and production principles. |
-| [ROADMAP.md](docs/ROADMAP.md) | Delivery status and future phases. |
-| [BACKEND.md](docs/BACKEND.md) | Backend contracts and endpoint reference. |
-| [FRONTEND.md](docs/FRONTEND.md) | Frontend behavior and component model. |
-| [TESTING.md](docs/TESTING.md) | Current verification commands and planned test layers. |
-| [AUTONOMOUS_RESEARCH.md](docs/AUTONOMOUS_RESEARCH.md) | A2 architecture, setup, security, replay, and operating guide. |
-| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Local runtime and optional-service troubleshooting. |
-| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Live Railway deployment, environment configuration, and launch checks. |
-| [A5_LAUNCH_EVIDENCE.md](docs/A5_LAUNCH_EVIDENCE.md) | Evidence checklist for public URLs, health checks, live investigation, reload, replay, and CI. |
+| [OPERATIONS.md](docs/OPERATIONS.md) | Startup, health, replay, recovery, projection administration, and troubleshooting. |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Public release, rollback, Kubernetes boundary, and AWS demonstration strategy. |
+| [PRE_B6_GUIDE.md](docs/PRE_B6_GUIDE.md) | Current workstation progress and readiness sequence before Kubernetes. |
+| [TESTING.md](docs/TESTING.md) | Routine checks and B3–B5 acceptance gates. |
+| [100K stress-test plan](docs/100k%20stress%20test%20plan.md) | Standalone daily-capacity experiment. |
+| [ROADMAP.md](docs/ROADMAP.md) | Delivery status, remaining acceptance, and future phases. |

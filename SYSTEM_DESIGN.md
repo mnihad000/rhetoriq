@@ -6,11 +6,11 @@ RhetoriQ is an evidence-first narrative investigation system. It identifies publ
 
 1. **Evidence before synthesis.** Reports must link material claims to retrievable source records.
 2. **Observed is not proven.** The system says “first observed in the available dataset” and never treats correlation as proof of coordination.
-3. **Autonomous but bounded research.** The planned LangGraph investigator will select approved self-operated search, browser, and corpus tools per evidence gap; fixed budgets and source policy will constrain every run.
+3. **Autonomous but bounded research.** The LangGraph investigator selects approved self-operated search, browser, primary-source, and corpus tools per evidence gap; fixed budgets and source policy constrain every run.
 4. **Transport is not source.** A publisher, public record, or social post is the source; an API, feed, search result, or page fetch is how it is acquired.
 5. **Decomposed investigation.** Retrieval, timeline building, graph analysis, source-diversity analysis, and report synthesis are separate stages.
 6. **Inspectable outputs.** Intermediate artifacts, limitations, provider coverage, and unresolved gaps remain visible.
-7. **Durable processing.** The production architecture will use checkpoints and replayable events so each layer can scale and recover independently.
+7. **Durable processing.** Kafka events, transactional outbox delivery, Flink checkpoints, and idempotent consumers let layers recover independently.
 
 ## System flow
 
@@ -32,15 +32,15 @@ flowchart TB
     end
     subgraph Processing
       F --> G[Trend and investigation pipelines]
-      G -. target: replayable events .-> H[Kafka and stream processing]
+      G --> H[Kafka and Flink processing]
     end
     subgraph InvestigationData[Investigation data]
-      G --> I[(Development stores)]
-      H -. target .-> J[(PostgreSQL, search index, graph store, Redis)]
+      G --> I[(SQLite development stores)]
+      H --> J[(PostgreSQL, search index, graph store, Redis)]
     end
     subgraph Product
-      I --> K[Current investigation services]
-      J -. target .-> K
+      I --> K[Investigation services]
+      J --> K
       K --> L[FastAPI]
       L --> M[React frontend]
     end
@@ -64,7 +64,7 @@ flowchart TB
 1. A user submits a research question. Later, a scheduled monitoring connector may also create a candidate signal.
 2. The planner converts the question into retrieval lanes and uncertainty requirements.
 3. The current retriever follows the planner's retrieval lanes, normalizes canonical evidence where required, and records actions and failures as receipts or evidence gaps.
-4. The planned LangGraph supervisor will select permitted search, browser, or corpus tools based on the next evidence gap.
+4. The LangGraph supervisor selects permitted search, primary-source, browser, or corpus tools based on the next evidence gap.
 5. Deterministic stages build the timeline, narrative family, counter-frames, source-diversity summary, and spread graph.
 6. A skeptic pass identifies unsupported conclusions and missing source classes.
 7. The report synthesizer produces cautious findings and attaches receipts.

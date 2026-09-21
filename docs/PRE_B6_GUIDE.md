@@ -1,12 +1,28 @@
 # Before B6: Setup, Technologies, and Runtime Acceptance
 
-Prepared: 2026-09-19. Last verified against this Windows development machine.
+Prepared: 2026-09-19. Last updated from this Windows development machine on
+2026-09-21.
+
+## Current local progress
+
+### 2026-09-20 — Docker prerequisite cleared
+
+- **Blocker:** Docker Desktop showed "Virtualization support not detected" and its Linux engine could not start.
+- **Cause:** CPU virtualization was unavailable to Docker, and the Windows WSL/virtual-machine components were not enabled.
+- **Resolution:** Enabled CPU virtualization in UEFI/BIOS, then enabled `Microsoft-Windows-Subsystem-Linux` and `VirtualMachinePlatform` from an elevated PowerShell session and set `hypervisorlaunchtype` to `auto`. After restarting Windows, Docker Desktop reported **Engine running**.
+- **Verified:** `docker version` completed locally and displayed both the client and server sections. `docker info` confirmed the Docker Desktop Linux engine is backed by the WSL2 kernel (`6.6.87.2-microsoft-standard-WSL2`) and has 16 CPUs available. `wsl --status` confirmed `docker-desktop` as the default WSL 2 distribution.
+- **New resource blocker:** Docker currently reports 6.664 GiB total memory, and the host has 13.8 GiB physical RAM. The host cannot allocate the 16 GiB B5 load-qualification budget while leaving memory for Windows. This machine is suitable for development and reduced local smoke tests, but not for the full B5 load qualification.
+- **Qualification scope clarification:** The current B5 acceptance gate requires 10,000 distinct seeded documents. The separate [`100k stress test plan`](100k%20stress%20test%20plan.md) describes a future 100,000-documents-per-day capacity claim; it is not the current B5 sign-off corpus or a completed runtime result.
+- **Still required:** The increased Docker/WSL memory allocation for full qualification, the Elasticsearch kernel setting, and all runtime acceptance gates below.
 
 This guide collects the software prerequisites, environment configuration, technology overview, architecture flow, and explanation of disposable B3–B5 acceptance before Kubernetes deployment.
 
 B6 is **local Kubernetes deployment**. The repository contains the B3 Kafka backbone, B4 Flink processing, and B5 specialized retrieval implementations, but their actual runtime acceptance remains pending. Implementation and unit-test results alone do not close those milestones.
 
-The detailed sources of truth are the [roadmap](ROADMAP.md), [B4 operations](B4_OPERATIONS.md), [B5 operations and B6 handoff](B5_OPERATIONS.md), and [B5 acceptance record](B5_ACCEPTANCE.md). This guide does not claim that acceptance has been performed.
+The durable sources of truth are the [roadmap](ROADMAP.md),
+[operations runbook](OPERATIONS.md), and [testing and acceptance
+guide](TESTING.md). This guide does not claim that acceptance has been
+performed.
 
 ## 1. Software to Install or Verify
 
@@ -15,12 +31,12 @@ The following inventory is a snapshot of commands available on the development m
 | Software | Observed setup | Purpose and next action |
 | --- | --- | --- |
 | Git | Installed | Source control and identifying deployment versions. |
-| Docker Desktop / Compose | Docker client v29.6.2 is installed; the Linux engine was unreachable during the 2026-09-19 check. | Start Docker Desktop and select Linux containers with the WSL 2 backend. `docker version` must show both client and server before any Compose or kind command can work. |
-| WSL | Command installed; status check denied | Linux environment used by Docker on Windows. Operational state is unverified. |
+| Docker Desktop / Compose | Docker client v29.6.2 is installed and the Linux engine was verified running on 2026-09-20. | Keep Linux containers and the WSL 2 backend enabled; `docker version` must show both client and server before Compose or kind work. |
+| WSL | Docker Desktop is using the WSL2 kernel and `docker-desktop` distribution. | Linux environment used by Docker on Windows. Recheck after host or Docker updates. |
 | Node.js / npm | Node v22.23.2 installed | Frontend dependency installation, development, and builds. |
 | Python | v3.13.3 installed | Backend development and tests. |
-| kubectl | Installed; no current Kubernetes context. | Inspect and control Kubernetes workloads. Create the local cluster, then verify `kubectl config current-context`. Match its version appropriately to the chosen cluster. |
-| kind | Not found on PATH | Recommended local Kubernetes cluster tool for B6. |
+| kubectl | Installed; active context `kind-rhetoriq-b6` was verified on 2026-09-20. | Inspect and control Kubernetes workloads; recheck nodes and system pods before B6 deployment. |
+| kind | v0.33.0 installed; one-node `rhetoriq-b6` cluster verified Ready on 2026-09-20. | Local Kubernetes cluster tool selected for B6. |
 | minikube | Not found on PATH | Alternative to kind; choose one local cluster tool. |
 | Helm | Not found on PATH | Needed if B6 uses Helm charts; plain Kubernetes manifests do not require it. |
 | Terraform / AWS CLI | Not found on PATH | Later cloud infrastructure work; not required for local B6. |
@@ -50,26 +66,22 @@ kubectl config current-context
 
 ### Current machine blockers and exact next actions
 
-The 2026-09-19 verification found no running Docker Linux engine, no active
-Kubernetes context, and no `kind`, `minikube`, or `helm` executable on PATH.
-Complete these steps in order:
+Docker, WSL 2, kind, and the `rhetoriq-b6` cluster are now working. Complete
+the remaining preparation in this order:
 
-1. Start Docker Desktop, enable its WSL 2 / Linux-container backend, and
-   confirm `docker version` reports a server version.
-2. Verify WSL is healthy with `wsl --status` and `wsl --list --verbose`.
-3. Install **one** local cluster tool. `kind` is the preferred B6 choice:
-
-   ```powershell
-   winget install Kubernetes.kind
-   ```
-
-4. Create a local cluster only after Docker is healthy. Confirm that
-   `kubectl config current-context`, `kubectl get nodes`, and
-   `kubectl get pods -A` succeed.
-5. Install Helm only if B6 is implemented as a Helm chart. Plain Kubernetes
-   manifests do not need Helm.
-6. Do not install Terraform, AWS CLI, Argo CD, Prometheus, or Grafana for
-   local B6. They belong to later cloud/GitOps/observability work.
+1. Reconfirm `docker version`, `docker info`, `kubectl config
+   current-context`, `kubectl get nodes`, and `kubectl get pods -A` after a host
+   or Docker restart.
+2. Verify the Elasticsearch `vm.max_map_count` setting inside Docker/WSL and
+   confirm it survives restart.
+3. Use this workstation only for reduced smoke tests. Its 6.664 GiB Docker
+   memory allocation and 13.8 GiB physical RAM cannot satisfy the 16 GiB B5
+   qualification budget.
+4. Run the full B5 load qualification in a temporary higher-memory environment
+   with the required eight CPUs and recorded resource evidence.
+5. Install Helm only if B6 uses a Helm chart. Plain manifests do not require it.
+6. Leave Terraform, AWS CLI, Argo CD, Prometheus, and Grafana for the later
+   cloud/GitOps/observability milestones.
 
 The repository currently has no Kubernetes manifests or Helm chart. Creating
 the B6 deployment artifacts is therefore required work after the runtime gates
@@ -77,7 +89,11 @@ below; installing a cluster tool alone cannot deploy this project.
 
 ### Machine resources and Elasticsearch prerequisite
 
-The B5 operations guide calls for **16 GB RAM and 8 CPUs allocated to Docker/WSL**. Its configured steady-state container memory caps total approximately 13 GiB; these are limits, not measured usage. Kubernetes adds overhead. A machine with 32 GB total RAM is a practical preference, not a measured project requirement.
+The [operations runbook](OPERATIONS.md) calls for **16 GB RAM and 8 CPUs
+allocated to Docker/WSL** for B5 qualification. Its configured steady-state
+container memory caps total approximately 13 GiB; these are limits, not measured
+usage. Kubernetes adds overhead. A machine with 32 GB total RAM is a practical
+preference, not a measured project requirement.
 
 Elasticsearch requires this Linux kernel setting in the Docker/WSL environment:
 
@@ -389,7 +405,7 @@ Most checks use recorded hosted-model responses to avoid paid calls. They still 
 
 ### B5 Load Qualification
 
-The [B5 acceptance record](B5_ACCEPTANCE.md) prescribes:
+The [B5 acceptance section](TESTING.md#b5-actual-stack-acceptance) prescribes:
 
 | Item | Required experiment or target |
 | --- | --- |
@@ -416,7 +432,9 @@ Retain JSON reports, container memory/OOM evidence, Kafka offsets/lag/DLQs, Flin
 
 The bounded live canary acquires at most 20 actual documents under explicit provider limits, preserves real acquisition receipts, runs the publication gate, then restarts and reloads the investigation. Record provider usage and failures without credentials.
 
-Use the executable procedures in [B4 operations](B4_OPERATIONS.md) and [B5 operations](B5_OPERATIONS.md). The [B5 acceptance scenario matrix](B5_ACCEPTANCE.md) defines full sign-off; a startup smoke report alone does not complete the milestone.
+Use the executable procedures in [Operations](OPERATIONS.md). The
+[B5 acceptance scenario matrix](TESTING.md#scenario-matrix) defines full
+sign-off; a startup smoke report alone does not complete the milestone.
 
 ### Why Complete This Before B6?
 
@@ -426,12 +444,12 @@ This work does not deploy publicly or test against production. Its result is sav
 
 ## 6. Readiness Checklist and Deployment Order
 
-- [ ] Start Docker Desktop's Linux engine and verify WSL 2, `docker version`, and `docker info`.
-- [ ] Allocate 8 Docker CPUs and 16 GB RAM; verify the Elasticsearch kernel setting survives restart.
-- [ ] Install kind (preferred) or minikube, create a cluster, and verify the kubectl context and nodes.
-- [ ] Create untracked `.env` from `.env.production.example`; provide fresh `POSTGRES_PASSWORD` and `SEARXNG_SECRET` at minimum.
+- [x] Start Docker Desktop's Linux engine and verify WSL 2, `docker version`, and `docker info`. Completed 2026-09-20: Docker's Linux engine is running; `docker version` reports its server; `docker info` reports the WSL2 Linux engine; and `wsl --status` reports `docker-desktop` on WSL 2.
+- [~] Allocate 8 Docker CPUs and 16 GB RAM; verify the Elasticsearch kernel setting survives restart. Docker has 16 CPUs but only 6.664 GiB RAM as of 2026-09-20, while the host has 13.8 GiB physical RAM. Do not attempt the full B5 load qualification on this machine; use a reduced local smoke topology or a higher-memory temporary environment for that gate.
+- [x] Install kind (preferred) or minikube, create a cluster, and verify the kubectl context and nodes. Completed 2026-09-20: `kind v0.33.0` created the one-node `rhetoriq-b6` cluster; the active context is `kind-rhetoriq-b6`; its control-plane node is `Ready`; and all observed system pods were `Running` with zero restarts.
+- [x] Create untracked `.env` from `.env.production.example`; provide fresh `POSTGRES_PASSWORD` and `SEARXNG_SECRET` at minimum. Completed 2026-09-20: the ignored root `.env` was created from the template, configured with fresh local-only values, and passed `docker compose config --quiet` without output.
 - [ ] Use fresh local-only credentials, volumes, and database state; do not use the Neon URLs in `.env.local`.
-- [ ] Build the root Compose images and verify pinned MiniLM loading. Internet is required for image/dependency/model downloads.
+- [~] Build the root Compose images and verify pinned MiniLM loading. The root `docker compose build` completed successfully on 2026-09-21. Pinned MiniLM is built through the opt-in B5 overlay and remains deferred with the full B5 acceptance run because this host cannot meet its 16 GiB qualification budget.
 - [ ] Complete B3 actual event delivery, replay, and recovery checks.
 - [ ] Complete B4 actual Flink delivery, checkpoint, recovery, and load checks.
 - [ ] Complete B5 startup, persisted product/browser, failure, repair, rebuild, rollback, and load checks.
@@ -443,6 +461,9 @@ This work does not deploy publicly or test against production. Its result is sav
 
 The B6 handoff must preserve PostgreSQL data, Kafka logs, Flink checkpoints/savepoints, Elasticsearch data, Neo4j data, and certificate material. Redis remains disposable cache. Public CA trust can be a ConfigMap; private keys require Secrets or equivalent secure provisioning. Load or publish application images into the local cluster and record immutable image identities.
 
-Local B6 requires no AWS account or cloud purchase. Later work adds Terraform/GitOps in B7 and observability in B8. The approved cloud strategy is a short-lived AWS showcase plus an affordable separate public demo; see [the ephemeral AWS strategy](EPHEMERAL_AWS_KUBERNETES_DEMO.md).
+Local B6 requires no AWS account or cloud purchase. Later work adds
+Terraform/GitOps in B7 and observability in B8. The approved cloud strategy is a
+short-lived AWS showcase plus an affordable separate public demo; see
+[Deployment](DEPLOYMENT.md#ephemeral-aws-portfolio-demonstration).
 
 The public demo still needs the current Kafka/worker execution dependencies unless a lighter application topology is deliberately implemented. The earlier frontend/API/database-only deployment does not satisfy the current investigation execution contract.

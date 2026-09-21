@@ -3,7 +3,12 @@
 ## Current status
 
 - **B2 is complete.** SearXNG broad discovery, canonical retrieval, Federal Register primary-source research, provenance receipts, provider policy, retries, pagination, deduplication, rate limiting, and explicit fallback diagnostics are implemented.
-- **B3 is implemented with an immediate Kafka cutover.** Six primary topics and six DLQs, committed JSON Schemas, Apicurio compatibility, KRaft Compose, transactional outbox, consumer ledger, retries/DLQs, replay, Kafka-only investigation dispatch, health/lag metrics, ordered stage events, and stable completion events are present. There is no synchronous production fallback.
+- **B3 is implemented with an immediate Kafka cutover.** The original six-topic
+  backbone has expanded to 12 primary topics with matching DLQs for B4/B5;
+  committed JSON Schemas, Apicurio compatibility, KRaft Compose, transactional
+  outbox, consumer ledgers, retries/DLQs, replay, Kafka-only investigation
+  dispatch, health/lag metrics, ordered stage events, and stable completion
+  events are present. There is no synchronous production fallback.
 - **A1, A2, A3, and A4 remain complete by product decision.** A5 public launch evidence is still pending. B1 pgvector remains opt-in until a live investigation corpus is backfilled and compared before production enablement.
 - Do not re-open A3 unless requested. The project owner explicitly accepted the remaining 30-case curated-real-source corpus as future quality work, not a blocker.
 - The working tree was already dirty before A3. Preserve unrelated changes and do not reset/revert them.
@@ -14,7 +19,9 @@
 - Frontend: 4 tests passed and the production build completed successfully.
 - Compose configuration renders successfully with required local secrets supplied.
 - Live Federal Register canary: two current primary-source records, valid receipts, one page, no warning.
-- Docker Desktop cannot start its Linux engine until the workstation is restarted. Docker reports `HCS_E_HYPERV_NOT_INSTALLED`; `wsl --install --no-distribution` completed successfully, so restart Windows and rerun the Compose integration/canary sequence in `docs/TESTING.md`. If the error persists, enable firmware virtualization.
+- The Docker/WSL prerequisite was subsequently cleared and a local kind cluster
+  was created. Current resource limits and remaining runtime gates are recorded
+  in [the Pre-B6 guide](docs/PRE_B6_GUIDE.md).
 - `backend/test_redis_connection.py` no longer contains a credential and reads `REDIS_URL` only from the environment. The previously exposed external Redis credential must still be rotated at its provider; source-code removal cannot revoke it.
 
 ## A3 decisions and implementation
@@ -79,5 +86,9 @@
 - The frontend container reads `PUBLIC_API_BASE_URL` at startup and exposes it to the client runtime. `VITE_API_BASE_URL` remains the local Vite development variable.
 - The API container runs committed PostgreSQL migrations before starting FastAPI. The Railway API service owns migration execution; do not run migrations concurrently from a second release process.
 - Neon supplies `DATABASE_URL`; preserve the provider's TLS setting, normally `sslmode=require`. Keep the value in Railway secret/reference configuration.
-- A5 remains **In Progress** until the public frontend/API URLs, health responses, a live SSE investigation, workspace reload, replay after redeploy, and CI evidence are recorded in [docs/A5_LAUNCH_EVIDENCE.md](docs/A5_LAUNCH_EVIDENCE.md). No public URLs were available when this handoff was updated.
+- A5 remains **In Progress** until the public frontend/API URLs, health
+  responses, a live SSE investigation, workspace reload, replay after redeploy,
+  and CI evidence are recorded in the [deployment launch
+  checklist](docs/DEPLOYMENT.md#launch-evidence). No public URLs were available
+  when this handoff was updated.
 - Rollback is an application release rollback followed by a forward database fix or Neon restore when required. The migration runner has no destructive down-migration path; take a Neon backup/branch before schema changes.

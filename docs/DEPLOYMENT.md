@@ -1,155 +1,189 @@
-# Deployment
+# RhetoriQ Deployment
 
-RhetoriQ requires the API/frontend, PostgreSQL/pgvector, private SearXNG, Apache Kafka, Apicurio Registry, topic initializer, outbox publisher, and role-scoped event workers. Browser rendering/Playwright remains optional. The root Compose file is the local production rehearsal. A managed deployment must provide equivalent private Kafka, registry, and worker services; deploying only the earlier API/frontend/Neon topology is no longer sufficient for investigation execution.
+RhetoriQ’s accepted work is Kafka-backed, so a live deployment must provide the
+API/frontend, PostgreSQL, Kafka, Apicurio, topic initialization, the outbox
+publisher, role-scoped workers, and SearXNG. Deploying only an API, frontend,
+and database does not satisfy the current investigation execution contract.
+Browser rendering and B5 specialized retrieval remain opt-in.
 
 ## Local production rehearsal
 
-Copy the template, choose fresh local-only values, then start the stack:
+Copy `.env.production.example` to an untracked environment file, replace every
+placeholder secret, and run:
 
 ```powershell
-Copy-Item .env.production.example .env
-docker compose up --build
+docker compose config --quiet
+docker compose up --build -d
+docker compose ps
 ```
 
-Open `http://localhost:4173`, verify `http://localhost:8000/health`, and run a
-live investigation. PostgreSQL data is stored in `postgres-data` and broker state in `kafka-data`.
-Stop services with `docker compose down`; do not use `-v` unless you
-intend to discard local database data.
+Open `http://localhost:4173`, check `http://localhost:8000/health` and
+`http://localhost:8000/api/research/health`, then run a live investigation.
+PostgreSQL, Kafka, and Flink state use named volumes. Do not run `docker compose
+down -v` unless that state is intentionally disposable. Detailed recovery and
+B5 overlay commands are in [Operations](OPERATIONS.md).
 
-The backend container runs committed migrations before it starts FastAPI.
+## Public deployment boundary
 
-## Railway services
+The documented public-demo topology uses public frontend and API services,
+private execution dependencies, and durable PostgreSQL:
 
-Create one Railway project and one production environment for the Railway
-services below; provision Neon separately:
+| Component | Exposure | Responsibility |
+| --- | --- | --- |
+| Frontend | Public | Nginx-served React application using `PUBLIC_API_BASE_URL`. |
+| API | Public | FastAPI, migrations, durable reads, accepted writes, health, and SSE. |
+| PostgreSQL/pgvector | Private managed service | Canonical application state, checkpoints, corpus, outbox, and projection authority. |
+| Kafka and Apicurio | Private | Event delivery and compatible schema registry. |
+| Topic initializer | Private one-shot job | Topics, retention, schemas, and compatibility. |
+| Outbox and role workers | Private | Publish and consume accepted ingestion/investigation work. |
+| SearXNG | Private | Broad web discovery. |
+| Browser renderer | Not deployed initially | JavaScript-only pages remain a visible retrieval limitation. |
 
-| Service | Exposure | Source | Purpose |
-|---|---|---|---|
-| `Neon` | managed external database | Neon PostgreSQL | durable application state, LangGraph checkpoints, and future pgvector corpus |
-| `searxng` | private | SearXNG image/config | web discovery only |
-| `broker` | private | Apache Kafka 4.3.1 | KRaft event backbone |
-| `schema-registry` | private | Apicurio Registry 3.3.0 | Confluent-compatible JSON Schema registry |
-| `topic-init` | private one-shot | repository `backend/` directory | Topics, retention, schemas, and compatibility |
-| `outbox-publisher` | private | repository `backend/` directory | Publish committed outbox records |
-| event workers | private | repository `backend/` directory | Documents, signals, investigations, and projections |
-| `api` | public | repository `backend/` directory | FastAPI, durable reads, and outbox writes |
-| `frontend` | public | repository `frontend/` directory | static React application served by Nginx |
+Railway plus Neon is the currently documented provider combination, but any
+host is acceptable if it supplies equivalent private networking, durable
+services, health checks, and restart behavior. Do not create a second
+PostgreSQL service when Neon is authoritative.
 
-Do not create a Railway Postgres service or a browser-renderer service. Only
-`api` and `frontend` receive a Railway public domain. The API reaches SearXNG
-over its private Railway address and reaches Neon using the secret connection
-string; the Neon host is not a Railway private-domain service.
+The API service owns forward-only migration execution before Uvicorn starts.
+Do not run migrations concurrently from another release process. Preserve the
+managed database TLS option, normally `sslmode=require`, and keep the complete
+URL in platform secret configuration.
 
-### API variables
-
-Set these in Railway's `api` service. Store the Neon connection string as a
-secret variable; use Railway references for Railway-managed service addresses.
+Set public frontend/API origins explicitly:
 
 ```text
-DATABASE_URL=<Neon connection string, including sslmode=require>
+PUBLIC_API_BASE_URL=https://api.example.invalid
+CORS_ALLOW_ORIGINS=https://app.example.invalid
 DEPLOYMENT_ENV=production
 DEMO_MODE=false
-RESEARCH_RUNTIME=langgraph
-RESEARCH_EXECUTION_MODE=kafka
-SEARXNG_BASE_URL=http://${{searxng.RAILWAY_PRIVATE_DOMAIN}}:8080
-KAFKA_BOOTSTRAP_SERVERS=<private Kafka bootstrap addresses>
-KAFKA_SCHEMA_REGISTRY_URL=<private Apicurio URL>/apis/ccompat/v7
-KAFKA_CLIENT_ID=rhetoriq-api
-KAFKA_CONSUMER_GROUP_PREFIX=rhetoriq
-KAFKA_SECURITY_PROTOCOL=<PLAINTEXT or managed TLS/SASL protocol>
-KAFKA_SASL_USERNAME=<secret when required>
-KAFKA_SASL_PASSWORD=<secret when required>
-BROWSER_RENDERING_ENABLED=false
-ENABLE_POSTGRES_VECTOR_SEARCH=false
-POSTGRES_VECTOR_SEARCH_TOP_K=8
-POSTGRES_VECTOR_BACKFILL_BATCH_SIZE=100
-CORS_ALLOW_ORIGINS=https://<frontend-public-domain>
-REQUEST_RATE_LIMIT_PER_MINUTE=120
-INVESTIGATION_START_LIMIT_PER_HOUR=5
-REQUEST_RATE_LIMIT_MAX_CLIENTS=10000
-# Set true only when Railway is the sole ingress to this API service.
-TRUST_PROXY_HEADERS=true
-GEMINI_API_KEY=<secret, if using Gemini>
-GROQ_API_KEY=<secret, if using Groq>
 ```
 
-Set at least one hosted-model secret before running an investigation. Never
-copy an existing local `.env` file to Railway or commit it.
+`VITE_API_BASE_URL` is for local Vite development. Provider credentials,
+database URLs, SASL credentials, and service passwords must be platform secrets,
+not copied from a local `.env` file.
 
-### SearXNG variables
+## Feature rollout
 
-Deploy SearXNG from the repository with `infra/research/` as its Railway root
-directory and `searxng/Dockerfile` as its Dockerfile path. That image copies
-the committed `searxng-settings.yml` into the service. Set a newly generated
-`SEARXNG_SECRET`, and do not generate a public domain for this service.
+- Keep `ENABLE_POSTGRES_VECTOR_SEARCH=false` until migrations, resumable corpus
+  backfill, index creation, and result comparisons pass.
+- Keep `ENABLE_FLINK_TRENDING=false` until checkpoint, replay, recovery, and
+  signal gates pass. The legacy snapshot remains the explicit fallback.
+- Keep `ENABLE_B5_RETRIEVAL=false` until store initialization, projection
+  coverage, failure behavior, rebuild/rollback, and product acceptance pass.
+- Keep `BROWSER_RENDERING_ENABLED=false` unless an isolated renderer is
+  deliberately deployed and secured.
+- Keep automatic investigation off unless its separate policy and operating
+  gates are approved.
 
-### Frontend variables
+Enabling a flag is not evidence that the dependency is healthy. Health and
+workspace responses must expose unavailable, pending, stale, and fallback
+states accurately.
 
-Set this runtime variable after generating the API public domain:
+## Launch evidence
 
-```text
-PUBLIC_API_BASE_URL=https://<api-public-domain>
-```
+A public launch is complete only after one deployment records all fields below.
+Do not mix evidence from different commits or environments.
 
-The frontend reads this value at container startup, so it does not need a
-rebuild when the API domain changes. For local Vite development, use
-`VITE_API_BASE_URL` instead.
+### Release identity
 
-### Database ownership and TLS
+| Field | Recorded value |
+| --- | --- |
+| Frontend URL | `<pending>` |
+| API URL | `<pending>` |
+| PostgreSQL project/branch | `<pending>` |
+| Deployed commit and image digests | `<pending>` |
+| Verification timestamp (UTC) | `<pending>` |
+| Verifier | `<pending>` |
 
-Neon owns the PostgreSQL service and its backups. Railway stores the Neon
-`DATABASE_URL` as an API secret. Keep the provider's TLS query parameter,
-normally `sslmode=require`; do not copy the URL into source control or logs.
+### Topology and health
 
-The API image runs `python -m migrations` before Uvicorn starts. That process
-creates `schema_migrations` and applies each committed migration once. The API
-release is the single migration owner. Before applying a schema change, create
-a Neon backup/branch and verify the migration against the CI PostgreSQL job.
+- [ ] Public ingress exposes only the intended frontend/API endpoints.
+- [ ] PostgreSQL is durable, private, TLS-enabled, and used by the migration
+  owner, API, workers, and checkpointer.
+- [ ] Kafka, registry, SearXNG, outbox publisher, and all required workers are
+  private and ready.
+- [ ] `GET /health` returns HTTP 200 and reports `demo_mode: false`.
+- [ ] `GET /api/research/health` reports numeric lag/DLQ counts and ready
+  execution dependencies.
+- [ ] Optional browser/B5 dependencies report their intentional disabled or
+  degraded state truthfully.
 
-The B1 semantic corpus is additive and disabled by default during launch
-closeout. New documents are stored as pending corpus rows without loading the
-embedding model until backfill or feature enablement. First create a Neon
-backup or non-production branch, apply the
-migration there, and run the resumable backfill from the backend image with
-`python -m services.postgres_corpus backfill --batch-size 100`. The command
-prints a cursor after each batch and returns a nonzero status if any document
-could not be embedded. Resume with `--after-id <last-cursor>` after an
-interruption; use `--retry-unavailable` from the start to revisit rows whose
-embedding was unavailable. After a successful backfill, run
-`python -m services.postgres_corpus build-index`, compare cosine results with
-the legacy path, and record the results. Only then back up the production Neon
-branch, deploy the additive migration with the flag still `false`, repeat the
-production backfill and index build, compare production retrieval, and set
-`ENABLE_POSTGRES_VECTOR_SEARCH=true`.
-Switching that flag back to `false` is the application rollback for a retrieval
-regression; the additive corpus rows may remain for diagnosis.
+Record only sanitized excerpts—never connection strings, tokens, event bodies,
+or source documents.
 
-## Launch checks
+### Investigation durability
 
-1. Open `https://<api-domain>/health`; it must report `demo_mode: false`.
-2. Open `https://<api-domain>/api/research/health`; SearXNG, checkpointer, Kafka, registry, outbox, and all consumer groups must be ready. Lag and DLQ counts must be numeric. Browser rendering may be intentionally absent.
-3. Open the frontend, start a short investigation, and confirm the SSE
-   progress rail updates.
-4. Redeploy the API and confirm the completed investigation and research trail
-   remain available.
-5. Confirm the frontend is using `PUBLIC_API_BASE_URL`, CORS allows only the
-   frontend origin, and Railway waits for GitHub CI before deploys.
-6. Record timestamps, deployed commit, response bodies/statuses, and the
-   investigation/run identifiers in [A5_LAUNCH_EVIDENCE.md](A5_LAUNCH_EVIDENCE.md).
+- [ ] Start a short public-source investigation from the deployed frontend.
+- [ ] Record the investigation ID, run ID, terminal status, and deployment
+  identity.
+- [ ] Observe SSE progress to a terminal state without manual database repair.
+- [ ] Reload the workspace and verify its report, receipts, event trail, and IDs.
+- [ ] Restart or redeploy the API and reload the same workspace.
+- [ ] Trigger recorded replay and preserve its comparison or terminal
+  limitation.
 
-## Operational limits
+### Release checks
 
-Research runs execute in Kafka consumers, so API replicas do not execute jobs or invoke a synchronous fallback. The existing fetch/domain/model budgets remain active and must be kept within the chosen provider quotas. The API also limits each client to 120 requests per
-minute and five investigation starts per hour by default. These limits are
-in-process and are appropriate only while the API remains a single instance;
-move the counters to shared storage before increasing the API replica count.
+- [ ] CI is green for the deployed commit.
+- [ ] Backend, schema, compile, PostgreSQL migration, frontend test/build, and
+  Markdown checks pass with only documented optional skips.
+- [ ] Runtime event delivery and recovery evidence is attached.
+- [ ] Any enabled Flink or B5 capability has its corresponding acceptance
+  evidence from [Testing](TESTING.md).
 
 ## Rollback
 
-For an application regression, redeploy the last known-good Railway API and
-frontend commits and leave the Neon schema in place when it is backward
-compatible. The migration runner does not provide destructive down migrations.
-For an incompatible schema change, stop promotion, use the tested forward fix,
-or restore the pre-change Neon backup/branch according to the recorded incident
-decision. After rollback, verify `/health`, `/api/research/health`, a persisted
-workspace reload, and replay before reopening traffic.
+Before schema-changing releases, create and record a PostgreSQL backup or Neon
+branch. The migration runner has no destructive down-migration path. Application
+rollback may reuse a backward-compatible schema; incompatible database changes
+require a tested forward fix or an explicit restore decision.
+
+Record the last-known-good commit/images, backup identifier, rollback action,
+and post-rollback health plus workspace reload. B5 generation rollback is a
+separate atomic manifest operation described in [Operations](OPERATIONS.md); it
+does not replace application or database rollback.
+
+## Local Kubernetes (B6)
+
+B6 translates the accepted Compose topology into local Kubernetes workloads,
+Services, initialization Jobs, ConfigMaps, Secrets, persistent volumes, probes,
+resource limits, shutdown grace, ingress, and rollout policy. It must preserve:
+
+- PostgreSQL data, Kafka logs, Flink checkpoints/savepoints, Elasticsearch and
+  Neo4j data, plus certificate material;
+- dependency initialization order and service-specific trust;
+- explicit liveness versus dependency readiness;
+- stable worker identities, shutdown behavior, and replay semantics;
+- the same seeded search, path, reload, recovery, and degradation evidence.
+
+Redis remains disposable cache. Public CA material may use a ConfigMap; private
+keys require Secrets or equivalent secure provisioning. Build or load immutable
+application images into the local cluster rather than relying on a mutable
+`local` tag. The detailed workstation status and execution order remain in
+[Pre-B6](PRE_B6_GUIDE.md).
+
+## Ephemeral AWS portfolio demonstration
+
+After B6 and the Terraform/GitOps roadmap work, a short-lived AWS EKS
+environment may demonstrate the production-style architecture. It is evidence
+of engineering capability, not a permanent production service or proof of
+continuous 100K-document operation.
+
+The demonstration should use seeded or appropriately licensed data and record:
+
+- immutable images, manifests/charts, ConfigMaps, Secrets, resource settings,
+  probes, autoscaling, and deployment flow;
+- one end-to-end investigation plus Kafka/Flink, persistence, search, graph,
+  and observability evidence for the components actually deployed;
+- screenshots, deployment logs, measured workload results, and teardown proof.
+
+Before provisioning, use a dedicated account or isolated Terraform workspace,
+set a low AWS Budget alert, restrict regions and instance sizes, tag resources
+with `project=rhetoriq`, `environment=portfolio-demo`, and an expiry timestamp,
+and avoid NAT gateways or managed services unless the demonstration requires
+them.
+
+After recording evidence, run `terraform destroy` from the same workspace and
+confirm removal of the EKS cluster, node groups, load balancers, volumes, public
+IPs, NAT gateways, and managed databases. Review Cost Explorer and active
+resources. The affordable public demo remains a separate deployment.

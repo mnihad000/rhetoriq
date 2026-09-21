@@ -19,15 +19,23 @@ There is no synchronous production fallback. Accepted source records, research e
 ```mermaid
 flowchart LR
     C[Source connectors] --> R[raw.documents.v1]
-    R --> N[Normalizer and enricher]
+    R --> N[Flink normalization]
+    N --> Q[documents.enrichment-requested.v1]
+    Q --> W[Enrichment worker]
+    W --> E[documents.enriched.v1]
+    E --> N
     N --> D[documents.processed.v1]
+    N --> L[documents.late.v1]
+    N --> H[pipeline.evaluated.v1]
     D --> S[Persistence and indexes]
     D --> V[Signal detector]
     V --> G[signals.detected.v1]
     G --> I[Investigation worker]
     Q[investigations.requested.v1] --> I
-    I --> E[investigations.stage-events.v1]
+    I --> ST[investigations.stage-events.v1]
     I --> O[investigations.completed.v1]
+    D --> CP[corpus.projections.v1]
+    O --> IP[investigation.projections.v1]
     R --> X[raw.documents.dlq.v1]
     D --> Y[documents.processed.dlq.v1]
 ```
@@ -37,11 +45,17 @@ flowchart LR
 | Topic | Producer | Primary consumers | Purpose |
 |---|---|---|---|
 | `raw.documents.v1` | Source connector workers | Normalization/enrichment | Provider records and canonical retrieval results before shared enrichment. |
+| `documents.enrichment-requested.v1` | Flink normalization | Hosted enrichment worker | Normalized input requiring a recorded extraction/embedding artifact. |
+| `documents.enriched.v1` | Hosted enrichment worker | Flink | Validated immutable enrichment result returned to stream processing. |
+| `documents.late.v1` | Flink | Projection/audit worker | Valid records too late to revise the active signal windows. |
+| `pipeline.evaluated.v1` | Flink | Projection/health worker | Evaluation heartbeat and pipeline freshness state. |
 | `documents.processed.v1` | Normalization/enrichment | Persistence, indexing, signal detection | Validated normalized documents with provenance metadata. |
 | `signals.detected.v1` | Signal detector | Investigation scheduler, API updates | Candidate narrative spikes with supporting document IDs and coverage context. |
 | `investigations.requested.v1` | API or scheduler | Investigation workers | User-requested and signal-triggered investigation jobs. |
 | `investigations.stage-events.v1` | Investigation workers | API, observability, persistence | Progress and inspectable intermediate-stage events. |
 | `investigations.completed.v1` | Investigation workers | Persistence and API | Completed evidence-limited reports and artifact references. |
+| `corpus.projections.v1` | Canonical persistence | Elasticsearch, Neo4j, and MiniLM workers | Versioned document projection mutations. |
+| `investigation.projections.v1` | Investigation persistence | Neo4j worker | Versioned investigation graph projection mutations. |
 | `*.dlq.v1` | Failing consumers | Operations/replay tooling | Records requiring inspection or controlled replay. |
 
 Use additional source-specific topics only when security, retention, ordering, or extreme volume requires isolation. `raw.reddit`, `raw.gdelt`, and `raw.cspan` are not default contracts because they couple downstream consumers to provider deployment names.
@@ -206,10 +220,11 @@ Exactly-once business behavior comes from idempotent application writes, not fro
 
 Initial topic defaults are configured by `backend/events/topics.py`:
 
-- raw documents: 7 days;
-- processed documents: 30 days;
+- raw documents: 14 days;
+- enrichment-requested, enriched, late, and processed documents: 30 days;
+- pipeline evaluations and corpus projections: 90 days;
 - signals, investigation requests, and stage events: 90 days;
-- completed investigations: 180 days;
+- completed investigations and investigation projections: 180 days;
 - all dead-letter topics: 14 days.
 
 User-generated platform content may require deletion synchronization. A Kafka retention policy must never preserve content longer than the applicable provider agreement allows.
@@ -220,9 +235,15 @@ User-generated platform content may require deletion synchronization. A Kafka re
 - `backend/services/kafka_runtime.py`: Apicurio schema registration/framing, idempotent producer, outbox publisher, broker health, group lag, and DLQ depth.
 - `backend/events/worker.py`: role-scoped consumers, manual offset commits, retry classification, sanitized DLQ publication, and durable idempotency.
 - `backend/events/replay.py`: explicit topic/partition/offset or correlation-filtered replay under an audited replay job ID.
-- `backend/events/schemas/`: committed schemas for all six primary and six DLQ topics.
+- `backend/events/schemas/`: committed schemas for all 12 primary and 12 DLQ topics.
 
-The document worker consumes raw events, emits processed events, and persists processed documents to the canonical corpus and research audit store. The signal worker schedules only explicitly authorized automatic investigations. The investigation worker uses the existing lease/recovery rules and emits ordered stage events plus one stable completion event. Projection consumers record delivery without rewriting authoritative business state.
+Flink exclusively consumes the raw/enriched processing topics. The document
+worker persists processed documents to the canonical corpus and emits projection
+mutations. The signal worker schedules only explicitly authorized automatic
+investigations. The investigation worker uses lease/recovery rules and emits
+ordered stage events plus one stable completion event. Product projection
+consumers persist stage/completion and pipeline/late-event state; B5 consumers
+update derived stores without rewriting authoritative business state.
 
 ## Local operation
 

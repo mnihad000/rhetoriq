@@ -95,7 +95,13 @@ The LangGraph investigator chooses SearXNG, the isolated browser adapter, or int
 
 Search results are discovery receipts, not complete evidence. Canonical pages remain the preferred evidence record. Browser-derived content is normalized through the same page and receipt pipeline; page text is untrusted content, never tool instruction.
 
-The approved broad-search provider is a self-operated SearXNG deployment. Its results may be retained for at most the raw-event default of 7 days unless the underlying provider or publisher policy requires less. Discovery snippets are not citable evidence and are promoted only after canonical retrieval succeeds. An unavailable or malformed search provider produces `SearchProviderUnavailable` with visible internal-corpus fallback diagnostics; it is never silently replaced by a model-native search path.
+The approved broad-search provider is a self-operated SearXNG deployment. Its
+results may be retained for at most the raw-event default of 14 days unless the
+underlying provider or publisher policy requires less. Discovery snippets are
+not citable evidence and are promoted only after canonical retrieval succeeds.
+An unavailable or malformed search provider produces
+`SearchProviderUnavailable` with visible internal-corpus fallback diagnostics;
+it is never silently replaced by a model-native search path.
 
 ### Federal Register primary-source lane
 
