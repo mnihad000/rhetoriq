@@ -187,6 +187,7 @@ Connector credentials are configured only for approved deployments. Reddit acces
 | [OPERATIONS.md](docs/OPERATIONS.md) | Startup, health, replay, recovery, projection administration, and troubleshooting. |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Public release, rollback, Kubernetes boundary, and AWS demonstration strategy. |
 | [PRE_B6_GUIDE.md](docs/PRE_B6_GUIDE.md) | Current workstation progress and readiness sequence before Kubernetes. |
+| [B6_OPERATIONS.md](docs/B6_OPERATIONS.md) | Implemented full-stack Helm/EKS runbook, current blockers, evidence gates, and teardown. |
 | [TESTING.md](docs/TESTING.md) | Routine checks and B3–B5 acceptance gates. |
 | [100K stress-test plan](docs/100k%20stress%20test%20plan.md) | Standalone daily-capacity experiment. |
 | [ROADMAP.md](docs/ROADMAP.md) | Delivery status, remaining acceptance, and future phases. |

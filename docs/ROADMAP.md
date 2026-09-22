@@ -49,9 +49,9 @@ observability are not implemented.
 | B4 Flink signals | Implemented | Flink topology, enrichment artifacts, event-time windows, projections, and product fallback exist; runtime recovery/load/live-canary gates remain. |
 | B5 Recoverable projections | Implemented | Immutable authority, ES/Neo4j/MiniLM projections, cache, product UI, drift/repair/rebuild/cutover tooling exist; actual-stack acceptance remains. |
 | B6 Local Kubernetes | Implemented, unqualified | Full-topology Helm profiles, deployment contracts, PKI, policies, storage, smoke/evidence Jobs, and guarded scripts exist; kind runtime evidence remains open. |
-| B7 Terraform and GitOps | Partially implemented | Three-state ephemeral EKS Terraform and guarded plan/apply/teardown exist; no cloud run or GitOps reconciler is claimed. |
+| B7 Ephemeral EKS Terraform | Implemented, unqualified | Three-state Terraform, immutable ECR flow, IAM/network/storage controls, guarded plan/apply, deadline fallback, and verified teardown logic exist; no AWS apply or destroy evidence exists. GitOps is outside the portfolio-demo scope. |
 | B8 Observability | Planned | Prometheus/OpenTelemetry metrics, Grafana dashboards, alerts, and operational objectives. |
-| B9 Managed-cloud demonstration | Planned | Short-lived AWS portfolio demonstration with measured evidence and verified teardown. |
+| B9 Managed-cloud demonstration | Implemented, not executed | The complete short-lived EKS workflow and evidence tooling exist; provisioning, recording, evidence export, and zero-residual teardown remain open. |
 
 ## B4 delivered boundary
 
@@ -109,14 +109,95 @@ current workstation; reduced local smoke tests do not replace that evidence.
 See [B6 Operations](B6_OPERATIONS.md) for the exact blocked-by-default runtime
 sequence. B6 remains unqualified until that evidence is retained.
 
+### B6 implementation and verification snapshot
+
+The repository now contains:
+
+- one reusable chart at `deploy/helm/rhetoriq`, with shared defaults and
+  `kind` and `eks-demo` profiles;
+- the full one-replica topology: frontend, API, PostgreSQL/pgvector, Kafka
+  KRaft, Apicurio, Flink, SearXNG, Elasticsearch, Neo4j, Redis, outbox,
+  document/signal/investigation/projection/enrichment workers, three B5
+  workers, initialization Jobs, smoke/evidence Jobs, and durable claims;
+- cert-manager/trust-manager PKI preserving service-specific PostgreSQL,
+  Elasticsearch, Neo4j, and Redis TLS contracts;
+- check-only Kubernetes application startup with an advisory-locked migration
+  Job as the exclusive schema writer;
+- process liveness, operational readiness, worker heartbeat probes, bounded
+  dependency waits, and graceful consumer shutdown;
+- digest-only application images, pinned platform images, CPU-only MiniLM,
+  restricted security contexts, explicit resources, and `Recreate` rollouts;
+- default-deny NetworkPolicies plus functional allow/deny test tooling;
+- complete kind preflight, platform, image, Secret, deployment, smoke,
+  recovery, browser-access, and evidence scripts;
+- three isolated EKS Terraform states (`bootstrap`, `foundation`, `platform`),
+  ECR/IAM/EKS/network/storage/optional HTTPS resources, an eight-hour teardown
+  deadline, explicit ECR cleanup, and residual-resource auditing;
+- exact Flink 2.3.0 Kafka connector source pinning to commit
+  `9e4bd3c04f57e5c2189b5d5ddae521518c52cffa`, with archive checksum
+  verification and the compatibility patch recorded in the runtime lock.
+
+Recorded non-runtime verification at the current working-tree state:
+
+- 368 backend tests passed and 27 environment-dependent tests skipped;
+- 8 focused B6 deployment-contract tests passed;
+- 27 frontend tests and the production frontend build passed;
+- both Helm profiles linted and rendered: 61 kind resources and 58 EKS
+  resources;
+- Kubernetes schema validation found no invalid built-in resources;
+- every B6 PowerShell script parsed, Compose rendered with the example
+  environment, and all three Terraform configurations validated without AWS
+  credentials or a remote backend;
+- the final Flink image built from checksum-verified connector source and
+  passed non-root UID, runtime-import, required-JAR, and no-compiler checks.
+
+These checks establish implementation quality only. They are not kind, EKS,
+B3-B5, 10,000-document, or capacity acceptance evidence.
+
+### B6 remaining gates
+
+The last recorded workstation snapshot was:
+
+- context `kind-rhetoriq-b6`, with a Ready Kubernetes v1.37.0 node;
+- about 6.66 GiB Docker memory and 6,987,968 KiB allocatable node memory;
+- `vm.max_map_count=262144`, below the required `1048576`;
+- about 15.43 GiB free on the workspace drive, below the 20 GiB hard preflight
+  minimum and the recommended 25 GiB working margin;
+- Helm and Terraform absent from the host `PATH`; pinned containers are used
+  only for static validation.
+
+After correcting those prerequisites, the local gates are:
+
+1. install platform prerequisites and prove NetworkPolicy enforcement;
+2. build/load all four images and record exact containerd digests;
+3. create the ignored Kubernetes Secret without printing values;
+4. deploy every component without silently disabling any service;
+5. pass the 20-document flow through Kafka, Apicurio, Flink, PostgreSQL,
+   Elasticsearch, Neo4j, MiniLM/pgvector, Redis, API, and frontend;
+6. pass worker, Flink, and stateful restart/recovery checks without duplicate
+   canonical records or lost durable data;
+7. retain at least 15 minutes of working-set, restart, OOM, lag, DLQ,
+   checkpoint, persistence, count, digest, and model-revision evidence.
+
+The EKS gates are entirely unexecuted: provide the required operator/network/
+expiry/owner/run/notification and optional DNS inputs; review each saved plan;
+explicitly approve AWS changes, image pushes, and Secret upload; confirm the
+Budget subscription; execute the demo; export evidence; and destroy in
+`platform -> foundation -> bootstrap` order with an empty residual inventory.
+No AWS provisioning or billable action has occurred.
+
 ## Later platform work
 
-### B7 — Terraform and GitOps
+### B7 — Terraform and deployment automation
 
-- define a short-lived, cost-bounded AWS environment;
-- add image build/publish and infrastructure validation in CI;
-- use versioned deployment configuration and explicit promotion/rollback;
-- preserve secret boundaries and record immutable release identities.
+- execute and retain plan/apply/destroy evidence for the implemented
+  short-lived, cost-bounded AWS environment;
+- add the existing image, Helm, Kubernetes-schema, and Terraform validation
+  gates to CI;
+- retain explicit plan review, secret boundaries, and immutable release
+  identities;
+- evaluate GitOps only as a later production-platform decision; it is not a
+  B6 demo requirement and is not currently implemented.
 
 ### B8 — Observability and operations
 
@@ -130,12 +211,12 @@ sequence. B6 remains unqualified until that evidence is retained.
 
 ### B9 — Ephemeral AWS demonstration
 
-- deploy only components that have corresponding repository artifacts and
-  acceptance evidence;
+- execute the implemented one-node EKS demo only after reviewing all plans and
+  registering the teardown deadline;
 - record one end-to-end investigation and measured workload;
-- export screenshots, logs, dashboards, image/deployment identities, and cost
-  evidence;
-- destroy the environment and verify that billable resources are gone.
+- export screenshots, sanitized logs, resource measurements,
+  image/deployment identities, and cost evidence;
+- destroy the environment and retain zero-residual-resource evidence.
 
 ## Engineering backlog
 

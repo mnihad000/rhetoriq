@@ -54,6 +54,56 @@ CUDA, NVIDIA device plugins, and GPU nodes are not part of either B6 profile.
 Platform controller images are also pinned by digest; EKS-managed add-on
 versions must be recorded from the reviewed foundation plan.
 
+## Progress record
+
+As of the latest repository verification, implementation is complete through
+the non-mutating boundary. Nothing in this section is runtime acceptance.
+
+Completed and verified locally:
+
+- migration `apply`/`verify` separation, read-only schema verification, and
+  advisory-lock behavior;
+- sanitized `/health/ready`, check-only topic/schema and B5 initialization,
+  durable worker heartbeats, probe commands, interruptible polling, and
+  graceful shutdown;
+- the full chart, both profiles, PKI, policies, storage, ingress, smoke,
+  evidence, recovery, and teardown artifacts;
+- three isolated Terraform states and guarded stage/application/smoke/teardown
+  scripts;
+- exact connector-source commit and archive-checksum verification in the Flink
+  image build;
+- 368 backend tests passed with 27 environment-dependent skips, 8 focused B6
+  contract tests passed, and 27 frontend tests plus the production build
+  passed;
+- both Helm profiles linted and rendered (61 kind and 58 EKS resources), their
+  built-in Kubernetes objects passed strict schema validation, all B6
+  PowerShell scripts parsed, Compose rendered from the example environment,
+  and all Terraform states validated without a backend or AWS credentials;
+- the final Flink runtime passed non-root UID 9999, Python/PyFlink import,
+  required connector/schema JAR, and no-runtime-compiler checks.
+
+Not performed:
+
+- no Kubernetes platform release, application release, Secret upload, smoke,
+  recovery drill, persistence drill, or evidence capture;
+- no AWS identity/provider call, Terraform account plan, apply, image push,
+  DNS change, Secret upload, billable resource, or destroy;
+- no formal B3-B5, B5 10,000-document, or 100,000-documents/day qualification.
+
+Last recorded local prerequisites:
+
+| Check | Recorded state | Required action |
+| --- | --- | --- |
+| kind context/node | `kind-rhetoriq-b6`, Kubernetes v1.37.0, Ready | Preserve the exact context check. |
+| Docker/node memory | about 6.66 GiB / 6,987,968 KiB allocatable | Treat the full smoke as measured and stop on Pending/OOM. |
+| `vm.max_map_count` | `262144` | Raise deliberately to `1048576` before deployment. |
+| Workspace free disk | about 15.43 GiB | Free at least 20 GiB; 25 GiB is recommended. |
+| Host Helm | not on `PATH` | Install Helm 3.19.0 for runtime scripts. |
+| Host Terraform | not on `PATH` | Install Terraform 1.13.3 before AWS planning. |
+
+The ignored root `.env` was not read, printed, or changed. Existing
+`compose.yml` and `docs/PRE_B6_GUIDE.md` changes were preserved.
+
 ## Local kind sequence
 
 The workstation currently has too little configured Docker memory for a

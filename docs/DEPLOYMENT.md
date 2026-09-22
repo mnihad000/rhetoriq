@@ -165,28 +165,48 @@ application images into the local cluster rather than relying on a mutable
 The implemented chart, guarded execution sequence, evidence gates, and EKS
 teardown are documented in [B6 Operations](B6_OPERATIONS.md).
 
+Implementation and static verification are complete, but no Kubernetes B6
+runtime has been accepted. Run the repository gate before any cluster change:
+
+```powershell
+./infra/b6/validate.ps1
+```
+
+At the last recorded check, the existing kind node was Ready, but
+`vm.max_map_count` was `262144` instead of `1048576`, the workspace drive had
+about 15.43 GiB free instead of the 20 GiB minimum, and host Helm was absent.
+The local full-stack run must stop until those prerequisites are corrected. Its
+6.66 GiB Docker-memory allocation makes the smoke an experiment: Pending pods
+or OOM kills are evidence to retain, not permission to remove components.
+
 ## Ephemeral AWS portfolio demonstration
 
-After B6 and the Terraform/GitOps roadmap work, a short-lived AWS EKS
-environment may demonstrate the production-style architecture. It is evidence
-of engineering capability, not a permanent production service or proof of
-continuous 100K-document operation.
+The repository now implements a short-lived AWS EKS environment for the
+production-style architecture. It has not been provisioned. A future execution
+is evidence of engineering integration only, not a permanent production
+service, formal B3-B5 qualification, B5 10,000-document qualification, or proof
+of continuous 100K-document operation.
 
 The demonstration should use seeded or appropriately licensed data and record:
 
-- immutable images, manifests/charts, ConfigMaps, Secrets, resource settings,
-  probes, autoscaling, and deployment flow;
+- immutable images, manifests/charts, ConfigMaps, externally supplied Secrets,
+  resource settings, probes, and the guarded deployment flow;
 - one end-to-end investigation plus Kafka/Flink, persistence, search, graph,
   and observability evidence for the components actually deployed;
 - screenshots, deployment logs, measured workload results, and teardown proof.
 
-Before provisioning, use a dedicated account or isolated Terraform workspace,
-set a low AWS Budget alert, restrict regions and instance sizes, tag resources
-with `project=rhetoriq`, `environment=portfolio-demo`, and an expiry timestamp,
-and avoid NAT gateways or managed services unless the demonstration requires
-them.
+Before provisioning, review the three isolated Terraform states and saved
+plans, verify the intended AWS identity, register the eight-hour Windows
+teardown task, confirm the $25 Budget notification, restrict endpoint access to
+the supplied CIDRs, and apply the required project/environment/owner/run/
+commit/expiry tags. The implemented profile uses one on-demand x86
+`m7i.2xlarge`, two public subnets, no NAT Gateway, encrypted gp3 volumes,
+immutable ECR repositories, and no managed application databases.
 
-After recording evidence, run `terraform destroy` from the same workspace and
-confirm removal of the EKS cluster, node groups, load balancers, volumes, public
-IPs, NAT gateways, and managed databases. Review Cost Explorer and active
-resources. The affordable public demo remains a separate deployment.
+After recording evidence, use the guarded teardown from the same states. It
+exports evidence, requests a final Flink savepoint, stops consumers, destroys
+platform resources, deletes ECR image manifests, destroys foundation
+resources, audits AWS for residual resources, and destroys the bootstrap state
+bucket only after that inventory is empty. A Budget alert and `expires-at` tag
+are advisory; neither performs cleanup. The affordable public demo remains a
+separate deployment.
