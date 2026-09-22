@@ -1,0 +1,196 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: postgres, namespace: {{ .Release.Namespace }}}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: postgres}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: postgres}}
+    spec:
+      serviceAccountName: rhetoriq
+      terminationGracePeriodSeconds: 60
+      securityContext: {fsGroup: 999, fsGroupChangePolicy: OnRootMismatch}
+      containers:
+        - name: postgres
+          image: {{ include "rhetoriq.image" .Values.images.postgres }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: [postgres, -c, ssl=on, -c, ssl_cert_file=/certs/tls.crt, -c, ssl_key_file=/certs/tls.key]
+          env:
+            - {name: POSTGRES_USER, valueFrom: {secretKeyRef: {name: {{ .Values.global.secretName }}, key: postgres-user}}}
+            - {name: POSTGRES_PASSWORD, valueFrom: {secretKeyRef: {name: {{ .Values.global.secretName }}, key: postgres-password}}}
+            - {name: POSTGRES_DB, valueFrom: {secretKeyRef: {name: {{ .Values.global.secretName }}, key: postgres-db}}}
+          ports: [{name: postgres, containerPort: 5432}]
+          readinessProbe: {exec: {command: [sh, -c, 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']}, periodSeconds: 5, timeoutSeconds: 3, failureThreshold: 12}
+          livenessProbe: {exec: {command: [sh, -c, 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']}, periodSeconds: 15, timeoutSeconds: 5, failureThreshold: 6}
+          resources: {{- toYaml .Values.resources.postgres | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, seccompProfile: {type: RuntimeDefault}}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: tls, mountPath: /certs, readOnly: true}
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: postgres}}
+        - name: tls
+          secret: {secretName: postgres-tls, defaultMode: 0440}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: kafka, namespace: {{ .Release.Namespace }}}
+spec:
+  serviceName: kafka-headless
+  replicas: 1
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: kafka}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: kafka}}
+    spec:
+      serviceAccountName: rhetoriq
+      terminationGracePeriodSeconds: 90
+      containers:
+        - name: kafka
+          image: {{ include "rhetoriq.image" .Values.images.kafka }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - {name: KAFKA_NODE_ID, value: "1"}
+            - {name: KAFKA_PROCESS_ROLES, value: "broker,controller"}
+            - {name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"}
+            - {name: KAFKA_LISTENERS, value: 'PLAINTEXT://:19092,CONTROLLER://:29093'}
+            - {name: KAFKA_ADVERTISED_LISTENERS, value: 'PLAINTEXT://kafka:19092'}
+            - {name: KAFKA_INTER_BROKER_LISTENER_NAME, value: PLAINTEXT}
+            - {name: KAFKA_CONTROLLER_LISTENER_NAMES, value: CONTROLLER}
+            - {name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: '1@kafka-0.kafka-headless:29093'}
+            - {name: CLUSTER_ID, value: 4L6g3nShT-eMCtK--X86sw}
+            - {name: KAFKA_LOG_DIRS, value: /var/lib/kafka/data}
+            - {name: KAFKA_HEAP_OPTS, value: -Xms256m -Xmx384m}
+            - {name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS, value: "0"}
+          ports: [{name: broker, containerPort: 19092}, {name: controller, containerPort: 29093}]
+          startupProbe: {exec: {command: [sh, -c, '/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list >/dev/null']}, periodSeconds: 5, failureThreshold: 30}
+          readinessProbe: {exec: {command: [sh, -c, '/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list >/dev/null']}, periodSeconds: 10, failureThreshold: 6}
+          resources: {{- toYaml .Values.resources.kafka | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, seccompProfile: {type: RuntimeDefault}}
+          volumeMounts: [{name: data, mountPath: /var/lib/kafka/data}]
+      volumes: [{name: data, persistentVolumeClaim: {claimName: kafka}}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: elasticsearch, namespace: {{ .Release.Namespace }}}
+spec:
+  serviceName: elasticsearch
+  replicas: 1
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: elasticsearch}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: elasticsearch}}
+    spec:
+      serviceAccountName: rhetoriq
+      terminationGracePeriodSeconds: 90
+      securityContext: {fsGroup: 1000, fsGroupChangePolicy: OnRootMismatch}
+      containers:
+        - name: elasticsearch
+          image: {{ include "rhetoriq.image" .Values.images.elasticsearch }}
+          env:
+            - {name: discovery.type, value: single-node}
+            - {name: cluster.name, value: rhetoriq-b6}
+            - {name: ELASTIC_PASSWORD, valueFrom: {secretKeyRef: {name: {{ .Values.global.secretName }}, key: elasticsearch-password}}}
+            - {name: ES_JAVA_OPTS, value: {{ if eq .Values.global.releaseIdentity "kind" }}-Xms512m -Xmx512m{{ else }}-Xms1g -Xmx1g{{ end }}}
+            - {name: xpack.security.enabled, value: "true"}
+            - {name: xpack.security.http.ssl.enabled, value: "true"}
+            - {name: xpack.security.http.ssl.key, value: certs/tls.key}
+            - {name: xpack.security.http.ssl.certificate, value: certs/tls.crt}
+            - {name: xpack.security.transport.ssl.enabled, value: "true"}
+            - {name: xpack.security.transport.ssl.verification_mode, value: certificate}
+            - {name: xpack.security.transport.ssl.key, value: certs/tls.key}
+            - {name: xpack.security.transport.ssl.certificate, value: certs/tls.crt}
+            - {name: xpack.security.transport.ssl.certificate_authorities, value: ca/ca.crt}
+          ports: [{name: https, containerPort: 9200}, {name: transport, containerPort: 9300}]
+          startupProbe: {exec: {command: [sh, -c, 'curl -fsS --cacert /usr/share/elasticsearch/config/ca/ca.crt -u "elastic:$ELASTIC_PASSWORD" https://localhost:9200/_cluster/health >/dev/null']}, periodSeconds: 10, failureThreshold: 36}
+          readinessProbe: {exec: {command: [sh, -c, 'curl -fsS --cacert /usr/share/elasticsearch/config/ca/ca.crt -u "elastic:$ELASTIC_PASSWORD" https://localhost:9200/_cluster/health >/dev/null']}, periodSeconds: 10, failureThreshold: 6}
+          resources: {{- toYaml .Values.resources.elasticsearch | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, runAsNonRoot: true, runAsUser: 1000, seccompProfile: {type: RuntimeDefault}}
+          volumeMounts:
+            - {name: data, mountPath: /usr/share/elasticsearch/data}
+            - {name: tls, mountPath: /usr/share/elasticsearch/config/certs, readOnly: true}
+            - {name: ca, mountPath: /usr/share/elasticsearch/config/ca, readOnly: true}
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: elasticsearch}}
+        - {name: tls, secret: {secretName: elasticsearch-tls, defaultMode: 0440}}
+        - {name: ca, configMap: {name: rhetoriq-internal-ca}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: neo4j, namespace: {{ .Release.Namespace }}}
+spec:
+  serviceName: neo4j
+  replicas: 1
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: neo4j}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: neo4j}}
+    spec:
+      serviceAccountName: rhetoriq
+      terminationGracePeriodSeconds: 90
+      securityContext: {fsGroup: 7474, fsGroupChangePolicy: OnRootMismatch}
+      containers:
+        - name: neo4j
+          image: {{ include "rhetoriq.image" .Values.images.neo4j }}
+          env:
+            - name: NEO4J_AUTH
+              valueFrom: {secretKeyRef: {name: {{ .Values.global.secretName }}, key: neo4j-auth}}
+            - {name: B5_NEO4J_PASSWORD, valueFrom: {secretKeyRef: {name: {{ .Values.global.secretName }}, key: neo4j-password}}}
+            - {name: NEO4J_server_memory_heap_initial__size, value: {{ if eq .Values.global.releaseIdentity "kind" }}384m{{ else }}768m{{ end }}}
+            - {name: NEO4J_server_memory_heap_max__size, value: {{ if eq .Values.global.releaseIdentity "kind" }}384m{{ else }}768m{{ end }}}
+            - {name: NEO4J_server_memory_pagecache_size, value: {{ if eq .Values.global.releaseIdentity "kind" }}256m{{ else }}768m{{ end }}}
+            - {name: NEO4J_server_bolt_tls__level, value: REQUIRED}
+            - {name: NEO4J_server_http_enabled, value: "false"}
+            - {name: NEO4J_server_https_enabled, value: "false"}
+            - {name: NEO4J_dbms_ssl_policy_bolt_enabled, value: "true"}
+            - {name: NEO4J_dbms_ssl_policy_bolt_base__directory, value: /certificates/bolt}
+            - {name: NEO4J_dbms_ssl_policy_bolt_private__key, value: tls.key}
+            - {name: NEO4J_dbms_ssl_policy_bolt_public__certificate, value: tls.crt}
+            - {name: NEO4J_dbms_ssl_policy_bolt_client__auth, value: NONE}
+          ports: [{name: bolt, containerPort: 7687}]
+          startupProbe: {exec: {command: [sh, -c, 'cypher-shell -a bolt+ssc://localhost:7687 -u neo4j -p "$B5_NEO4J_PASSWORD" "RETURN 1" >/dev/null']}, periodSeconds: 10, failureThreshold: 36}
+          readinessProbe: {exec: {command: [sh, -c, 'cypher-shell -a bolt+ssc://localhost:7687 -u neo4j -p "$B5_NEO4J_PASSWORD" "RETURN 1" >/dev/null']}, periodSeconds: 10, failureThreshold: 6}
+          resources: {{- toYaml .Values.resources.neo4j | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, seccompProfile: {type: RuntimeDefault}}
+          volumeMounts: [{name: data, mountPath: /data}, {name: tls, mountPath: /certificates/bolt, readOnly: true}]
+      volumes: [{name: data, persistentVolumeClaim: {claimName: neo4j}}, {name: tls, secret: {secretName: neo4j-tls, defaultMode: 0440}}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: flink-jobmanager, namespace: {{ .Release.Namespace }}}
+spec:
+  serviceName: flink-jobmanager
+  replicas: 1
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: flink-jobmanager}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: flink-jobmanager}}
+    spec:
+      serviceAccountName: rhetoriq
+      terminationGracePeriodSeconds: 120
+      initContainers:
+        - name: wait-topics
+          image: {{ include "rhetoriq.image" .Values.images.backend }}
+          command: [sh, -c, 'until python -m events.topics --check; do sleep 5; done']
+          env: {{- include "rhetoriq.appEnv" . | nindent 12 }}
+          volumeMounts: {{- include "rhetoriq.appVolumeMounts" . | nindent 12 }}
+      containers:
+        - name: jobmanager
+          image: {{ include "rhetoriq.image" .Values.images.flink }}
+          args: [standalone-job, --job-classname, org.apache.flink.client.python.PythonDriver, --pyModule, flink.job, --pyFiles, /opt/flink/usrlib/backend]
+          env:
+            - {name: KAFKA_BOOTSTRAP_SERVERS, value: kafka:19092}
+            - {name: KAFKA_SCHEMA_REGISTRY_URL, value: http://apicurio:8080/apis/ccompat/v7}
+            - {name: PYTHONPATH, value: /opt/flink/usrlib/backend}
+            - {name: FLINK_PROPERTIES, valueFrom: {configMapKeyRef: {name: flink-config, key: flink-properties}}}
+          ports: [{name: rest, containerPort: 8081}, {name: rpc, containerPort: 6123}]
+          startupProbe: {httpGet: {path: /overview, port: rest}, periodSeconds: 10, failureThreshold: 30}
+          readinessProbe: {httpGet: {path: /overview, port: rest}, periodSeconds: 10, failureThreshold: 6}
+          resources: {{- toYaml .Values.resources.flinkJobmanager | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+          volumeMounts: [{name: checkpoints, mountPath: /opt/flink/checkpoints}, {name: savepoints, mountPath: /opt/flink/savepoints}]
+      volumes:
+        - {name: checkpoints, persistentVolumeClaim: {claimName: flink-checkpoints}}
+        - {name: savepoints, persistentVolumeClaim: {claimName: flink-savepoints}}
+        - {name: internal-ca, configMap: {name: rhetoriq-internal-ca}}
+        - {name: app-tmp, emptyDir: {sizeLimit: 128Mi}}

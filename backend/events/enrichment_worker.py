@@ -12,6 +12,8 @@ import hashlib
 import json
 import os
 import re
+import signal
+import threading
 import time
 from typing import Callable, Any
 from uuid import uuid4
@@ -387,10 +389,14 @@ def main(argv: list[str] | None = None) -> None:
                    "enable.auto.commit": False, "isolation.level": "read_committed", "auto.offset.reset": "earliest"})
     consumer = Consumer(config)
     worker = EnrichmentWorker(service, budget=ledger)
+    stop = threading.Event()
+    if threading.current_thread() is threading.main_thread():
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(signum, lambda *_: stop.set())
     worker.run_forever(consumer, KafkaEventPublisher(SchemaRegistry(), settings=settings), SchemaRegistry(),
                        topic=ENRICHMENT_REQUESTED_TOPIC,
                        subscription_topic=physical_topic(ENRICHMENT_REQUESTED_TOPIC, settings),
-                       output_topic="documents.enriched.v1")
+                       output_topic="documents.enriched.v1", stop=stop.is_set)
 
 
 if __name__ == "__main__":

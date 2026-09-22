@@ -30,8 +30,9 @@ The repository contains:
 
 Actual B3–B5 runtime qualification remains separate from implementation.
 Feature flags keep Flink-primary trending and B5 retrieval disabled until their
-gates pass. Kubernetes, Terraform/GitOps, and production observability are not
-yet implemented.
+gates pass. B6 Helm and ephemeral-EKS Terraform artifacts are implemented, but
+no kind/EKS runtime evidence has been recorded. GitOps and production
+observability are not implemented.
 
 ## Milestone status
 
@@ -47,8 +48,8 @@ yet implemented.
 | B3 Kafka contracts | Implemented | Contracts, registry, outbox, consumers, DLQs, replay, and health exist; actual delivery/recovery evidence remains. |
 | B4 Flink signals | Implemented | Flink topology, enrichment artifacts, event-time windows, projections, and product fallback exist; runtime recovery/load/live-canary gates remain. |
 | B5 Recoverable projections | Implemented | Immutable authority, ES/Neo4j/MiniLM projections, cache, product UI, drift/repair/rebuild/cutover tooling exist; actual-stack acceptance remains. |
-| B6 Local Kubernetes | Next | Translate the accepted Compose topology into a local cluster and reproduce its evidence. |
-| B7 Terraform and GitOps | Planned | Provision the ephemeral AWS environment and reconcile deployments from versioned configuration. |
+| B6 Local Kubernetes | Implemented, unqualified | Full-topology Helm profiles, deployment contracts, PKI, policies, storage, smoke/evidence Jobs, and guarded scripts exist; kind runtime evidence remains open. |
+| B7 Terraform and GitOps | Partially implemented | Three-state ephemeral EKS Terraform and guarded plan/apply/teardown exist; no cloud run or GitOps reconciler is claimed. |
 | B8 Observability | Planned | Prometheus/OpenTelemetry metrics, Grafana dashboards, alerts, and operational objectives. |
 | B9 Managed-cloud demonstration | Planned | Short-lived AWS portfolio demonstration with measured evidence and verified teardown. |
 
@@ -86,12 +87,12 @@ B5 remains unqualified until the complete disposable-stack scenario matrix,
 and bounded live canary pass. See [Testing](TESTING.md) and
 [Operations](OPERATIONS.md).
 
-## Next: B6 local Kubernetes
+## B6 local Kubernetes
 
 The B6 entry condition is accepted B3–B5 behavior under Compose. The current
 workstation and sequence are recorded in [Pre-B6](PRE_B6_GUIDE.md).
 
-B6 must add:
+B6 implementation adds:
 
 - namespaces, Services, ConfigMaps, Secrets, workloads, initialization Jobs,
   persistent volumes, and ingress;
@@ -105,6 +106,8 @@ B6 must add:
 Kubernetes must not be used to hide an unqualified underlying application
 topology. The full B5 load gate requires a higher-memory environment than the
 current workstation; reduced local smoke tests do not replace that evidence.
+See [B6 Operations](B6_OPERATIONS.md) for the exact blocked-by-default runtime
+sequence. B6 remains unqualified until that evidence is retained.
 
 ## Later platform work
 

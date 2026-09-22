@@ -1,0 +1,5 @@
+bucket       = "replace-with-bootstrap-output"
+key          = "platform/terraform.tfstate"
+region       = "us-east-2"
+encrypt      = true
+use_lockfile = true

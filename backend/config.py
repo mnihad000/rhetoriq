@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     # Investigation runtime
     DEPLOYMENT_ENV: str = "development"
     DATABASE_URL: str = ""
+    # Compose keeps the historical auto-apply behavior. Kubernetes sets
+    # verify on every long-running process and reserves apply for its Job.
+    DATABASE_MIGRATION_MODE: str = "auto"
     INVESTIGATION_DB_PATH: str = "investigations.sqlite3"
     # SSE resources are bounded per API process; database reads are shared per run.
     RESEARCH_STREAM_WORKERS: int = 4
@@ -191,6 +194,8 @@ class Settings(BaseSettings):
     def resolve_repo_relative_paths(self) -> "Settings":
         if self.DEPLOYMENT_ENV.lower() == "production" and not self.DATABASE_URL:
             raise ValueError("DATABASE_URL is required when DEPLOYMENT_ENV=production")
+        if self.DATABASE_MIGRATION_MODE not in {"auto", "apply", "verify"}:
+            raise ValueError("DATABASE_MIGRATION_MODE must be auto, apply, or verify")
         if self.REQUEST_RATE_LIMIT_PER_MINUTE < 0:
             raise ValueError("REQUEST_RATE_LIMIT_PER_MINUTE cannot be negative")
         if self.B5_QUERY_TIMEOUT_SECONDS <= 0 or self.B5_CACHE_TTL_SECONDS < 1:

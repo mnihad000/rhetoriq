@@ -1,0 +1,14 @@
+region                 = "us-east-2"
+run_id                 = "replace-run-id"
+owner                  = "replace-owner"
+commit                 = "replace-commit"
+expires_at             = "2099-01-01T00:00:00Z"
+operator_principal_arn = "arn:aws:iam::000000000000:role/replace-operator-role"
+operator_cidrs         = ["203.0.113.10/32"]
+ci_cidrs               = []
+notification_email     = "replace@example.invalid"
+kubernetes_version     = "1.36"
+node_instance_type     = "m7i.2xlarge"
+public_ingress_enabled = false
+hosted_zone_id         = ""
+subdomain              = ""

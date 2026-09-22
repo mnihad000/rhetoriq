@@ -10,6 +10,14 @@ __pycache__/
 .next/
 dist/
 build/
+.tmp-b6-tests/
+evidence/b6-runs/
+infra/b6/generated/
+infra/terraform/**/.terraform/
+infra/terraform/**/*.tfstate
+infra/terraform/**/*.tfstate.*
+infra/terraform/**/*.tfvars
+!infra/terraform/**/*.tfvars.example
 
 backend/.env
 backend/.venv/

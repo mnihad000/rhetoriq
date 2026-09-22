@@ -1,0 +1,7 @@
+apiVersion: v2
+name: rhetoriq
+description: Demo-scale full RhetoriQ architecture
+type: application
+version: 0.1.0
+appVersion: "b6"
+kubeVersion: ">=1.30.0-0"

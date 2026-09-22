@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["global", "images", "storage", "resources"],
+  "properties": {
+    "images": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["repository", "digest"],
+        "properties": {
+          "repository": {"type": "string", "minLength": 1},
+          "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+        }
+      }
+    },
+    "enrichment": {
+      "type": "object",
+      "properties": {"mode": {"enum": ["recorded", "live", "replay"]}}
+    }
+  }
+}

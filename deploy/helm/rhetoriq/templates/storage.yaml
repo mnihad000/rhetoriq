@@ -1,0 +1,13 @@
+{{- range $name, $size := dict "postgres" .Values.storage.postgres "kafka" .Values.storage.kafka "elasticsearch" .Values.storage.elasticsearch "neo4j" .Values.storage.neo4j "flink-checkpoints" .Values.storage.flinkCheckpoints "flink-savepoints" .Values.storage.flinkSavepoints "evidence" .Values.storage.evidence }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "rhetoriq.labels" $ | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ $.Values.global.storageClass }}
+  resources: {requests: {storage: {{ $size }}}}
+---
+{{- end }}

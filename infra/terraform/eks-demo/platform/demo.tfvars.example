@@ -1,0 +1,8 @@
+region                 = "us-east-2"
+state_bucket           = "replace-with-bootstrap-output"
+foundation_state_key   = "foundation/terraform.tfstate"
+public_ingress_enabled = false
+allowed_cidrs          = []
+cert_manager_version   = "v1.21.2"
+trust_manager_version  = "v0.24.0"
+load_balancer_controller_chart_version = "3.5.0"

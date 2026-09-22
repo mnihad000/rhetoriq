@@ -13,7 +13,10 @@ from typing import Callable
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 
-HEALTH_PATHS = frozenset({"/", "/health", "/health/embeddings", "/api/research/health"})
+HEALTH_PATHS = frozenset({
+    "/", "/health", "/health/ready", "/health/b5", "/health/embeddings",
+    "/api/research/health",
+})
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,53 @@
+global:
+  namespace: rhetoriq-demo
+  secretName: rhetoriq-secrets
+  imagePullPolicy: IfNotPresent
+  storageClass: standard
+  clusterDomain: cluster.local
+  releaseIdentity: development
+
+images:
+  backend: {repository: rhetoriq-backend, digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}
+  b5: {repository: rhetoriq-b5, digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}
+  flink: {repository: rhetoriq-flink, digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}
+  frontend: {repository: rhetoriq-frontend, digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}
+  postgres: {repository: pgvector/pgvector, digest: "sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f"}
+  kafka: {repository: apache/kafka, digest: "sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837"}
+  apicurio: {repository: quay.io/apicurio/apicurio-registry, digest: "sha256:30c34a50669a31d717ad0402c2a3b97041f44cdbf13604d6950a65d0370a82f9"}
+  elasticsearch: {repository: docker.elastic.co/elasticsearch/elasticsearch, digest: "sha256:82ac14f43fe701992e601f4cc81e1c0d7dbc5a2576d8cd736006452925df4026"}
+  neo4j: {repository: neo4j, digest: "sha256:eabfbb042bdaca2fd5e1950db1329b22c794eee80f0eacc4e7a729d44b2e863f"}
+  redis: {repository: redis, digest: "sha256:08ad0b1d280850169a790dba1393ff7a90aef951fc19632cf4d3ce4f78e679ba"}
+  searxng: {repository: docker.io/searxng/searxng, digest: "sha256:d0aaeb14880e6e92bde1518fcc7261e995783367d63d95203383607bef9c6516"}
+
+storage:
+  postgres: 2Gi
+  kafka: 2Gi
+  elasticsearch: 3Gi
+  neo4j: 2Gi
+  flinkCheckpoints: 1Gi
+  flinkSavepoints: 1Gi
+  evidence: 1Gi
+
+ingress:
+  enabled: false
+  className: nginx
+  host: rhetoriq.local
+  tlsSecretName: rhetoriq-public-tls
+  acmCertificateArn: ""
+  allowedCidrs: "127.0.0.1/32"
+  loadBalancerName: rhetoriq-demo
+  awsResourceTags: ""
+network:
+  ingressCidrs: ["127.0.0.1/32"]
+
+enrichment:
+  mode: recorded
+  requestBudget: "0"
+  spendBudgetMicros: "0"
+
+smoke:
+  enabled: false
+evidence:
+  enabled: false
+
+resources: {}

@@ -1,0 +1,33 @@
+global:
+  storageClass: gp3-encrypted
+  releaseIdentity: eks-demo
+storage:
+  postgres: 10Gi
+  kafka: 10Gi
+  elasticsearch: 20Gi
+  neo4j: 10Gi
+  flinkCheckpoints: 5Gi
+  flinkSavepoints: 5Gi
+  evidence: 2Gi
+ingress:
+  enabled: false
+  className: alb
+network:
+  ingressCidrs: []
+resources:
+  postgres: {requests: {cpu: 250m, memory: 384Mi}, limits: {cpu: "1", memory: 768Mi}}
+  kafka: {requests: {cpu: 500m, memory: 512Mi}, limits: {cpu: "2", memory: 1Gi}}
+  apicurio: {requests: {cpu: 250m, memory: 256Mi}, limits: {cpu: "1", memory: 512Mi}}
+  elasticsearch: {requests: {cpu: 500m, memory: 1536Mi}, limits: {cpu: "2", memory: 2560Mi}}
+  neo4j: {requests: {cpu: 500m, memory: 1536Mi}, limits: {cpu: "2", memory: 2560Mi}}
+  redis: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 500m, memory: 256Mi}}
+  searxng: {requests: {cpu: 250m, memory: 256Mi}, limits: {cpu: "1", memory: 512Mi}}
+  flinkJobmanager: {requests: {cpu: 250m, memory: 768Mi}, limits: {cpu: "1", memory: 1280Mi}}
+  flinkTaskmanager: {requests: {cpu: 500m, memory: 1536Mi}, limits: {cpu: "2", memory: 2560Mi}}
+  api: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 1Gi}}
+  minilm: {requests: {cpu: 250m, memory: 1Gi}, limits: {cpu: 1500m, memory: 1536Mi}}
+  heavyWorker: {requests: {cpu: 250m, memory: 384Mi}, limits: {cpu: "1", memory: 768Mi}}
+  worker: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 500m, memory: 256Mi}}
+  frontend: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 250m, memory: 128Mi}}
+enrichment:
+  mode: recorded

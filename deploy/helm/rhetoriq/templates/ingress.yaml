@@ -1,0 +1,69 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frontend
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    {{- if eq .Values.ingress.className "alb" }}
+    alb.ingress.kubernetes.io/group.name: rhetoriq
+    alb.ingress.kubernetes.io/load-balancer-name: {{ .Values.ingress.loadBalancerName | quote }}
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: {{ .Values.ingress.acmCertificateArn | quote }}
+    alb.ingress.kubernetes.io/inbound-cidrs: {{ .Values.ingress.allowedCidrs | quote }}
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    {{- if .Values.ingress.awsResourceTags }}
+    alb.ingress.kubernetes.io/tags: {{ .Values.ingress.awsResourceTags | quote }}
+    {{- end }}
+    {{- else }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if eq .Values.ingress.className "nginx" }}
+  tls: [{hosts: [{{ .Values.ingress.host | quote }}], secretName: {{ .Values.ingress.tlsSecretName }}}]
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: frontend, port: {number: 80}}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    {{- if eq .Values.ingress.className "alb" }}
+    alb.ingress.kubernetes.io/group.name: rhetoriq
+    alb.ingress.kubernetes.io/load-balancer-name: {{ .Values.ingress.loadBalancerName | quote }}
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: {{ .Values.ingress.acmCertificateArn | quote }}
+    alb.ingress.kubernetes.io/inbound-cidrs: {{ .Values.ingress.allowedCidrs | quote }}
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    {{- if .Values.ingress.awsResourceTags }}
+    alb.ingress.kubernetes.io/tags: {{ .Values.ingress.awsResourceTags | quote }}
+    {{- end }}
+    {{- else }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if eq .Values.ingress.className "nginx" }}
+  tls: [{hosts: [{{ .Values.ingress.host | quote }}], secretName: {{ .Values.ingress.tlsSecretName }}}]
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: {service: {name: api, port: {number: 8000}}}
+{{- end }}

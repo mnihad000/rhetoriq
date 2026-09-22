@@ -1,7 +1,16 @@
 Flink runtime: 2.3.0
-Kafka connector source: apache/flink-connector-kafka tag v4.0.1
+Kafka connector source: apache/flink-connector-kafka tag v4.0.1, resolved to
+commit 9e4bd3c04f57e5c2189b5d5ddae521518c52cffa
+Source archive SHA-256:
+029736e2a41f9c4ab3953e5acb7b9f51014caf6b77bc541f68656ef23796ca5c
 Build: shaded flink-sql-connector-kafka module with -Dflink.version=2.3.0
+Upstream test compilation is disabled because the 4.0.1 test suite targets the
+Flink 2.0 test API; B6 requires cluster delivery/checkpoint/recovery evidence.
+Source compatibility patch: replace removed DataTypeUtils.stripRowPrefix with a
+connector-local KafkaDataTypeUtils implementation derived from the last Apache
+Flink implementation. The helper retains row conversion and child data types
+without adding a class to Flink's own package.
 Candidate artifact: b4-kafka-4.0.1-flink-2.3.0.jar
 Apache Flink 2.3 documentation: no Kafka connector release is published yet.
-Qualification: candidate image build and actual delivery/checkpoint/recovery gates pending.
+Qualification: candidate image build is verified; actual delivery/checkpoint/recovery gates remain pending.
 Production cutover remains disabled until compatibility is demonstrated.

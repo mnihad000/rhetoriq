@@ -230,6 +230,20 @@ class EventStore:
             "oldest_pending_at": oldest,
         }
 
+    def heartbeat(self, worker_id: str, role: str, state: str = "ready", detail: str | None = None) -> None:
+        """Record deployment probe state without storing exception text or secrets."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO runtime_worker_health(worker_id, role, state, heartbeat_at, detail)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(worker_id) DO UPDATE SET
+                    role=excluded.role, state=excluded.state,
+                    heartbeat_at=excluded.heartbeat_at, detail=excluded.detail
+                """,
+                (worker_id, role, state, _now().isoformat(), detail[:120] if detail else None),
+            )
+
     def create_replay_job(
         self,
         replay_job_id: str,
@@ -307,5 +321,11 @@ class EventStore:
                     requested_at TEXT NOT NULL, completed_at TEXT, processed_count INTEGER NOT NULL DEFAULT 0,
                     skipped_count INTEGER NOT NULL DEFAULT 0, error TEXT
                 );
+                CREATE TABLE IF NOT EXISTS runtime_worker_health (
+                    worker_id TEXT PRIMARY KEY, role TEXT NOT NULL, state TEXT NOT NULL,
+                    heartbeat_at TEXT NOT NULL, detail TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_runtime_worker_health_role
+                    ON runtime_worker_health(role, heartbeat_at);
                 """
             )

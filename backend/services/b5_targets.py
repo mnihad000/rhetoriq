@@ -156,6 +156,32 @@ class ElasticsearchTarget:
         self._initialized.add(_safe_generation(generation))
         return {"status": "ready", "index": index, "created": response.status_code in {200, 201}}
 
+    def initialized(self, generation: str) -> bool:
+        """Verify the generation index and its critical mapping without changing it."""
+        if not self.base_url:
+            return False
+        index = self._index(generation)
+        response = self._request("GET", f"/{index}/_mapping")
+        if response.status_code == 404:
+            return False
+        response.raise_for_status()
+        mapping = self._json(response).get(index, {}).get("mappings", {})
+        properties = mapping.get("properties", {})
+        required = {
+            "document_id": {"type": "keyword"},
+            "generation": {"type": "keyword"},
+            "revision": {"type": "long"},
+            "semantic_hash": {"type": "keyword"},
+            "eligible": {"type": "boolean"},
+            "mentions": {"type": "nested"},
+            "text": {"type": "text"},
+            "graph_json": {"type": "object", "enabled": False},
+        }
+        return mapping.get("dynamic") == "strict" and all(
+            all(properties.get(name, {}).get(key) == value for key, value in expected.items())
+            for name, expected in required.items()
+        )
+
     def _existing(self, index: str, document_id: str) -> dict[str, Any] | None:
         response = self._request("GET", f"/{index}/_doc/{_safe_id(document_id)}")
         if response.status_code == 404:
@@ -441,6 +467,8 @@ _NEO_INIT_QUERIES = (
     "CREATE CONSTRAINT rhetoriq_graph_node IF NOT EXISTS FOR (n:RhetoriqGraphNode) REQUIRE n.projection_key IS UNIQUE",
     "CREATE INDEX rhetoriq_graph_node_scope IF NOT EXISTS FOR (n:RhetoriqGraphNode) ON (n.domain_id, n.generation)",
 )
+_NEO_REQUIRED_CONSTRAINTS = {"rhetoriq_projection_lock", "rhetoriq_graph_node"}
+_NEO_REQUIRED_INDEXES = {"rhetoriq_graph_node_scope"}
 _NEO_LOCK_QUERY = """
 MERGE (lock:RhetoriqProjectionLock {domain_id:$domain_id, generation:$generation})
 ON CREATE SET lock.revision=-1, lock.semantic_hash='', lock.eligible=false
@@ -576,6 +604,24 @@ class Neo4jTarget:
         finally:
             session.close()
         return {"status": "ready", "generation": _safe_generation(generation)}
+
+    def initialized(self, _generation: str) -> bool:
+        """Verify required Neo4j schema objects without creating them."""
+        if not self.url and self._driver is None:
+            return False
+        session = self._get_driver().session()
+        try:
+            constraints = {
+                str(self._record_value(record, "name"))
+                for record in session.run("SHOW CONSTRAINTS YIELD name RETURN name")
+            }
+            indexes = {
+                str(self._record_value(record, "name"))
+                for record in session.run("SHOW INDEXES YIELD name RETURN name")
+            }
+            return _NEO_REQUIRED_CONSTRAINTS <= constraints and _NEO_REQUIRED_INDEXES <= indexes
+        finally:
+            session.close()
 
     def apply(self, snapshot: dict[str, Any], generation: str, document_snapshots: list[dict[str, Any]] | None = None, *, _repair=False) -> dict[str, Any]:
         if snapshot.get("kind") == "investigation":

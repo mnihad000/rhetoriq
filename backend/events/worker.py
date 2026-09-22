@@ -8,6 +8,7 @@ import random
 import re
 import time
 import signal
+import socket
 import threading
 from typing import Any
 
@@ -100,6 +101,7 @@ class KafkaEventWorker:
         settings = get_settings()
         self.settings = settings
         self.role = role or settings.KAFKA_WORKER_ROLE
+        self.worker_id = f"{self.role}-{socket.gethostname()}"
         self._stop = threading.Event()
         self.registry = SchemaRegistry()
         self.publisher = KafkaEventPublisher(self.registry)
@@ -130,16 +132,22 @@ class KafkaEventWorker:
         try:
             self._run_loop()
         finally:
+            self.store.heartbeat(self.worker_id, self.role, "stopped")
             self.consumer.close()
             close = getattr(self.processor.handlers, "close", None)
             if close:
                 close()
 
     def _run_loop(self) -> None:
+        next_heartbeat_at = 0.0
         while not self._stop.is_set():
-            heartbeat = getattr(self.processor.handlers, "heartbeat", None)
-            if heartbeat:
-                heartbeat()
+            now = time.monotonic()
+            if now >= next_heartbeat_at:
+                self.store.heartbeat(self.worker_id, self.role)
+                heartbeat = getattr(self.processor.handlers, "heartbeat", None)
+                if heartbeat:
+                    heartbeat()
+                next_heartbeat_at = now + 15.0
             message = self.consumer.poll(1.0)
             if message is None:
                 continue
@@ -170,7 +178,8 @@ class KafkaEventWorker:
                         break
                     if attempt < self.settings.KAFKA_RETRY_MAX_ATTEMPTS:
                         delay = self.settings.KAFKA_RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
-                        time.sleep(delay * random.uniform(0.75, 1.25))
+                        if self._stop.wait(delay * random.uniform(0.75, 1.25)):
+                            return
             if last_error is not None:
                 self._dead_letter(message, logical, decoded, last_error, attempt_count=attempts)
                 self.consumer.commit(message=message, asynchronous=False)

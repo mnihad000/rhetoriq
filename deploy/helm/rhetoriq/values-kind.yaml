@@ -1,0 +1,24 @@
+global:
+  storageClass: standard
+  releaseIdentity: kind
+ingress:
+  enabled: true
+  className: nginx
+  host: rhetoriq.local
+resources:
+  postgres: {requests: {cpu: 100m, memory: 192Mi}, limits: {cpu: 500m, memory: 384Mi}}
+  kafka: {requests: {cpu: 250m, memory: 384Mi}, limits: {cpu: 750m, memory: 640Mi}}
+  apicurio: {requests: {cpu: 100m, memory: 160Mi}, limits: {cpu: 500m, memory: 256Mi}}
+  elasticsearch: {requests: {cpu: 250m, memory: 640Mi}, limits: {cpu: "1", memory: 1Gi}}
+  neo4j: {requests: {cpu: 250m, memory: 640Mi}, limits: {cpu: "1", memory: 1Gi}}
+  redis: {requests: {cpu: 25m, memory: 64Mi}, limits: {cpu: 250m, memory: 128Mi}}
+  searxng: {requests: {cpu: 50m, memory: 96Mi}, limits: {cpu: 500m, memory: 192Mi}}
+  flinkJobmanager: {requests: {cpu: 100m, memory: 384Mi}, limits: {cpu: 500m, memory: 640Mi}}
+  flinkTaskmanager: {requests: {cpu: 250m, memory: 640Mi}, limits: {cpu: "1", memory: 1Gi}}
+  api: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
+  minilm: {requests: {cpu: 100m, memory: 640Mi}, limits: {cpu: "1", memory: 1Gi}}
+  heavyWorker: {requests: {cpu: 75m, memory: 160Mi}, limits: {cpu: 500m, memory: 256Mi}}
+  worker: {requests: {cpu: 25m, memory: 64Mi}, limits: {cpu: 250m, memory: 128Mi}}
+  frontend: {requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 100m, memory: 64Mi}}
+enrichment:
+  mode: recorded

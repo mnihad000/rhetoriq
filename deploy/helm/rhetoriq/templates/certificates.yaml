@@ -1,0 +1,75 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: rhetoriq-selfsigned
+  namespace: {{ .Release.Namespace }}
+spec: {selfSigned: {}}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: rhetoriq-internal-root
+  namespace: {{ .Release.Namespace }}
+spec:
+  isCA: true
+  commonName: RhetoriQ B6 Internal Root
+  secretName: rhetoriq-internal-root
+  duration: 720h
+  renewBefore: 168h
+  privateKey: {algorithm: RSA, size: 3072}
+  issuerRef: {name: rhetoriq-selfsigned, kind: Issuer}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: rhetoriq-internal-ca
+  namespace: {{ .Release.Namespace }}
+spec:
+  ca: {secretName: rhetoriq-internal-root}
+{{- range $service := list "postgres" "elasticsearch" "neo4j" "redis" }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $service }}-tls
+  namespace: {{ $.Release.Namespace }}
+spec:
+  secretName: {{ $service }}-tls
+  commonName: {{ $service }}
+  duration: 168h
+  renewBefore: 24h
+  privateKey: {algorithm: RSA, size: 2048}
+  usages: [server auth, client auth]
+  dnsNames:
+    - {{ $service }}
+    - {{ $service }}.{{ $.Release.Namespace }}
+    - {{ $service }}.{{ $.Release.Namespace }}.svc
+    - {{ $service }}.{{ $.Release.Namespace }}.svc.{{ $.Values.global.clusterDomain }}
+  issuerRef: {name: rhetoriq-internal-ca, kind: Issuer}
+{{- end }}
+{{- if and .Values.ingress.enabled (eq .Values.ingress.className "nginx") }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: rhetoriq-public-tls
+  namespace: {{ .Release.Namespace }}
+spec:
+  secretName: {{ .Values.ingress.tlsSecretName }}
+  dnsNames: [{{ .Values.ingress.host | quote }}]
+  duration: 168h
+  renewBefore: 24h
+  issuerRef: {name: rhetoriq-internal-ca, kind: Issuer}
+{{- end }}
+---
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: rhetoriq-internal-ca
+spec:
+  sources:
+    - secret: {name: rhetoriq-internal-root, key: tls.crt}
+  target:
+    configMap: {key: ca.crt}
+    namespaceSelector:
+      matchLabels: {rhetoriq.io/trust: "true"}

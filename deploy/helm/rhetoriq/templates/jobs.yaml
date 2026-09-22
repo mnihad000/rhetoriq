@@ -1,0 +1,160 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrations-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: migrations}
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: migrations}}
+    spec:
+      serviceAccountName: rhetoriq
+      restartPolicy: OnFailure
+      containers:
+        - name: migrations
+          image: {{ include "rhetoriq.image" .Values.images.b5 }}
+          command: [python, -m, migrations]
+          env:
+            {{- include "rhetoriq.appEnv" . | nindent 12 }}
+            - {name: DATABASE_MIGRATION_MODE, value: apply}
+          resources: {{- toYaml .Values.resources.worker | nindent 12 }}
+          securityContext: {{- include "rhetoriq.appSecurity" . | nindent 12 }}
+          volumeMounts: {{- include "rhetoriq.appVolumeMounts" . | nindent 12 }}
+      volumes: {{- include "rhetoriq.appVolumes" . | nindent 8 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: topics-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: topics}
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: topics}}
+    spec:
+      serviceAccountName: rhetoriq
+      restartPolicy: OnFailure
+      containers:
+        - name: topics
+          image: {{ include "rhetoriq.image" .Values.images.backend }}
+          command: [python, -m, events.topics]
+          env: {{- include "rhetoriq.appEnv" . | nindent 12 }}
+          resources: {{- toYaml .Values.resources.worker | nindent 12 }}
+          securityContext: {{- include "rhetoriq.appSecurity" . | nindent 12 }}
+          volumeMounts: {{- include "rhetoriq.appVolumeMounts" . | nindent 12 }}
+      volumes: {{- include "rhetoriq.appVolumes" . | nindent 8 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: b5-init-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: b5-init}
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: b5-init}}
+    spec:
+      serviceAccountName: rhetoriq
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-schema-topics
+          image: {{ include "rhetoriq.image" .Values.images.b5 }}
+          command: [sh, -c, 'until python -m migrations --check && python -m events.topics --check; do sleep 5; done']
+          env: {{- include "rhetoriq.appEnv" . | nindent 12 }}
+          volumeMounts: {{- include "rhetoriq.appVolumeMounts" . | nindent 12 }}
+      containers:
+        - name: b5-init
+          image: {{ include "rhetoriq.image" .Values.images.b5 }}
+          command: [python, -m, events.b5_init]
+          env: {{- include "rhetoriq.appEnv" . | nindent 12 }}
+          resources: {{- toYaml .Values.resources.worker | nindent 12 }}
+          securityContext: {{- include "rhetoriq.appSecurity" . | nindent 12 }}
+          volumeMounts: {{- include "rhetoriq.appVolumeMounts" . | nindent 12 }}
+      volumes: {{- include "rhetoriq.appVolumes" . | nindent 8 }}
+{{- if .Values.smoke.enabled }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: b6-smoke-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: b6-smoke}
+spec:
+  backoffLimit: 0
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: b6-smoke}}
+    spec:
+      serviceAccountName: rhetoriq
+      restartPolicy: Never
+      containers:
+        - name: smoke
+          image: {{ include "rhetoriq.image" .Values.images.b5 }}
+          command: [python, -m, events.b5_acceptance]
+          args: [--mode, smoke, --disposable-stack, --kubernetes-demo, --output, /evidence/b6-smoke.json]
+          env:
+            {{- include "rhetoriq.appEnv" . | nindent 12 }}
+            - {name: B5_RUNTIME_TESTS, value: "true"}
+            - {name: B5_API_URL, value: http://api:8000}
+          resources: {{- toYaml .Values.resources.heavyWorker | nindent 12 }}
+          securityContext: {{- include "rhetoriq.appSecurity" . | nindent 12 }}
+          volumeMounts:
+            {{- include "rhetoriq.appVolumeMounts" . | nindent 12 }}
+            - {name: evidence, mountPath: /evidence}
+      volumes:
+        {{- include "rhetoriq.appVolumes" . | nindent 8 }}
+        - {name: evidence, persistentVolumeClaim: {claimName: evidence}}
+{{- end }}
+{{- if .Values.evidence.enabled }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: b6-evidence-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: b6-evidence}
+spec:
+  backoffLimit: 0
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: b6-evidence}}
+    spec:
+      serviceAccountName: rhetoriq
+      restartPolicy: Never
+      initContainers:
+        - name: wait-api
+          image: {{ include "rhetoriq.image" .Values.images.b5 }}
+          command: [python, -c]
+          args:
+            - |
+              import sys, time, urllib.request
+              for _ in range(120):
+                  try:
+                      urllib.request.urlopen("http://api:8000/health/ready", timeout=3).read()
+                      sys.exit(0)
+                  except Exception:
+                      time.sleep(5)
+              sys.exit(1)
+          env: {{- include "rhetoriq.appEnv" . | nindent 12 }}
+          resources: {{- toYaml .Values.resources.worker | nindent 12 }}
+          securityContext: {{- include "rhetoriq.appSecurity" . | nindent 12 }}
+          volumeMounts: {{- include "rhetoriq.appVolumeMounts" . | nindent 12 }}
+      containers:
+        - name: evidence
+          image: {{ include "rhetoriq.image" .Values.images.b5 }}
+          command: [python, -m, events.b6_evidence]
+          args: [--api-url, http://api:8000, --output, /evidence/b6-evidence.json]
+          env: {{- include "rhetoriq.appEnv" . | nindent 12 }}
+          resources: {{- toYaml .Values.resources.worker | nindent 12 }}
+          securityContext: {{- include "rhetoriq.appSecurity" . | nindent 12 }}
+          volumeMounts:
+            {{- include "rhetoriq.appVolumeMounts" . | nindent 12 }}
+            - {name: evidence, mountPath: /evidence}
+      volumes:
+        {{- include "rhetoriq.appVolumes" . | nindent 8 }}
+        - {name: evidence, persistentVolumeClaim: {claimName: evidence}}
+{{- end }}

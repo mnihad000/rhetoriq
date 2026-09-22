@@ -69,6 +69,7 @@ services:
       dockerfile: infra/b5/Dockerfile
     profiles: [b5]
     restart: "no"
+    user: "0:0"
     command: [python, /opt/rhetoriq/tls_init.py]
     volumes:
       - b5-ca-private:/ca-private

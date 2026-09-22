@@ -1,0 +1,10 @@
+region            = "us-east-2"
+state_bucket_name = "replace-with-globally-unique-rhetoriq-state-bucket"
+tags = {
+  project     = "rhetoriq"
+  environment = "portfolio-demo"
+  owner       = "replace-owner"
+  run-id      = "replace-run-id"
+  commit      = "replace-commit"
+  expires-at  = "2099-01-01T00:00:00Z"
+}

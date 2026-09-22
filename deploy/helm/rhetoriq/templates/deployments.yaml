@@ -1,0 +1,282 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: apicurio, namespace: {{ .Release.Namespace }}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: apicurio}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: apicurio}}
+    spec:
+      serviceAccountName: rhetoriq
+      containers:
+        - name: apicurio
+          image: {{ include "rhetoriq.image" .Values.images.apicurio }}
+          ports: [{name: http, containerPort: 8080}, {name: management, containerPort: 9000}]
+          startupProbe: {httpGet: {path: /health/ready, port: management}, periodSeconds: 5, failureThreshold: 30}
+          readinessProbe: {httpGet: {path: /health/ready, port: management}, periodSeconds: 10, failureThreshold: 6}
+          livenessProbe: {httpGet: {path: /health/live, port: management}, periodSeconds: 20, failureThreshold: 6}
+          resources: {{- toYaml .Values.resources.apicurio | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, seccompProfile: {type: RuntimeDefault}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: redis, namespace: {{ .Release.Namespace }}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: redis}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: redis}}
+    spec:
+      serviceAccountName: rhetoriq
+      terminationGracePeriodSeconds: 60
+      securityContext: {fsGroup: 999, fsGroupChangePolicy: OnRootMismatch}
+      containers:
+        - name: redis
+          image: {{ include "rhetoriq.image" .Values.images.redis }}
+          command: [sh, -c]
+          args: ['exec redis-server --port 0 --tls-port 6379 --tls-cert-file /certs/tls.crt --tls-key-file /certs/tls.key --tls-ca-cert-file /ca/ca.crt --tls-auth-clients no --requirepass "$REDIS_PASSWORD" --maxmemory 128mb --maxmemory-policy allkeys-lru --save "" --appendonly no']
+          env: [{name: REDIS_PASSWORD, valueFrom: {secretKeyRef: {name: {{ .Values.global.secretName }}, key: redis-password}}}]
+          ports: [{name: tls, containerPort: 6379}]
+          readinessProbe: {exec: {command: [sh, -c, 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --tls --cacert /ca/ca.crt -h redis ping | grep -q PONG']}, periodSeconds: 10, failureThreshold: 6}
+          resources: {{- toYaml .Values.resources.redis | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, runAsNonRoot: true, runAsUser: 999, seccompProfile: {type: RuntimeDefault}}
+          volumeMounts: [{name: tls, mountPath: /certs, readOnly: true}, {name: ca, mountPath: /ca, readOnly: true}]
+      volumes: [{name: tls, secret: {secretName: redis-tls, defaultMode: 0440}}, {name: ca, configMap: {name: rhetoriq-internal-ca}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: searxng, namespace: {{ .Release.Namespace }}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: searxng}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: searxng}}
+    spec:
+      serviceAccountName: rhetoriq
+      containers:
+        - name: searxng
+          image: {{ include "rhetoriq.image" .Values.images.searxng }}
+          env:
+            - {name: SEARXNG_BASE_URL, value: http://searxng:8080/}
+            - {name: SEARXNG_SECRET, valueFrom: {secretKeyRef: {name: {{ .Values.global.secretName }}, key: searxng-secret}}}
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /, port: http}, periodSeconds: 10, failureThreshold: 6}
+          resources: {{- toYaml .Values.resources.searxng | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, readOnlyRootFilesystem: true, seccompProfile: {type: RuntimeDefault}}
+          volumeMounts: [{name: config, mountPath: /etc/searxng/settings.yml, subPath: settings.yml, readOnly: true}, {name: tmp, mountPath: /tmp}]
+      volumes: [{name: config, configMap: {name: searxng-config}}, {name: tmp, emptyDir: {sizeLimit: 64Mi}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: flink-taskmanager, namespace: {{ .Release.Namespace }}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: flink-taskmanager}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: flink-taskmanager}}
+    spec:
+      serviceAccountName: rhetoriq
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: taskmanager
+          image: {{ include "rhetoriq.image" .Values.images.flink }}
+          args: [taskmanager]
+          env:
+            - {name: KAFKA_BOOTSTRAP_SERVERS, value: kafka:19092}
+            - {name: KAFKA_SCHEMA_REGISTRY_URL, value: http://apicurio:8080/apis/ccompat/v7}
+            - {name: PYTHONPATH, value: /opt/flink/usrlib/backend}
+            - {name: FLINK_PROPERTIES, valueFrom: {configMapKeyRef: {name: flink-config, key: flink-properties}}}
+          readinessProbe: {exec: {command: [python3.12, -c, "import json,urllib.request; d=json.load(urllib.request.urlopen('http://flink-jobmanager:8081/taskmanagers',timeout=3)); assert len(d['taskmanagers']) == 1"]}, periodSeconds: 10, failureThreshold: 12}
+          resources: {{- toYaml .Values.resources.flinkTaskmanager | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+          volumeMounts: [{name: checkpoints, mountPath: /opt/flink/checkpoints}, {name: savepoints, mountPath: /opt/flink/savepoints}]
+      volumes: [{name: checkpoints, persistentVolumeClaim: {claimName: flink-checkpoints}}, {name: savepoints, persistentVolumeClaim: {claimName: flink-savepoints}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: api, namespace: {{ .Release.Namespace }}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: api}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: api}}
+    spec:
+      serviceAccountName: rhetoriq
+      terminationGracePeriodSeconds: 45
+      initContainers:
+        - name: wait-initialization
+          image: {{ include "rhetoriq.image" .Values.images.b5 }}
+          command: [sh, -c, 'until python -m migrations --check && python -m events.topics --check && python -m events.b5_init --check; do sleep 5; done']
+          env: {{- include "rhetoriq.appEnv" . | nindent 12 }}
+          volumeMounts: {{- include "rhetoriq.appVolumeMounts" . | nindent 12 }}
+      containers:
+        - name: api
+          image: {{ include "rhetoriq.image" .Values.images.b5 }}
+          command: [python, -m, uvicorn, 'main:app', --host, 0.0.0.0, --port, "8000"]
+          env:
+            {{- include "rhetoriq.appEnv" . | nindent 12 }}
+            - {name: DEMO_MODE, value: "false"}
+            - {name: RESEARCH_RUNTIME, value: langgraph}
+            - {name: RESEARCH_EXECUTION_MODE, value: kafka}
+            - {name: PUBLIC_API_BASE_URL, value: ""}
+          ports: [{name: http, containerPort: 8000}]
+          startupProbe: {httpGet: {path: /health, port: http}, periodSeconds: 5, failureThreshold: 24}
+          readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 10, failureThreshold: 6}
+          livenessProbe: {httpGet: {path: /health, port: http}, periodSeconds: 20, failureThreshold: 6}
+          resources: {{- toYaml .Values.resources.api | nindent 12 }}
+          securityContext: {{- include "rhetoriq.appSecurity" . | nindent 12 }}
+          volumeMounts:
+            {{- include "rhetoriq.appVolumeMounts" . | nindent 12 }}
+      volumes:
+        {{- include "rhetoriq.appVolumes" . | nindent 8 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: frontend, namespace: {{ .Release.Namespace }}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: frontend}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: frontend}}
+    spec:
+      serviceAccountName: rhetoriq
+      securityContext: {fsGroup: 101, fsGroupChangePolicy: OnRootMismatch}
+      initContainers:
+        - name: copy-webroot
+          image: {{ include "rhetoriq.image" .Values.images.frontend }}
+          command: [sh, -c, 'cp -r /usr/share/nginx/html/. /work/']
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, runAsNonRoot: true, runAsUser: 101, seccompProfile: {type: RuntimeDefault}}
+          volumeMounts: [{name: webroot, mountPath: /work}]
+      containers:
+        - name: frontend
+          image: {{ include "rhetoriq.image" .Values.images.frontend }}
+          env: [{name: PUBLIC_API_BASE_URL, value: ""}]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /, port: http}, periodSeconds: 10, failureThreshold: 6}
+          livenessProbe: {httpGet: {path: /, port: http}, periodSeconds: 20, failureThreshold: 6}
+          resources: {{- toYaml .Values.resources.frontend | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 101, seccompProfile: {type: RuntimeDefault}}
+          volumeMounts: [{name: tmp, mountPath: /tmp}, {name: webroot, mountPath: /usr/share/nginx/html}]
+      volumes: [{name: tmp, emptyDir: {sizeLimit: 32Mi}}, {name: webroot, emptyDir: {sizeLimit: 32Mi}}]
+{{- $workers := dict "outbox-publisher" "outbox" "document-worker" "documents" "signal-worker" "signals" "investigation-worker" "investigations" "projection-worker" "projections" }}
+{{- range $name, $role := $workers }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ $name }}, namespace: {{ $.Release.Namespace }}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: {{ $name }}}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: {{ $name }}}}
+    spec:
+      serviceAccountName: rhetoriq
+      terminationGracePeriodSeconds: 45
+      initContainers:
+        - name: wait-initialization
+          image: {{ include "rhetoriq.image" $.Values.images.b5 }}
+          command: [sh, -c, 'until python -m migrations --check && python -m events.topics --check; do sleep 5; done']
+          env: {{- include "rhetoriq.appEnv" $ | nindent 12 }}
+          volumeMounts: {{- include "rhetoriq.appVolumeMounts" $ | nindent 12 }}
+      containers:
+        - name: worker
+          image: {{ include "rhetoriq.image" (ternary $.Values.images.b5 $.Values.images.backend (eq $role "investigations")) }}
+          command: {{ if eq $role "outbox" }}[python, -m, services.kafka_runtime]{{ else }}[python, -m, events.worker]{{ end }}
+          env:
+            {{- include "rhetoriq.appEnv" $ | nindent 12 }}
+            - {name: KAFKA_WORKER_ROLE, value: {{ $role }}}
+            - {name: WORKER_PROBE_ROLE, value: {{ $role }}}
+          readinessProbe: {exec: {command: [python, -m, events.runtime_probe]}, periodSeconds: 15, timeoutSeconds: 5, failureThreshold: 6}
+          livenessProbe: {exec: {command: [sh, -c, 'kill -0 1']}, periodSeconds: 20, failureThreshold: 6}
+          resources: {{- toYaml (ternary $.Values.resources.heavyWorker $.Values.resources.worker (eq $role "investigations")) | nindent 12 }}
+          securityContext: {{- include "rhetoriq.appSecurity" $ | nindent 12 }}
+          volumeMounts:
+            {{- include "rhetoriq.appVolumeMounts" $ | nindent 12 }}
+      volumes:
+        {{- include "rhetoriq.appVolumes" $ | nindent 8 }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: enrichment-worker, namespace: {{ .Release.Namespace }}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: enrichment-worker}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: enrichment-worker}}
+    spec:
+      serviceAccountName: rhetoriq
+      terminationGracePeriodSeconds: 45
+      initContainers:
+        - name: wait-initialization
+          image: {{ include "rhetoriq.image" .Values.images.b5 }}
+          command: [sh, -c, 'until python -m migrations --check && python -m events.topics --check; do sleep 5; done']
+          env: {{- include "rhetoriq.appEnv" . | nindent 12 }}
+          volumeMounts: {{- include "rhetoriq.appVolumeMounts" . | nindent 12 }}
+      containers:
+        - name: worker
+          image: {{ include "rhetoriq.image" .Values.images.b5 }}
+          command: [python, -m, events.enrichment_worker]
+          {{- if eq .Values.enrichment.mode "recorded" }}
+          args: [--recorded-fixture, /opt/rhetoriq/recorded-provider.json]
+          {{- else if eq .Values.enrichment.mode "replay" }}
+          args: [--replay]
+          {{- end }}
+          env:
+            {{- include "rhetoriq.appEnv" . | nindent 12 }}
+            - {name: ENRICHMENT_WORKER_ID, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: WORKER_PROBE_ID, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: WORKER_PROBE_ROLE, value: enrichment}
+            - {name: GEMINI_API_KEY, valueFrom: {secretKeyRef: {name: {{ .Values.global.secretName }}, key: gemini-api-key, optional: true}}}
+            - {name: GROQ_API_KEY, valueFrom: {secretKeyRef: {name: {{ .Values.global.secretName }}, key: groq-api-key, optional: true}}}
+            - {name: ENRICHMENT_REQUEST_BUDGET, value: {{ .Values.enrichment.requestBudget | quote }}}
+            - {name: ENRICHMENT_SPEND_BUDGET_MICROS, value: {{ .Values.enrichment.spendBudgetMicros | quote }}}
+          readinessProbe: {exec: {command: [python, -m, events.runtime_probe]}, periodSeconds: 15, failureThreshold: 6}
+          livenessProbe: {exec: {command: [sh, -c, 'kill -0 1']}, periodSeconds: 20, failureThreshold: 6}
+          resources: {{- toYaml .Values.resources.heavyWorker | nindent 12 }}
+          securityContext: {{- include "rhetoriq.appSecurity" . | nindent 12 }}
+          volumeMounts: {{- include "rhetoriq.appVolumeMounts" . | nindent 12 }}
+      volumes: {{- include "rhetoriq.appVolumes" . | nindent 8 }}
+{{- range $target := list "elasticsearch" "neo4j" "minilm" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ $target }}-worker, namespace: {{ $.Release.Namespace }}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: {{ $target }}-worker}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: rhetoriq, app.kubernetes.io/component: {{ $target }}-worker}}
+    spec:
+      serviceAccountName: rhetoriq
+      terminationGracePeriodSeconds: 45
+      initContainers:
+        - name: wait-initialization
+          image: {{ include "rhetoriq.image" $.Values.images.b5 }}
+          command: [sh, -c, 'until python -m migrations --check && python -m events.topics --check && python -m events.b5_init --check; do sleep 5; done']
+          env: {{- include "rhetoriq.appEnv" $ | nindent 12 }}
+          volumeMounts: {{- include "rhetoriq.appVolumeMounts" $ | nindent 12 }}
+      containers:
+        - name: worker
+          image: {{ include "rhetoriq.image" $.Values.images.b5 }}
+          command: [python, -m, events.b5_worker]
+          env:
+            {{- include "rhetoriq.appEnv" $ | nindent 12 }}
+            - {name: B5_WORKER_TARGET, value: {{ $target }}}
+          startupProbe: {exec: {command: [python, -m, events.b5_probe]}, periodSeconds: 15, failureThreshold: 20}
+          readinessProbe: {exec: {command: [python, -m, events.b5_probe]}, periodSeconds: 15, failureThreshold: 6}
+          livenessProbe: {exec: {command: [sh, -c, 'kill -0 1']}, periodSeconds: 20, failureThreshold: 6}
+          resources: {{- toYaml (ternary $.Values.resources.minilm $.Values.resources.worker (eq $target "minilm")) | nindent 12 }}
+          securityContext: {{- include "rhetoriq.appSecurity" $ | nindent 12 }}
+          volumeMounts: {{- include "rhetoriq.appVolumeMounts" $ | nindent 12 }}
+      volumes: {{- include "rhetoriq.appVolumes" $ | nindent 8 }}
+{{- end }}

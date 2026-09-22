@@ -44,10 +44,11 @@ host is acceptable if it supplies equivalent private networking, durable
 services, health checks, and restart behavior. Do not create a second
 PostgreSQL service when Neon is authoritative.
 
-The API service owns forward-only migration execution before Uvicorn starts.
-Do not run migrations concurrently from another release process. Preserve the
-managed database TLS option, normally `sslmode=require`, and keep the complete
-URL in platform secret configuration.
+Compose keeps its historical API-owned, advisory-locked forward migration
+behavior. Kubernetes instead gives exclusive apply ownership to a migration
+Job; API and worker startup is check-only and never changes schema. Preserve
+the managed database TLS option, normally `sslmode=require`, and keep the
+complete URL in platform secret configuration.
 
 Set public frontend/API origins explicitly:
 
@@ -161,6 +162,8 @@ keys require Secrets or equivalent secure provisioning. Build or load immutable
 application images into the local cluster rather than relying on a mutable
 `local` tag. The detailed workstation status and execution order remain in
 [Pre-B6](PRE_B6_GUIDE.md).
+The implemented chart, guarded execution sequence, evidence gates, and EKS
+teardown are documented in [B6 Operations](B6_OPERATIONS.md).
 
 ## Ephemeral AWS portfolio demonstration
 

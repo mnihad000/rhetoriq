@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import argparse
 import logging
+import httpx
 
 from config import get_settings
 from models.events import (
@@ -88,6 +90,32 @@ def bootstrap_topics() -> None:
         registry.ensure_schema(topic)
 
 
+def check_topics() -> None:
+    """Fail without mutation unless every required topic and schema exists."""
+    try:
+        from confluent_kafka.admin import AdminClient
+    except ImportError as exc:  # pragma: no cover - deployment dependency guard
+        raise RuntimeError("Kafka support requires confluent-kafka") from exc
+    settings = get_settings()
+    metadata = AdminClient(kafka_client_config(settings)).list_topics(
+        timeout=settings.KAFKA_REQUEST_TIMEOUT_SECONDS
+    )
+    required_topics = {physical_topic(topic, settings) for topic in (*PRIMARY_TOPICS, *DLQ_TOPICS)}
+    missing_topics = sorted(required_topics - set(metadata.topics))
+    if missing_topics:
+        raise RuntimeError("Kafka topics are missing: " + ", ".join(missing_topics))
+    with httpx.Client(timeout=settings.KAFKA_REQUEST_TIMEOUT_SECONDS) as client:
+        response = client.get(f"{settings.KAFKA_SCHEMA_REGISTRY_URL.rstrip('/')}/subjects")
+        response.raise_for_status()
+        subjects = set(response.json())
+    missing_subjects = sorted(f"{topic}-value" for topic in required_topics if f"{topic}-value" not in subjects)
+    if missing_subjects:
+        raise RuntimeError("Schema subjects are missing: " + ", ".join(missing_subjects))
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    bootstrap_topics()
+    parser = argparse.ArgumentParser(description="Initialize or verify Kafka topics and schemas")
+    parser.add_argument("--check", action="store_true", help="Verify without creating resources")
+    args = parser.parse_args()
+    check_topics() if args.check else bootstrap_topics()

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import logging
+import signal
+import socket
 import struct
 import threading
 import time
@@ -323,16 +325,29 @@ class OutboxPublisher:
 
     def run_forever(self, stop: Callable[[], bool] | None = None) -> None:
         stop = stop or (lambda: False)
+        worker_id = f"outbox-{socket.gethostname()}"
+        next_heartbeat_at = 0.0
         while not stop():
+            now = time.monotonic()
+            if now >= next_heartbeat_at:
+                self.store.heartbeat(worker_id, "outbox")
+                next_heartbeat_at = now + 15.0
             count = self.publish_batch()
             if not count:
-                time.sleep(self.settings.KAFKA_OUTBOX_POLL_SECONDS)
+                deadline = time.monotonic() + self.settings.KAFKA_OUTBOX_POLL_SECONDS
+                while not stop() and time.monotonic() < deadline:
+                    time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+        self.store.heartbeat(worker_id, "outbox", "stopped")
 
 
 def publish_outbox_main() -> None:
     settings = get_settings()
     store = EventStore(settings.persistence_target)
-    OutboxPublisher(store, KafkaEventPublisher()).run_forever()
+    stop = threading.Event()
+    if threading.current_thread() is threading.main_thread():
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(signum, lambda *_: stop.set())
+    OutboxPublisher(store, KafkaEventPublisher()).run_forever(stop.is_set)
 
 
 if __name__ == "__main__":
