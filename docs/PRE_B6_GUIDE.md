@@ -551,12 +551,16 @@ Use [AWS Release Readiness](RELEASE_READINESS.md) for the canonical completed
 evidence and ordered remaining checklist. The complete local regression is
 recorded against source `91a95e6` with evidence committed at `4efcab2`. If the
 selected deployment source changes, rerun every affected gate. Before AWS
-provisioning, build all four Linux/AMD64 images with provisional SHA-256
-identities, observe CI passing, complete the practical local B3/B4 gates, and
-verify AWS identity from a newly opened shell. AWS CLI v2 is installed, but no
-profile or credentials are configured and no AWS identity has been verified.
-Do not force
-the full B5 qualification onto this resource-constrained workstation.
+provisioning, complete the practical local B3/B4 gates and verify AWS identity
+from a newly opened shell. AWS CLI v2 is installed, but no profile or
+credentials are configured and no AWS identity has been verified. Remote CI
+observation is explicitly deferred until after the initial private deployment;
+it must pass for the frozen final commit before public exposure or final
+release sign-off. After foundation creates the four immutable ECR repositories,
+an approved GitHub Actions run must build and push all four Linux/AMD64 images
+from one explicit source SHA and verify their registry digests before application
+deployment. Do not force the full B5 qualification onto this resource-constrained
+workstation.
 
 Then provide the approved AWS identity and underlying IAM role ARN, confirmed
 region, operator `/32` CIDR, globally unique state-bucket name,

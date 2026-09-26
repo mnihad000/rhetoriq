@@ -21,6 +21,9 @@ output "public_subnet_ids" {
 output "ecr_repositories" {
   value = { for name, repository in aws_ecr_repository.app : name => repository.repository_url }
 }
+output "ecr_publisher_role_arn" {
+  value = aws_iam_role.ecr_publisher.arn
+}
 output "load_balancer_controller_role_arn" {
   value = aws_iam_role.load_balancer_controller.arn
 }

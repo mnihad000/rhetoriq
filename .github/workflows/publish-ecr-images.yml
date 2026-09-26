@@ -1,0 +1,270 @@
+name: Publish ECR Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full commit SHA containing all four image build contexts
+        required: true
+        type: string
+      run_id:
+        description: Run ID used when the foundation created its ECR repositories
+        required: true
+        type: string
+      region:
+        description: AWS region of the foundation
+        required: true
+        default: us-east-2
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecr-images-${{ inputs.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: github.ref == 'refs/heads/main' && github.repository == 'mnihad000/rhetoriq'
+    runs-on: ubuntu-latest
+    environment: ecr-release
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      account_id: ${{ steps.check.outputs.account_id }}
+      registry: ${{ steps.check.outputs.registry }}
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - name: Check dispatch inputs and configured role
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RUN_ID: ${{ inputs.run_id }}
+          ROLE_ARN: ${{ vars.ECR_PUBLISH_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'source_sha must be a full lowercase Git SHA'; exit 1; }
+          [[ "$RUN_ID" =~ ^[a-z0-9][a-z0-9_-]{0,39}$ ]] || { echo 'run_id has an invalid repository-name form'; exit 1; }
+          [[ "$ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/rhetoriq-${RUN_ID}-ecr-publisher$ ]] || { echo 'ECR_PUBLISH_ROLE_ARN must be the foundation publisher role for this run'; exit 1; }
+      - name: Assume the foundation ECR publisher role
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.ECR_PUBLISH_ROLE_ARN }}
+          role-session-name: ecr-${{ github.run_id }}
+          aws-region: ${{ inputs.region }}
+      - name: Verify four immutable foundation repositories
+        id: check
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          ROLE_ARN: ${{ vars.ECR_PUBLISH_ROLE_ARN }}
+          REGION: ${{ inputs.region }}
+        run: |
+          set -euo pipefail
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          [[ "$ROLE_ARN" == "arn:aws:iam::${account_id}:role/rhetoriq-${RUN_ID}-ecr-publisher" ]]
+          aws ecr describe-repositories --region "$REGION" --repository-names \
+            "rhetoriq-${RUN_ID}-backend" "rhetoriq-${RUN_ID}-b5" \
+            "rhetoriq-${RUN_ID}-flink" "rhetoriq-${RUN_ID}-frontend" > repositories.json
+          export ACCOUNT_ID="$account_id"
+          python3 - <<'PY'
+          import json, os
+          data = json.load(open('repositories.json', encoding='utf-8'))
+          expected = {f"rhetoriq-{os.environ['RUN_ID']}-{name}" for name in ('backend', 'b5', 'flink', 'frontend')}
+          repos = data['repositories']
+          assert len(repos) == 4 and {repo['repositoryName'] for repo in repos} == expected
+          registry = f"{os.environ['ACCOUNT_ID']}.dkr.ecr.{os.environ['REGION']}.amazonaws.com"
+          for repo in repos:
+              assert repo['registryId'] == os.environ['ACCOUNT_ID']
+              assert repo['imageTagMutability'] == 'IMMUTABLE'
+              assert repo['repositoryUri'] == f"{registry}/{repo['repositoryName']}"
+          PY
+          tag="${SOURCE_SHA:0:12}-${RUN_ID}-gha${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "account_id=$account_id" >> "$GITHUB_OUTPUT"
+          echo "registry=${account_id}.dkr.ecr.${REGION}.amazonaws.com" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment: ecr-release
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            file: backend/Dockerfile
+            context: backend
+          - name: b5
+            file: infra/b5/Dockerfile
+            context: .
+          - name: flink
+            file: infra/flink/Dockerfile
+            context: .
+          - name: frontend
+            file: frontend/Dockerfile
+            context: frontend
+    steps:
+      - name: Check out the explicit image source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Verify source identity
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - name: Assume the foundation ECR publisher role
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.ECR_PUBLISH_ROLE_ARN }}
+          role-session-name: ecr-${{ github.run_id }}-${{ matrix.name }}
+          aws-region: ${{ inputs.region }}
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build and push ${{ matrix.name }}
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ needs.preflight.outputs.registry }}/rhetoriq-${{ inputs.run_id }}-${{ matrix.name }}:${{ needs.preflight.outputs.tag }}
+      - name: Verify the ECR manifest and record identity
+        env:
+          IMAGE_NAME: ${{ matrix.name }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RUN_ID: ${{ inputs.run_id }}
+          REGION: ${{ inputs.region }}
+          ACCOUNT_ID: ${{ needs.preflight.outputs.account_id }}
+          REGISTRY: ${{ needs.preflight.outputs.registry }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          BUILD_DIGEST: ${{ steps.build.outputs.digest }}
+          BUILD_IMAGE_ID: ${{ steps.build.outputs.imageid }}
+        run: |
+          set -euo pipefail
+          repository_name="rhetoriq-${RUN_ID}-${IMAGE_NAME}"
+          repository="${REGISTRY}/${repository_name}"
+          aws ecr describe-images --region "$REGION" --repository-name "$repository_name" \
+            --image-ids "imageTag=$TAG" > image-details.json
+          docker buildx imagetools inspect "${repository}:${TAG}" --format '{{json .Image}}' > image-config.json
+          mkdir -p identity
+          python3 - <<'PY'
+          import json, os, re
+          details = json.load(open('image-details.json', encoding='utf-8'))['imageDetails']
+          assert len(details) == 1
+          detail = details[0]
+          digest = detail['imageDigest']
+          assert re.fullmatch(r'sha256:[0-9a-f]{64}', digest)
+          assert digest == os.environ['BUILD_DIGEST'], 'Build digest differs from ECR manifest digest'
+          assert detail['imageManifestMediaType'] in (
+              'application/vnd.oci.image.manifest.v1+json',
+              'application/vnd.docker.distribution.manifest.v2+json',
+          ), 'Expected a single-platform image manifest'
+          assert os.environ['TAG'] in detail['imageTags']
+          assert re.fullmatch(r'sha256:[0-9a-f]{64}', os.environ['BUILD_IMAGE_ID'])
+          config = json.load(open('image-config.json', encoding='utf-8'))
+          assert config['os'] == 'linux' and config['architecture'] == 'amd64'
+          name = os.environ['IMAGE_NAME']
+          repository = f"{os.environ['REGISTRY']}/rhetoriq-{os.environ['RUN_ID']}-{name}"
+          record = {
+              'name': name, 'source_sha': os.environ['SOURCE_SHA'],
+              'run_id': os.environ['RUN_ID'], 'region': os.environ['REGION'],
+              'account_id': os.environ['ACCOUNT_ID'], 'tag': os.environ['TAG'],
+              'repository': repository, 'digest': digest,
+              'manifest_media_type': detail['imageManifestMediaType'],
+              'platform': 'linux/amd64', 'build_image_id': os.environ['BUILD_IMAGE_ID'],
+              'identity_kind': 'ecr_manifest', 'github_run_id': os.environ['GITHUB_RUN_ID'],
+              'github_run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'workflow_sha': os.environ['GITHUB_SHA'],
+          }
+          with open(f'identity/{name}.json', 'w', encoding='utf-8') as output:
+              json.dump(record, output, indent=2, sort_keys=True)
+              output.write('\n')
+          PY
+      - name: Upload verified ${{ matrix.name }} identity
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecr-image-${{ matrix.name }}
+          path: identity/${{ matrix.name }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  package:
+    needs: [preflight, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download four verified identities
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ecr-image-*
+          path: identity
+          merge-multiple: true
+      - name: Assemble digest-only deployment values
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RUN_ID: ${{ inputs.run_id }}
+          REGION: ${{ inputs.region }}
+          ACCOUNT_ID: ${{ needs.preflight.outputs.account_id }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          names = ('backend', 'b5', 'flink', 'frontend')
+          paths = sorted(pathlib.Path('identity').glob('*.json'))
+          assert {path.stem for path in paths} == set(names) and len(paths) == 4
+          images = {}
+          for name in names:
+              image = json.loads(pathlib.Path(f'identity/{name}.json').read_text(encoding='utf-8'))
+              for key, expected in (
+                  ('name', name), ('source_sha', os.environ['SOURCE_SHA']),
+                  ('run_id', os.environ['RUN_ID']), ('region', os.environ['REGION']),
+                  ('account_id', os.environ['ACCOUNT_ID']), ('tag', os.environ['TAG']),
+                  ('platform', 'linux/amd64'), ('identity_kind', 'ecr_manifest'),
+                  ('github_run_id', os.environ['GITHUB_RUN_ID']),
+                  ('github_run_attempt', os.environ['GITHUB_RUN_ATTEMPT']),
+                  ('workflow_sha', os.environ['GITHUB_SHA']),
+              ):
+                  assert image[key] == expected, f'{name}: {key} mismatch'
+              expected_repo = f"{os.environ['ACCOUNT_ID']}.dkr.ecr.{os.environ['REGION']}.amazonaws.com/rhetoriq-{os.environ['RUN_ID']}-{name}"
+              assert image['repository'] == expected_repo
+              assert re.fullmatch(r'sha256:[0-9a-f]{64}', image['digest'])
+              images[name] = image
+          metadata = {
+              'schema_version': 1,
+              'source_sha': os.environ['SOURCE_SHA'], 'run_id': os.environ['RUN_ID'],
+              'region': os.environ['REGION'], 'account_id': os.environ['ACCOUNT_ID'],
+              'tag': os.environ['TAG'], 'github_run_id': os.environ['GITHUB_RUN_ID'],
+              'github_run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'workflow_sha': os.environ['GITHUB_SHA'],
+              'github_run_url': f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              'images': images,
+          }
+          pathlib.Path('images-ecr.json').write_text(json.dumps(metadata, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          lines = ['images:']
+          for name in names:
+              lines += [f'  {name}:', f"    repository: {images[name]['repository']}", f'    digest: "{images[name]["digest"]}"']
+          pathlib.Path('values-images-eks.yaml').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+      - name: Upload complete ECR delivery artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecr-images-${{ inputs.run_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            images-ecr.json
+            values-images-eks.yaml
+          if-no-files-found: error
+          retention-days: 30

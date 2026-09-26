@@ -251,6 +251,114 @@ resource "aws_ecr_repository" "app" {
   force_delete         = true
   image_scanning_configuration { scan_on_push = true }
 }
+data "aws_caller_identity" "current" {}
+
+resource "aws_iam_openid_connect_provider" "github" {
+  count          = var.github_oidc_provider_arn == "" ? 1 : 0
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+}
+
+data "aws_iam_openid_connect_provider" "github_existing" {
+  count = var.github_oidc_provider_arn == "" ? 0 : 1
+  arn   = var.github_oidc_provider_arn
+}
+
+locals {
+  github_oidc_provider_arn = var.github_oidc_provider_arn == "" ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github_existing[0].arn
+}
+
+data "aws_iam_policy_document" "ecr_publisher_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [local.github_oidc_provider_arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:mnihad000/rhetoriq:environment:ecr-release"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository"
+      values   = ["mnihad000/rhetoriq"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository_id"
+      values   = ["1275473509"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository_owner_id"
+      values   = ["181536152"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:environment"
+      values   = ["ecr-release"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:ref"
+      values   = ["refs/heads/main"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:workflow"
+      values   = ["Publish ECR Images"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ecr_publisher" {
+  name               = "${local.name}-ecr-publisher"
+  assume_role_policy = data.aws_iam_policy_document.ecr_publisher_assume.json
+  lifecycle {
+    precondition {
+      condition = var.github_oidc_provider_arn == "" || (
+        var.github_oidc_provider_arn == "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/token.actions.githubusercontent.com" &&
+        try(contains(data.aws_iam_openid_connect_provider.github_existing[0].client_id_list, "sts.amazonaws.com"), false)
+      )
+      error_message = "An existing GitHub OIDC provider must belong to this account and include sts.amazonaws.com."
+    }
+  }
+}
+
+data "aws_iam_policy_document" "ecr_publisher" {
+  statement {
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+  statement {
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:BatchGetImage",
+      "ecr:CompleteLayerUpload",
+      "ecr:DescribeImages",
+      "ecr:DescribeRepositories",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:InitiateLayerUpload",
+      "ecr:PutImage",
+      "ecr:UploadLayerPart",
+    ]
+    resources = [for repository in aws_ecr_repository.app : repository.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "ecr_publisher" {
+  name   = "ecr-publish-four-images"
+  role   = aws_iam_role.ecr_publisher.id
+  policy = data.aws_iam_policy_document.ecr_publisher.json
+}
+
 resource "aws_ecr_lifecycle_policy" "app" {
   for_each   = aws_ecr_repository.app
   repository = each.value.name

@@ -211,10 +211,12 @@ Docker memory increase or moving the full smoke to EKS.
 ## EKS sequence and stop points
 
 Use the EKS environment first as a private, time-bounded qualification
-environment. A passing local regression, CI run, and four provisional immutable
-images are required before provisioning, but the resource-heavy formal B3–B5
-scenarios may run on EKS. Public application ingress is a final proof step, not
-the initial deployment mode.
+environment. A passing local regression and four verified ECR manifest digests
+are required before application deployment, but the ordinary full CI run is
+deferred until after the initial private deployment. It remains mandatory for
+the frozen final commit before public exposure or release sign-off. The
+resource-heavy formal B3–B5 scenarios may run on EKS. Public application
+ingress is a final proof step, not the initial deployment mode.
 
 The 2026-09-26 preflight found no standard local AWS profiles or environment
 credentials. AWS CLI v2.37.4 is installed, but no identity has been verified.
@@ -239,6 +241,9 @@ placeholder. The private deployment input checklist is:
   to an empty list;
 - supply the AWS Budget `notification_email` and confirm the subscription email
   before the application stage; and
+- if this AWS account already has a shared GitHub Actions OIDC provider, set
+  `github_oidc_provider_arn` to its ARN so foundation reuses it without owning
+  its lifecycle; otherwise leave it empty so foundation creates one; and
 - create the `rhetoriq-secrets` Secret in namespace `rhetoriq-demo` before the
   Helm release. Required keys are `database-url`, `postgres-user`,
   `postgres-password`, `postgres-db`, `elasticsearch-password`, `neo4j-auth`,
@@ -271,11 +276,28 @@ the eight-hour deadline. The task invokes the same reverse-order teardown. A
 Budget notification is advisory; confirm its email subscription before the
 application stage.
 
+The `Publish ECR Images` workflow must already be committed to `main`. Before
+dispatching it, configure the `ecr-release` GitHub environment with a required
+reviewer, no administrator bypass, and a deployment-branch rule allowing only
+`main`. After foundation apply, set its `ECR_PUBLISH_ROLE_ARN` environment
+variable from `terraform -chdir=infra/terraform/eks-demo/foundation output -raw
+ecr_publisher_role_arn`. The value is a role ARN, not an AWS credential. The
+foundation role trusts only this repository, environment, workflow, and `main`
+ref, and can publish only to its four ECR repositories.
+
 After separate approvals:
 
-1. Push four provisional immutable amd64 images with `push-images.ps1
-   -ApproveImagePush`. Record their digests; they become obsolete if a fix
-   changes source.
+1. Dispatch `Publish ECR Images` on `main` with the exact 40-character source
+   SHA, the foundation `run_id`, and its region. For the initial deployment,
+   use `7d1c4f2ab91bb5a557050b9c591ea621fd6c1652` if that is still the
+   selected source. Wait for all four Linux/AMD64 builds and ECR readbacks to
+   pass. Download the run's `ecr-images-*` artifact and run
+   `verify-image-artifact.ps1 -ArtifactDir <downloaded-directory> -SourceSha
+   <full-sha> -RunId <run-id>` from the repository root. The verifier checks
+   foundation outputs, the four tags and ECR manifest digests, then writes
+   `infra/b6/generated/values-images-eks.yaml`. Supply that file as
+   `-ImageValues` to the deployment wrapper. A partial or failed run is not
+   deployment evidence; new source requires a new immutable run and digests.
 2. Upload the Kubernetes Secret with `new-secret.ps1
    -ApproveSecretUpload`; Terraform and Helm values never contain its data.
 3. Use `deploy-application.ps1 -Action Plan`, review it, then run the same
@@ -287,7 +309,9 @@ After separate approvals:
    provider canary is a different approval and is capped at 20 documents and
    $5; recorded enrichment is the default.
 
-`push-images.ps1` writes the digest values consumed by the later wrappers.
+The GitHub artifact supplies the digest values consumed by the later wrappers.
+Do not use local build image IDs as deployment digests or run the local
+`push-images.ps1` path for this workstation.
 `deploy-application.ps1` injects `deploy_application=true` and all four image
 digests; `run-smoke.ps1` injects the smoke and evidence flags. Do not manually
 duplicate those generated values in the base tfvars.

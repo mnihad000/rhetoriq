@@ -7,6 +7,8 @@ operator_principal_arn = "arn:aws:iam::000000000000:role/replace-operator-role"
 operator_cidrs         = ["203.0.113.10/32"]
 ci_cidrs               = []
 notification_email     = "replace@example.invalid"
+# Set only when this account already has a shared GitHub Actions OIDC provider.
+github_oidc_provider_arn = ""
 kubernetes_version     = "1.36"
 node_instance_type     = "m7i.2xlarge"
 public_ingress_enabled = false

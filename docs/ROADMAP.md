@@ -218,8 +218,9 @@ occurred.
 - execute and retain plan/apply/destroy evidence for the implemented
   short-lived, cost-bounded AWS environment;
 - observe the added image, Helm, Kubernetes-schema, Terraform format/validate,
-  and immutable-image identity gates passing in remote CI for the deployment
-  commit;
+  and immutable-image identity gates passing in remote CI for the frozen final
+  commit; this observation is deferred until after the initial private
+  deployment but remains required before public exposure or release sign-off;
 - retain explicit plan review, secret boundaries, and immutable release
   identities;
 - evaluate GitOps only as a later production-platform decision; it is not a

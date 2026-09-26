@@ -15,11 +15,13 @@ qualified or deployed.
 | Release-hardening commit | `6e8b99e91d7dd112fe00e990a040320633249a77` |
 | Local regression tested source | `91a95e60a511c8e740f0d0436039ff39830076e7` |
 | Regression evidence and Terraform formatting commit | `4efcab20de05fb62d6ce83c7b3e2816afa2eb1e0` |
-| Final deployment commit | Pending EKS qualification, remote CI, and definitive digest rebuild |
+| Initial remote image source | `7d1c4f2ab91bb5a557050b9c591ea621fd6c1652` |
+| Final deployment commit | Pending EKS qualification, post-deployment remote CI, and definitive digest rebuild |
 | Helm chart | `rhetoriq` `0.1.0`, app version `b6` |
 | MiniLM model | `sentence-transformers/all-MiniLM-L6-v2` |
 | MiniLM revision | `c9745ed1d9f207416be6d2e6f8de32d1f16199bf` |
-| Final application-image digests | Pending rebuild from the candidate commit |
+| Initial ECR manifest digests | Pending foundation, approved GitHub Actions run, and registry verification |
+| Final application-image digests | Pending definitive rebuild after EKS qualification |
 
 The local regression began with only the developer's `.codex/config.toml` edit
 visible as a tracked change. That edit was preserved and excluded from this
@@ -55,7 +57,9 @@ committed.
 - CI now contains infrastructure-static validation, Terraform formatting and
   validation, Linux/AMD64 production-image builds with immutable SHA-256
   identity checks, and the frontend high-severity dependency audit. The remote
-  CI workflow has not yet been observed green for the candidate commit.
+  CI workflow has not yet been observed green for the candidate commit. By
+  project decision, that observation is deferred until after the initial
+  private EKS deployment and remains mandatory before final/public sign-off.
 - Flink 2.3 runtime incompatibilities were corrected for checkpoint storage,
   externalized checkpoint retention, and state TTL construction. The recorded
   disposable Kafka/Flink smoke passed with 20 published, 20 uniquely processed,
@@ -87,8 +91,12 @@ directories created for this run (`.tmp-rc-pytest-20260926-1` and
 `.tmp-rc-all-pytest-20260926-2`), including an ownership-recovery attempt. This
 is a local cleanup limitation, not a test failure. The disposable PostgreSQL
 container was removed, and the four pre-existing Docker services remained
-running. Remote CI has not been observed green. Private EKS qualification and
-the four release image builds/digests remain pending.
+running. The workstation now has about 3.3 GiB free, Docker is stopped, and the
+kind API is unavailable. No local release-image build, kind load, Docker
+cleanup, or Docker storage change is planned. Remote CI has not been observed
+green and is explicitly deferred until after the initial private deployment;
+it is not being treated as evidence or silently marked complete. Private EKS
+qualification and the four release image builds/digests remain pending.
 
 The AWS CLI preflight began with `.codex/config.toml` and
 `frontend/tsconfig.app.tsbuildinfo` modified. While it ran, concurrent sessions
@@ -104,28 +112,43 @@ as evidence from, the AWS preflight.
    state. Rerun affected gates if executable, dependency, build, chart, script,
    or Terraform source changes, and rerun the complete suite before the
    definitive image rebuild after EKS iteration.
-2. Build the backend, B5, Flink, and frontend Linux/AMD64 images from that
-   commit and record provisional SHA-256 identities suitable for the first EKS
-   deployment. They are not final release digests if later fixes change code.
-3. Observe equivalent CI gates passing for that initial deployment commit.
-4. Configure an approved AWS SSO profile or IAM credentials in a private
+2. Commit the ECR delivery workflow and foundation OIDC publisher role to the
+   default branch. Configure the protected `ecr-release` GitHub environment;
+   the role ARN is copied there from foundation output after foundation apply.
+3. Configure an approved AWS SSO profile or IAM credentials in a private
    operator shell, then require `aws sts get-caller-identity` to succeed. Confirm
    the region (`us-east-2` is the repository default) and resolve the underlying
    IAM role ARN for `operator_principal_arn`; never use the returned STS
    `assumed-role` session ARN.
-5. Supply a globally unique state-bucket name, `owner`, `run-id`, `commit`, an
+4. Supply a globally unique state-bucket name, `owner`, `run-id`, `commit`, an
    RFC3339 `expires-at` no more than eight hours away, the operator's public
    `/32` CIDR, and a Budget notification email whose AWS subscription will be
    confirmed. Keep credentials and Secret values out of tracked files.
-6. Complete the practical local B3/B4 checks. Record the workstation's memory,
+5. Complete the practical local B3/B4 checks. Record the workstation's memory,
    disk, and kernel boundary rather than weakening the topology or forcing the
    B5 qualification onto this host.
 
+Foundation may be provisioned before images exist. Before application
+deployment, manually approve the GitHub Actions `Publish ECR Images` run for
+one explicit source SHA. It must build and push all four Linux/AMD64 images to
+the foundation-created immutable repositories, verify their ECR manifest
+SHA-256 digests, and publish `values-images-eks.yaml`. Download and validate
+the complete artifact against foundation outputs and live ECR before passing
+it to the deployment wrapper. Build image IDs are not ECR deployment digests.
+The four ECR identities remain pending until this run succeeds.
+
+The ordinary full CI run is not an initial-provisioning gate for this run.
+Trigger and observe the complete workflow after the first private deployment,
+incorporate any
+repository-owned fixes through the immutable redeployment loop, and require it
+to pass for the frozen final commit before public exposure or release sign-off.
+
 ## Private EKS qualification and iteration
 
-1. Provision the guarded EKS environment with public application ingress
-   disabled, register the eight-hour teardown, push the provisional images,
-   upload the Secret, and deploy the complete topology.
+1. Provision the guarded EKS foundation with public application ingress
+   disabled and register the eight-hour teardown. After the approved GitHub
+   Actions ECR delivery artifact is verified, upload the Secret and deploy the
+   complete topology.
 2. Run the remaining formal B3 DLQ/replay/interruption/recovery scenarios and
    B4 duplicate/late/out-of-order, failure-injection, checkpoint-recovery,
    paced-load, and retry/budget scenarios on EKS.

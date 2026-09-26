@@ -1,9 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # Restore push and pull_request triggers after the initial private deployment.
+  workflow_dispatch:
 
 jobs:
   backend:
