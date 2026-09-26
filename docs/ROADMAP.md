@@ -172,6 +172,18 @@ Runtime evidence recorded separately: the B4 recorded-provider smoke passed
 checkpoints. See [AWS Release Readiness](RELEASE_READINESS.md) for the current
 candidate identity and remaining gates.
 
+Remote delivery preparation is also complete through the non-AWS boundary.
+Commit `823e305` is on `further_dev` and the historical `main` with the
+manually approved ECR workflow, foundation OIDC publisher role,
+explicit-source reachability guard, and artifact verifier. `further_dev` is the
+GitHub default branch, the only permitted ECR release branch, and the
+source-ancestry boundary; the workflow guard, ancestry check, and publisher-role
+`ref` trust now target it. The protected `ecr-release` environment is
+configured but still permits only `main` until switched to `further_dev`.
+Workflow lint, Terraform validation, verifier tests, and `git diff --check`
+passed. Foundation has not been applied, the environment role ARN is unset, and
+no ECR image or digest exists.
+
 These checks establish implementation quality only. They are not kind, EKS,
 B3-B5, 10,000-document, or capacity acceptance evidence.
 
@@ -179,16 +191,19 @@ B3-B5, 10,000-document, or capacity acceptance evidence.
 
 The last recorded workstation snapshot was:
 
-- context `kind-rhetoriq-b6`, with a Ready Kubernetes v1.37.0 node;
-- about 6.66 GiB Docker memory and 6,987,968 KiB allocatable node memory;
+- historical context `kind-rhetoriq-b6`, last observed with a Ready Kubernetes
+  v1.37.0 node, but currently unreachable because Docker is stopped;
+- historical Docker memory of about 6.66 GiB and 6,987,968 KiB allocatable node
+  memory;
 - `vm.max_map_count=262144`, below the required `1048576`;
-- about 15.43 GiB free on the workspace drive, below the 20 GiB hard preflight
-  minimum and the recommended 25 GiB working margin;
+- about 2.3 GiB free on the workspace drive, which is a hard boundary for local
+  image builds and kind loading;
 - Helm 3.19.0, Terraform 1.13.3, kubectl 1.36.1, kind 0.33.0, and AWS CLI
   v2.37.4 are installed. No standard local AWS profile or environment
   credentials were found, so AWS identity remains unverified.
 
-After correcting those prerequisites, the local gates are:
+The local kind/image path is deferred rather than forcing cleanup or weakening
+the topology. If a suitable workstation is provided later, its gates are:
 
 1. install platform prerequisites and prove NetworkPolicy enforcement;
 2. build/load all four images and record exact containerd digests;
@@ -201,15 +216,18 @@ After correcting those prerequisites, the local gates are:
 7. retain at least 15 minutes of working-set, restart, OOM, lag, DLQ,
    checkpoint, persistence, count, digest, and model-revision evidence.
 
-The EKS gates are entirely unexecuted: provide the required operator/network/
-expiry/owner/run/notification and optional DNS inputs; review each saved plan;
-explicitly approve AWS changes, image pushes, and Secret upload; confirm the
-Budget subscription; deploy privately; execute the remaining formal B3–B5
-scenarios; iterate with new commit/image identities for every fix; freeze and
-revalidate the final release; enable restricted public HTTPS for final proof;
-export evidence; and destroy in `platform -> foundation -> bootstrap` order
-with an empty residual inventory. No AWS provisioning or billable action has
-occurred.
+The EKS gates are entirely unexecuted: obtain a short-lived AWS session and
+Budget notification email; provide the required operator/network/expiry/owner/
+run inputs and optional DNS inputs; review each saved plan; explicitly approve
+AWS changes, the guarded GitHub image push, and Secret upload; restrict the
+protected environment to `further_dev`; apply foundation,
+set its publisher-role ARN in the protected environment, publish and verify all
+four ECR digests, deploy privately, and execute the remaining formal B3–B5
+scenarios. Then iterate with new commit/image identities for every fix, freeze
+and revalidate the final release, enable restricted public HTTPS for final
+proof, export evidence, and destroy in `platform -> foundation -> bootstrap`
+order with an empty residual inventory. No AWS provisioning or billable action
+has occurred.
 
 ## Later platform work
 

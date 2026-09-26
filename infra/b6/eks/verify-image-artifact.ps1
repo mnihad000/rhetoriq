@@ -18,6 +18,8 @@ function Assert-Equal([object]$Actual, [object]$Expected, [string]$Description) 
 
 if ($SourceSha -cnotmatch '^[0-9a-f]{40}$') { throw "SourceSha must be a full lowercase Git SHA." }
 if ($RunId -cnotmatch '^[a-z0-9][a-z0-9_-]{0,39}$') { throw "RunId has an invalid repository-name form." }
+if ($Region -cnotmatch '^[a-z]{2}(-[a-z]+)+-[0-9]+$') { throw "Region has an invalid AWS region form." }
+$placeholderDigest = "sha256:" + ("0" * 64)
 $metadataPath = Join-Path $ArtifactDir "images-ecr.json"
 $valuesPath = Join-Path $ArtifactDir "values-images-eks.yaml"
 if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) { throw "Missing images-ecr.json." }
@@ -68,6 +70,7 @@ foreach ($name in $names) {
     Assert-Equal $image.github_run_attempt $metadata.github_run_attempt "$name GitHub run attempt"
     Assert-Equal $image.workflow_sha $metadata.workflow_sha "$name workflow SHA"
     if ([string]$image.digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw "Invalid $name ECR manifest digest." }
+    if ([string]$image.digest -ceq $placeholderDigest) { throw "Placeholder $name ECR manifest digest." }
     if ([string]$image.build_image_id -cnotmatch '^sha256:[0-9a-f]{64}$') { throw "Invalid $name build image ID." }
     if ([string]$image.manifest_media_type -cnotin @(
         "application/vnd.oci.image.manifest.v1+json",

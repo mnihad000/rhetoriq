@@ -16,6 +16,8 @@ qualified or deployed.
 | Local regression tested source | `91a95e60a511c8e740f0d0436039ff39830076e7` |
 | Regression evidence and Terraform formatting commit | `4efcab20de05fb62d6ce83c7b3e2816afa2eb1e0` |
 | Initial remote image source | `7d1c4f2ab91bb5a557050b9c591ea621fd6c1652` |
+| ECR delivery readiness commit (on `further_dev` and historical `main`) | `823e305e842b403d7562256fed6821aecf3014f8` |
+| GitHub default and ECR release branch | `further_dev` |
 | Final deployment commit | Pending EKS qualification, post-deployment remote CI, and definitive digest rebuild |
 | Helm chart | `rhetoriq` `0.1.0`, app version `b6` |
 | MiniLM model | `sentence-transformers/all-MiniLM-L6-v2` |
@@ -78,15 +80,25 @@ committed.
   credentials were found, so `aws sts get-caller-identity` was deliberately
   skipped. No AWS API call or resource mutation was made; AWS identity remains
   unverified.
-- The ECR delivery workflow and foundation OIDC publisher role are committed to
-  `main`. GitHub reports the workflow active and the `ecr-release` environment
-  protected by reviewer `mnihad000`, a `main`-only branch rule, and disabled
-  administrator bypass. Actionlint 1.7.12, foundation Terraform formatting and
+- The ECR delivery workflow and foundation OIDC publisher role were committed at
+  `823e305`, which is on both `further_dev` and the historical `main`.
+  `further_dev` is now the GitHub default branch, the only permitted ECR
+  release branch, and the source-ancestry boundary: the workflow branch guard,
+  ancestry check, and publisher-role `ref` trust were migrated from `main` to
+  `further_dev`. Foundation has never been applied, so no deployed IAM role
+  needs an in-place trust update. GitHub reports the `ecr-release` environment
+  protected by reviewer `mnihad000` and disabled administrator bypass, but its
+  deployment-branch rule still allows only `main`; it must be switched to
+  `further_dev` before dispatch. The workflow and verifier now reject invalid
+  regions before Terraform, AWS, or OIDC use and reject the all-zero
+  placeholder digest at per-image verification, packaging, and local
+  verification. Actionlint 1.7.12, foundation Terraform formatting and
   validation, and the artifact verifier's valid, missing-image, YAML-mismatch,
-  and ECR-mismatch cases passed. The initial source SHA is reachable from
-  `main`; the workflow checks that before assuming its publisher role. No ECR
-  image run has started, and the role ARN environment variable awaits foundation
-  output.
+  ECR-mismatch, placeholder-digest, malformed-digest, and invalid-region cases
+  passed, each with isolated fixtures and an expected failure message. The
+  initial source SHA is reachable from `further_dev`; the workflow checks that
+  before assuming its publisher role. No ECR image run has started, and the role
+  ARN environment variable awaits foundation output.
 
 ## Evidence limits and remaining gates
 
@@ -100,7 +112,7 @@ directories created for this run (`.tmp-rc-pytest-20260926-1` and
 `.tmp-rc-all-pytest-20260926-2`), including an ownership-recovery attempt. This
 is a local cleanup limitation, not a test failure. The disposable PostgreSQL
 container was removed, and the four pre-existing Docker services remained
-running. The workstation now has about 3.3 GiB free, Docker is stopped, and the
+running. The workstation now has about 2.3 GiB free, Docker is stopped, and the
 kind API is unavailable. No local release-image build, kind load, Docker
 cleanup, or Docker storage change is planned. Remote CI has not been observed
 green and is explicitly deferred until after the initial private deployment;
@@ -121,12 +133,15 @@ as evidence from, the AWS preflight.
    state. Rerun affected gates if executable, dependency, build, chart, script,
    or Terraform source changes, and rerun the complete suite before the
    definitive image rebuild after EKS iteration.
-2. Commit the ECR delivery workflow and foundation OIDC publisher role to the
-   default branch. Configure the protected `ecr-release` GitHub environment;
-   the role ARN is copied there from foundation output after foundation apply.
-   On 2026-09-26, GitHub confirmed the workflow on `main` and the environment
-   with reviewer `mnihad000`, a `main`-only branch policy, and administrator
-   bypass disabled. The role ARN remains pending foundation apply.
+2. The ECR delivery workflow and foundation OIDC publisher role are committed
+   at `823e305` and target the `further_dev` release branch. The protected
+   `ecr-release` environment is configured with reviewer `mnihad000` and
+   administrator bypass disabled; change its deployment-branch rule from
+   `main` to `further_dev` only, with no wildcards or tags, and reverify it
+   before dispatch. After foundation apply, copy its
+   `ecr_publisher_role_arn` output to the environment's
+   `ECR_PUBLISH_ROLE_ARN` variable. That role ARN, the workflow run, four image
+   pushes, artifact, and registry digests remain pending.
 3. Configure an approved AWS SSO profile or IAM credentials in a private
    operator shell, then require `aws sts get-caller-identity` to succeed. Confirm
    the region (`us-east-2` is the repository default) and resolve the underlying

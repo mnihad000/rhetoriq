@@ -51,6 +51,24 @@ Prepared: 2026-09-19. Last updated from this Windows development machine on
   not yet been built from the selected deployment commit. After EKS iteration,
   the complete suite and definitive digests must be reproduced for the final
   deployment identity.
+- **Remote image delivery readiness:** Commit `823e305` is on `further_dev`
+  and the historical `main` with the manually approved ECR publishing
+  workflow, foundation OIDC publisher role, source-reachability guard, and
+  artifact verifier. `further_dev` is now the GitHub default branch, the only
+  permitted ECR release branch, and the source-ancestry boundary for image
+  publication; the workflow guard, ancestry check, and publisher-role `ref`
+  trust were migrated to it, and the workflow and verifier now reject invalid
+  regions and the all-zero placeholder digest. The protected `ecr-release`
+  environment is configured but still permits only `main`; switching it to
+  `further_dev` is the remaining branch-migration step. Workflow lint,
+  foundation Terraform validation, artifact-verifier tests, and
+  `git diff --check` passed without AWS access. Foundation has not been
+  applied, so no deployed role needs a trust update, the environment role ARN
+  is unset, and no image push, ECR digest, or deployment artifact exists yet.
+- **Workstation boundary:** The workspace drive has about 2.3 GiB free, Docker
+  is stopped, and kind is unreachable. No local Docker build, kind load, cache
+  cleanup, or Docker-storage change was performed; remote image delivery is the
+  selected path.
 
 ### 2026-09-26 — B4 recorded-provider smoke passed
 
@@ -557,10 +575,13 @@ credentials are configured and no AWS identity has been verified. Remote CI
 observation is explicitly deferred until after the initial private deployment;
 it must pass for the frozen final commit before public exposure or final
 release sign-off. After foundation creates the four immutable ECR repositories,
-an approved GitHub Actions run must build and push all four Linux/AMD64 images
-from one explicit source SHA and verify their registry digests before application
-deployment. Do not force the full B5 qualification onto this resource-constrained
-workstation.
+the workflow already committed at `823e305` and migrated to the
+`further_dev` release branch must receive the foundation publisher-role ARN,
+and the `ecr-release` environment must permit only `further_dev`. An approved
+GitHub Actions run on `further_dev` must then build
+and push all four Linux/AMD64 images from one explicit source SHA and verify
+their registry digests before application deployment. Do not force Docker,
+kind, or the full B5 qualification onto this resource-constrained workstation.
 
 Then provide the approved AWS identity and underlying IAM role ARN, confirmed
 region, operator `/32` CIDR, globally unique state-bucket name,

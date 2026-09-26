@@ -309,7 +309,7 @@ data "aws_iam_policy_document" "ecr_publisher_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:ref"
-      values   = ["refs/heads/main"]
+      values   = ["refs/heads/further_dev"]
     }
     condition {
       test     = "StringEquals"

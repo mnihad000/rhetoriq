@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   preflight:
-    if: github.ref == 'refs/heads/main' && github.repository == 'mnihad000/rhetoriq'
+    if: github.ref == 'refs/heads/further_dev' && github.repository == 'mnihad000/rhetoriq'
     runs-on: ubuntu-latest
     environment: ecr-release
     permissions:
@@ -41,11 +41,13 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           RUN_ID: ${{ inputs.run_id }}
+          REGION: ${{ inputs.region }}
           ROLE_ARN: ${{ vars.ECR_PUBLISH_ROLE_ARN }}
         run: |
           set -euo pipefail
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'source_sha must be a full lowercase Git SHA'; exit 1; }
           [[ "$RUN_ID" =~ ^[a-z0-9][a-z0-9_-]{0,39}$ ]] || { echo 'run_id has an invalid repository-name form'; exit 1; }
+          [[ "$REGION" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]+$ ]] || { echo 'region has an invalid AWS region form'; exit 1; }
           [[ "$ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/rhetoriq-${RUN_ID}-ecr-publisher$ ]] || { echo 'ECR_PUBLISH_ROLE_ARN must be the foundation publisher role for this run'; exit 1; }
       - name: Check out the explicit image source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -53,13 +55,13 @@ jobs:
           ref: ${{ inputs.source_sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify source identity and main ancestry
+      - name: Verify source identity and further_dev ancestry
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/further_dev
       - name: Assume the foundation ECR publisher role
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
@@ -181,6 +183,7 @@ jobs:
           detail = details[0]
           digest = detail['imageDigest']
           assert re.fullmatch(r'sha256:[0-9a-f]{64}', digest)
+          assert digest != 'sha256:' + '0' * 64, 'ECR returned the placeholder digest'
           assert digest == os.environ['BUILD_DIGEST'], 'Build digest differs from ECR manifest digest'
           assert detail['imageManifestMediaType'] in (
               'application/vnd.oci.image.manifest.v1+json',
@@ -218,6 +221,8 @@ jobs:
   package:
     needs: [preflight, publish]
     runs-on: ubuntu-latest
+    # Same-run artifact transfer uses the Actions runtime token, not GITHUB_TOKEN.
+    permissions: {}
     steps:
       - name: Download four verified identities
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -255,6 +260,7 @@ jobs:
               expected_repo = f"{os.environ['ACCOUNT_ID']}.dkr.ecr.{os.environ['REGION']}.amazonaws.com/rhetoriq-{os.environ['RUN_ID']}-{name}"
               assert image['repository'] == expected_repo
               assert re.fullmatch(r'sha256:[0-9a-f]{64}', image['digest'])
+              assert image['digest'] != 'sha256:' + '0' * 64, f'{name}: placeholder digest'
               images[name] = image
           metadata = {
               'schema_version': 1,

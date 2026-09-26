@@ -92,6 +92,16 @@ Completed and verified locally:
   received 20 unique processed documents with zero failures in 135.31 seconds;
   the running job completed checkpoints. This is partial B4 runtime evidence,
   not recovery or load qualification.
+- commit `823e305` is on `further_dev`, the GitHub default branch, and on the
+  historical `main`, with the guarded `Publish ECR Images` workflow,
+  foundation OIDC publisher role, explicit-source reachability check, and
+  artifact verifier. The ECR release path (workflow branch guard,
+  source-ancestry check, and publisher-role `ref` trust) was then migrated from
+  `main` to `further_dev`, and region validation plus all-zero placeholder
+  digest rejection were added to the workflow and verifier. Workflow lint,
+  foundation Terraform validation, verifier tests, and `git diff --check`
+  passed without AWS access. The protected `ecr-release` environment still
+  permits only `main` and must be switched to `further_dev` before dispatch.
 
 Not performed:
 
@@ -106,10 +116,10 @@ Last recorded local prerequisites:
 
 | Check | Recorded state | Required action |
 | --- | --- | --- |
-| kind context/node | `kind-rhetoriq-b6`, Kubernetes v1.37.0, Ready | Preserve the exact context check. |
-| Docker/node memory | about 6.66 GiB / 6,987,968 KiB allocatable | Treat the full smoke as measured and stop on Pending/OOM. |
+| kind context/node | Last verified `kind-rhetoriq-b6`, Kubernetes v1.37.0; currently unreachable because Docker is stopped | Local kind execution is deferred; do not claim the historical Ready state is current. |
+| Docker/node memory | Historical measurement about 6.66 GiB / 6,987,968 KiB allocatable; Docker currently stopped | Do not restart for local image builds on this constrained host. |
 | `vm.max_map_count` | `262144` | Raise deliberately to `1048576` before deployment. |
-| Workspace free disk | about 15.43 GiB | Free at least 20 GiB; 25 GiB is recommended. |
+| Workspace free disk | about 2.3 GiB | Hard local boundary; do not run the four-image build, kind load, or destructive cleanup to chase the former minimum. |
 | Host Helm | 3.19.0 installed on `PATH` | Reverify before runtime scripts. |
 | Host Terraform | 1.13.3 installed on `PATH` | Reverify before AWS planning. |
 | AWS CLI | v2.37.4 installed at `C:\Program Files\Amazon\AWSCLIV2\aws.exe` | Open a new shell and verify an approved AWS identity; no local profile or credentials were present at the recorded preflight. |
@@ -120,10 +130,11 @@ candidate identity, completed evidence, and pre-AWS gates are recorded in
 
 ## Local kind sequence
 
-The workstation currently has too little configured Docker memory for a
-guaranteed run, and the last measured `vm.max_map_count` was below the required
-value. Treat this as a measured experiment and never remove a component to make
-it pass.
+The workstation currently has about 2.3 GiB free, Docker is stopped, kind is
+unreachable, and the last measured `vm.max_map_count` was below the required
+value. The local kind sequence is deferred. Do not delete user data, alter
+Docker storage, restart the local build path, or remove a component to force a
+pass; use the guarded GitHub/ECR path and private EKS qualification instead.
 
 Before any cluster mutation, run the pinned static gate. It lints and renders
 both Helm profiles, checks the full topology contract, validates built-in
@@ -276,26 +287,33 @@ the eight-hour deadline. The task invokes the same reverse-order teardown. A
 Budget notification is advisory; confirm its email subscription before the
 application stage.
 
-The `Publish ECR Images` workflow must already be committed to `main`. Before
-dispatching it, configure the `ecr-release` GitHub environment with a required
-reviewer, no administrator bypass, and a deployment-branch rule allowing only
-`main`. After foundation apply, set its `ECR_PUBLISH_ROLE_ARN` environment
-variable from `terraform -chdir=infra/terraform/eks-demo/foundation output -raw
+`further_dev` is the GitHub default branch and the only permitted ECR release
+branch; `main` is retained as a secondary historical branch and is not part of
+the release path. The `Publish ECR Images` workflow must already be committed
+to `further_dev`. Before dispatching it, configure the `ecr-release` GitHub
+environment with a required reviewer, no administrator bypass, and a
+deployment-branch rule allowing only `further_dev` (no wildcards or tags).
+After foundation apply, set its `ECR_PUBLISH_ROLE_ARN` environment variable
+from `terraform -chdir=infra/terraform/eks-demo/foundation output -raw
 ecr_publisher_role_arn`. The value is a role ARN, not an AWS credential. The
-foundation role trusts only this repository, environment, workflow, and `main`
-ref, and can publish only to its four ECR repositories.
+foundation role trusts only this repository, environment, workflow, and
+`refs/heads/further_dev` ref, and can publish only to its four ECR
+repositories. Foundation has never been applied, so the `main` to
+`further_dev` trust change needs no in-place update of a deployed role.
 GitHub currently reports this repository's OIDC subject prefix as
 `repo:mnihad000@181536152/rhetoriq@1275473509`; the trust policy uses its
 exact `:environment:ecr-release` subject. Recheck GitHub's OIDC configuration
-before a future publisher-role change.
+before a future publisher-role change. Pinning the workflow file through the
+`job_workflow_ref` claim is optional future hardening only; it has not been
+observed for this non-reusable workflow and is not configured.
 
 After separate approvals:
 
-1. Dispatch `Publish ECR Images` on `main` with the exact 40-character source
-   SHA, the foundation `run_id`, and its region. For the initial deployment,
-   use `7d1c4f2ab91bb5a557050b9c591ea621fd6c1652` if that is still the
-   selected source. The workflow verifies the source is reachable from `main`
-   before assuming the publisher role. Wait for all four Linux/AMD64 builds and
+1. Dispatch `Publish ECR Images` on `further_dev` with the exact 40-character
+   source SHA, the foundation `run_id`, and its region. For the initial
+   deployment, use `7d1c4f2ab91bb5a557050b9c591ea621fd6c1652` if that is still
+   the selected source. The workflow validates the inputs and verifies the
+   source is reachable from `further_dev` before assuming the publisher role. Wait for all four Linux/AMD64 builds and
    ECR readbacks to pass. Download the run's `ecr-images-*` artifact and run
    `verify-image-artifact.ps1 -ArtifactDir <downloaded-directory> -SourceSha
    <full-sha> -RunId <run-id>` from the repository root. The verifier checks
