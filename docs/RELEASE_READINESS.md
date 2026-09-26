@@ -78,6 +78,15 @@ committed.
   credentials were found, so `aws sts get-caller-identity` was deliberately
   skipped. No AWS API call or resource mutation was made; AWS identity remains
   unverified.
+- The ECR delivery workflow and foundation OIDC publisher role are committed to
+  `main`. GitHub reports the workflow active and the `ecr-release` environment
+  protected by reviewer `mnihad000`, a `main`-only branch rule, and disabled
+  administrator bypass. Actionlint 1.7.12, foundation Terraform formatting and
+  validation, and the artifact verifier's valid, missing-image, YAML-mismatch,
+  and ECR-mismatch cases passed. The initial source SHA is reachable from
+  `main`; the workflow checks that before assuming its publisher role. No ECR
+  image run has started, and the role ARN environment variable awaits foundation
+  output.
 
 ## Evidence limits and remaining gates
 
