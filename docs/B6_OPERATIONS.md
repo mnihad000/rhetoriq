@@ -100,8 +100,10 @@ Completed and verified locally:
   `main` to `further_dev`, and region validation plus all-zero placeholder
   digest rejection were added to the workflow and verifier. Workflow lint,
   foundation Terraform validation, verifier tests, and `git diff --check`
-  passed without AWS access. The protected `ecr-release` environment still
-  permits only `main` and must be switched to `further_dev` before dispatch.
+  passed without AWS access. The branch migration is complete: on 2026-09-26
+  the public GitHub API showed the protected `ecr-release` environment with a
+  single `further_dev` branch policy (no wildcards or tags), required reviewer
+  `mnihad000`, and administrator bypass disabled.
 
 Not performed:
 
@@ -290,9 +292,10 @@ application stage.
 `further_dev` is the GitHub default branch and the only permitted ECR release
 branch; `main` is retained as a secondary historical branch and is not part of
 the release path. The `Publish ECR Images` workflow must already be committed
-to `further_dev`. Before dispatching it, configure the `ecr-release` GitHub
-environment with a required reviewer, no administrator bypass, and a
-deployment-branch rule allowing only `further_dev` (no wildcards or tags).
+to `further_dev`. The `ecr-release` GitHub environment is configured with a
+required reviewer, no administrator bypass, and a deployment-branch rule
+allowing only `further_dev` (no wildcards or tags); reverify it before
+dispatching.
 After foundation apply, set its `ECR_PUBLISH_ROLE_ARN` environment variable
 from `terraform -chdir=infra/terraform/eks-demo/foundation output -raw
 ecr_publisher_role_arn`. The value is a role ARN, not an AWS credential. The

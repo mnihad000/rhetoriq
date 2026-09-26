@@ -86,10 +86,11 @@ committed.
   release branch, and the source-ancestry boundary: the workflow branch guard,
   ancestry check, and publisher-role `ref` trust were migrated from `main` to
   `further_dev`. Foundation has never been applied, so no deployed IAM role
-  needs an in-place trust update. GitHub reports the `ecr-release` environment
-  protected by reviewer `mnihad000` and disabled administrator bypass, but its
-  deployment-branch rule still allows only `main`; it must be switched to
-  `further_dev` before dispatch. The workflow and verifier now reject invalid
+  needs an in-place trust update. The branch migration is complete: on
+  2026-09-26 the public GitHub API reported the `ecr-release` environment with
+  a single `further_dev` branch policy (custom branch policies, no wildcards or
+  tags), required reviewer `mnihad000`, and administrator bypass disabled.
+  The workflow and verifier now reject invalid
   regions before Terraform, AWS, or OIDC use and reject the all-zero
   placeholder digest at per-image verification, packaging, and local
   verification. Actionlint 1.7.12, foundation Terraform formatting and
@@ -135,10 +136,10 @@ as evidence from, the AWS preflight.
    definitive image rebuild after EKS iteration.
 2. The ECR delivery workflow and foundation OIDC publisher role are committed
    at `823e305` and target the `further_dev` release branch. The protected
-   `ecr-release` environment is configured with reviewer `mnihad000` and
-   administrator bypass disabled; change its deployment-branch rule from
-   `main` to `further_dev` only, with no wildcards or tags, and reverify it
-   before dispatch. After foundation apply, copy its
+   `ecr-release` environment is configured with reviewer `mnihad000`,
+   administrator bypass disabled, and a `further_dev`-only deployment-branch
+   rule with no wildcards or tags. Reverify it before dispatch. After
+   foundation apply, copy its
    `ecr_publisher_role_arn` output to the environment's
    `ECR_PUBLISH_ROLE_ARN` variable. That role ARN, the workflow run, four image
    pushes, artifact, and registry digests remain pending.

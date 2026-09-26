@@ -178,8 +178,9 @@ manually approved ECR workflow, foundation OIDC publisher role,
 explicit-source reachability guard, and artifact verifier. `further_dev` is the
 GitHub default branch, the only permitted ECR release branch, and the
 source-ancestry boundary; the workflow guard, ancestry check, and publisher-role
-`ref` trust now target it. The protected `ecr-release` environment is
-configured but still permits only `main` until switched to `further_dev`.
+`ref` trust now target it. The branch migration is complete: the protected
+`ecr-release` environment permits only `further_dev`, with a required reviewer
+and administrator bypass disabled.
 Workflow lint, Terraform validation, verifier tests, and `git diff --check`
 passed. Foundation has not been applied, the environment role ARN is unset, and
 no ECR image or digest exists.
@@ -219,8 +220,7 @@ the topology. If a suitable workstation is provided later, its gates are:
 The EKS gates are entirely unexecuted: obtain a short-lived AWS session and
 Budget notification email; provide the required operator/network/expiry/owner/
 run inputs and optional DNS inputs; review each saved plan; explicitly approve
-AWS changes, the guarded GitHub image push, and Secret upload; restrict the
-protected environment to `further_dev`; apply foundation,
+AWS changes, the guarded GitHub image push, and Secret upload; apply foundation,
 set its publisher-role ARN in the protected environment, publish and verify all
 four ECR digests, deploy privately, and execute the remaining formal B3–B5
 scenarios. Then iterate with new commit/image identities for every fix, freeze
