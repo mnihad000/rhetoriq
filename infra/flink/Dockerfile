@@ -59,7 +59,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends libexpat1 libff
     && test -n "$FLINK_PYTHON_JAR" \
     && cp "$FLINK_PYTHON_JAR" /opt/flink/lib/ \
     && chown -R flink:flink /opt/flink/checkpoints /opt/flink/savepoints /opt/flink/usrlib \
+    && sed -i 's/\r$//' /opt/flink/application-entrypoint.sh \
     && chmod +x /opt/flink/application-entrypoint.sh \
-    && python --version && python -c "import pyflink,pydantic,httpx,jsonschema; import flink.job"
+    && python --version \
+    && python -c "import pyflink,pydantic,httpx,jsonschema; from pyflink.common import Configuration; from pyflink.datastream.checkpoint_config import ExternalizedCheckpointRetention; config=Configuration(); config.set_string('state.checkpoints.dir','file:///tmp/checkpoints'); assert config.get_string('state.checkpoints.dir',None)=='file:///tmp/checkpoints'; import flink.job"
 USER flink
 ENTRYPOINT ["/opt/flink/application-entrypoint.sh"]

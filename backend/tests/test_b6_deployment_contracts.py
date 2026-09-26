@@ -228,3 +228,13 @@ def test_flink_connector_source_pin_matches_runtime_evidence():
     assert f"ARG KAFKA_CONNECTOR_SOURCE_SHA256={checksum}" in dockerfile
     assert commit in compatibility
     assert checksum in compatibility
+
+
+def test_flink_job_uses_the_pinned_flink_2_3_checkpoint_api():
+    source = (REPOSITORY_ROOT / "backend/flink/job.py").read_text(encoding="utf-8")
+
+    assert "ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION" in source
+    assert "runtime_configuration.set_string(" in source
+    assert '"state.checkpoints.dir"' in source
+    assert ".set_checkpoint_storage(" not in source
+    assert "ExternalizedCheckpointCleanup" not in source

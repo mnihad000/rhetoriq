@@ -55,6 +55,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - run: npm audit --audit-level=high
       - run: npm run build
       - run: npm test
 
@@ -69,6 +70,60 @@ jobs:
         run: docker compose --env-file .env.production.example -f compose.yml -f infra/b5/compose.b5.yml --profile b5 config --quiet
       - name: Validate disposable B5 acceptance topology
         run: docker compose --env-file .env.production.example -f compose.yml -f infra/b5/compose.b5.yml -f infra/b5/compose.acceptance.yml --profile b5 --profile acceptance config --quiet
+
+  infrastructure-static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Validate Helm, Kubernetes resources, scripts, Compose, and Terraform
+        shell: pwsh
+        run: ./infra/b6/validate.ps1
+
+  production-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            file: backend/Dockerfile
+            context: backend
+          - name: b5
+            file: infra/b5/Dockerfile
+            context: .
+          - name: flink
+            file: infra/flink/Dockerfile
+            context: .
+          - name: frontend
+            file: frontend/Dockerfile
+            context: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.name }} production image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          tags: rhetoriq/${{ matrix.name }}:ci
+          load: true
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Verify immutable Linux/AMD64 identity
+        shell: bash
+        run: |
+          test "$(docker image inspect rhetoriq/${{ matrix.name }}:ci --format '{{.Os}}/{{.Architecture}}')" = "linux/amd64"
+          image_id="$(docker image inspect rhetoriq/${{ matrix.name }}:ci --format '{{.Id}}')"
+          test "${image_id#sha256:}" != "$image_id"
+          echo "${{ matrix.name }}=${image_id}"
 
   flink-runtime:
     runs-on: ubuntu-latest

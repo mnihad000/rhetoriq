@@ -191,11 +191,11 @@ def _sink(stream, topic, brokers):
 
 
 def main():
-    from pyflink.common import Duration, Types, WatermarkStrategy
+    from pyflink.common import Configuration, Duration, Types, WatermarkStrategy
     from pyflink.common import DeserializationSchema
     from pyflink.java_gateway import get_gateway
     from pyflink.datastream import StreamExecutionEnvironment
-    from pyflink.datastream.checkpoint_config import ExternalizedCheckpointCleanup
+    from pyflink.datastream.checkpoint_config import ExternalizedCheckpointRetention
     from pyflink.datastream.connectors.kafka import KafkaOffsetResetStrategy, KafkaOffsetsInitializer, KafkaSource
     from models.events import dlq_topic
     from services.kafka_runtime import SchemaRegistry, physical_topic
@@ -205,11 +205,15 @@ def main():
     registry = SchemaRegistry()
     for topic in (*outputs, "raw.documents.v1", "documents.enriched.v1"):
         registry.ensure_schema(topic)
-    env = StreamExecutionEnvironment.get_execution_environment()
+    runtime_configuration = Configuration()
+    runtime_configuration.set_string(
+        "state.checkpoints.dir",
+        os.getenv("FLINK_CHECKPOINT_DIR", "file:///opt/flink/checkpoints"),
+    )
+    env = StreamExecutionEnvironment.get_execution_environment(runtime_configuration)
     env.set_parallelism(2)
     env.enable_checkpointing(60_000)
-    env.get_checkpoint_config().set_checkpoint_storage(os.getenv("FLINK_CHECKPOINT_DIR", "file:///opt/flink/checkpoints"))
-    env.get_checkpoint_config().enable_externalized_checkpoints(ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION)
+    env.get_checkpoint_config().enable_externalized_checkpoints(ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION)
 
     def source(topic, group):
         kafka_source = (KafkaSource.builder().set_bootstrap_servers(brokers).set_topics(physical_topic(topic))

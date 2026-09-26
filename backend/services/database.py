@@ -13,7 +13,28 @@ from typing import Any
 
 
 def is_postgres_database(target: str) -> bool:
-    return target.startswith(("postgres://", "postgresql://"))
+    if target.startswith(("postgres://", "postgresql://")):
+        return True
+    if "=" not in target:
+        return False
+    try:
+        from psycopg import ProgrammingError
+        from psycopg.conninfo import conninfo_to_dict
+    except ImportError:
+        return False
+    try:
+        return bool(conninfo_to_dict(target))
+    except (ProgrammingError, ValueError):
+        return False
+
+
+def postgres_query(query: str) -> str:
+    """Convert repository qmark SQL to psycopg's parameter format.
+
+    Repositories intentionally share qmark SQL with SQLite. Literal percent
+    signs must be escaped before psycopg parses the converted statement.
+    """
+    return query.replace("%", "%%").replace("?", "%s")
 
 
 class PostgresConnection:
@@ -40,7 +61,7 @@ class PostgresConnection:
         # transactions automatically on the first statement.
         if query.strip().upper() == "BEGIN IMMEDIATE":
             return self._connection.execute("SELECT 1")
-        return self._connection.execute(query.replace("?", "%s"), parameters or ())
+        return self._connection.execute(postgres_query(query), parameters or ())
 
     def executescript(self, script: str) -> None:
         # Repository schemas contain simple DDL statements; no function bodies

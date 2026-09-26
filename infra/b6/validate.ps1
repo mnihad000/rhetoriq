@@ -69,6 +69,9 @@ if ($LASTEXITCODE -ne 0) { throw "Compose compatibility rendering failed." }
 foreach ($state in @("bootstrap", "foundation", "platform")) {
     $workingDirectory = "/work/infra/terraform/eks-demo/$state"
     docker run --rm -v "${repoRoot}:/work" -w $workingDirectory $terraformImage `
+        fmt -check -recursive | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "Terraform format check failed for $state." }
+    docker run --rm -v "${repoRoot}:/work" -w $workingDirectory $terraformImage `
         init -backend=false -input=false | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Terraform init failed for $state." }
     docker run --rm -v "${repoRoot}:/work" -w $workingDirectory $terraformImage validate | Out-Host

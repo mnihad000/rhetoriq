@@ -22,7 +22,7 @@ import anyio
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from services.database import is_postgres_database
+from services.database import is_postgres_database, postgres_query
 
 logger = logging.getLogger("rq.research.stream")
 ACTIVE_STATUSES = frozenset({"queued", "running"})
@@ -169,7 +169,7 @@ class StreamReader:
 
     def _rows(self, sql, parameters):
         with self._connection() as conn:
-            query = sql.replace("?", "%s") if self.pool is not None else sql
+            query = postgres_query(sql) if self.pool is not None else sql
             return conn.execute(query, parameters).fetchall()
 
     def resolve(self, investigation_id: str, run_id: str | None) -> RunHead | None:
