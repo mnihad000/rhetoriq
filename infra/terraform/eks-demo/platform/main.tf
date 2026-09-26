@@ -67,13 +67,13 @@ resource "helm_release" "cert_manager" {
   atomic           = true
   timeout          = 600
   values = [yamlencode({
-    crds = { enabled = true }
-    image = { digest = "sha256:70f532fd9cfde0b09d55687200942399d89838bc2d5d5b45152eb799a15912b8" }
-    webhook = { image = { digest = "sha256:a60e2dac46dbb8a7f3df95c54ce941012f54c2fe022f0ee55aaa1ab40ed957ae" } }
-    cainjector = { image = { digest = "sha256:c85268c64f2e0e76684bf5fe8906caff34b82523561c6affe0fae3546bd87562" } }
+    crds            = { enabled = true }
+    image           = { digest = "sha256:70f532fd9cfde0b09d55687200942399d89838bc2d5d5b45152eb799a15912b8" }
+    webhook         = { image = { digest = "sha256:a60e2dac46dbb8a7f3df95c54ce941012f54c2fe022f0ee55aaa1ab40ed957ae" } }
+    cainjector      = { image = { digest = "sha256:c85268c64f2e0e76684bf5fe8906caff34b82523561c6affe0fae3546bd87562" } }
     startupapicheck = { image = { digest = "sha256:46e75b6866359ffb5d82624f41e3ed1c70b2994982702ced547ce5edb418a8f5" } }
   })]
-  depends_on       = [kubernetes_network_policy_v1.platform_allow_all]
+  depends_on = [kubernetes_network_policy_v1.platform_allow_all]
 }
 
 resource "helm_release" "trust_manager" {
@@ -86,11 +86,11 @@ resource "helm_release" "trust_manager" {
   atomic           = true
   timeout          = 600
   values = [yamlencode({
-    app = { trust = { namespace = local.namespace } }
-    image = { digest = "sha256:a7c1d71cad37b404738192213e3801dbf89fe797e72664b0ff0d498db35cea74" }
+    app                 = { trust = { namespace = local.namespace } }
+    image               = { digest = "sha256:a7c1d71cad37b404738192213e3801dbf89fe797e72664b0ff0d498db35cea74" }
     defaultPackageImage = { digest = "sha256:17084a794d1e75065c9047438e2a6167907771fe78d7e4b5d4373a4b1d4e0494" }
   })]
-  depends_on       = [helm_release.cert_manager, kubernetes_namespace_v1.rhetoriq]
+  depends_on = [helm_release.cert_manager, kubernetes_namespace_v1.rhetoriq]
 }
 
 resource "helm_release" "load_balancer_controller" {
@@ -106,7 +106,7 @@ resource "helm_release" "load_balancer_controller" {
     region         = var.region
     vpcId          = data.terraform_remote_state.foundation.outputs.vpc_id
     serviceAccount = { create = true, name = "aws-load-balancer-controller" }
-    image = { tag = "v3.5.0@sha256:298acdff5a571731276aaea3d5cc450a264e4ad710a5bddf3e518f68a3f9f6cb" }
+    image          = { tag = "v3.5.0@sha256:298acdff5a571731276aaea3d5cc450a264e4ad710a5bddf3e518f68a3f9f6cb" }
   })]
   depends_on = [kubernetes_network_policy_v1.platform_allow_all]
 }

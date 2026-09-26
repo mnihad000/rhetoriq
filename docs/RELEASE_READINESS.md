@@ -13,33 +13,42 @@ qualified or deployed.
 | --- | --- |
 | Application code baseline | `269440d8d35e6b9ecac7b2ed337c1bac941fd38b` |
 | Release-hardening commit | `6e8b99e91d7dd112fe00e990a040320633249a77` |
-| Final deployment commit | Pending final regression, fixes, and digest rebuild |
+| Local regression tested commit | `91a95e60a511c8e740f0d0436039ff39830076e7` (plus the Terraform formatting fix recorded in this document) |
+| Final deployment commit | Pending EKS qualification, remote CI, and definitive digest rebuild |
 | Helm chart | `rhetoriq` `0.1.0`, app version `b6` |
 | MiniLM model | `sentence-transformers/all-MiniLM-L6-v2` |
 | MiniLM revision | `c9745ed1d9f207416be6d2e6f8de32d1f16199bf` |
 | Final application-image digests | Pending rebuild from the candidate commit |
 
-The developer's existing edits to `.codex/config.toml`, `docs/ROADMAP.md`, and
-`docs/PRE_B6_GUIDE.md` were preserved during release hardening. Secrets and the
-ignored root `.env` were not printed or committed.
+The local regression began with only the developer's `.codex/config.toml` edit
+visible as a tracked change. That edit was preserved and excluded from this
+release-candidate commit. Secrets and developer `.env` files were not read or
+committed.
 
 ## Evidence completed
 
-- Installed and verified Docker Server 29.6.2, Helm 3.19.0, Terraform 1.13.3,
-  kubectl 1.36.1, kind 0.33.0, Node 22.23.2, npm 11.12.1, and Python 3.13.3.
-  AWS CLI is still absent.
-- The last complete backend baseline produced 368 passes and 27 documented
-  environment-dependent skips. A disposable PostgreSQL run subsequently
-  passed all 16 PostgreSQL integration tests. Post-fix focused suites passed
-  18 tests, and the final Flink deployment-contract suite passed 9 tests.
-- The frontend produced 27 passing tests and a production build. Dependency
-  remediation upgraded React Router and transitive PostCSS/nanoid packages;
-  `npm audit --audit-level=high` reported zero vulnerabilities.
-- Event schemas reproduced without diffs. Compose rendered from the example
-  environment. Both Helm profiles linted/rendered (61 kind resources and 58
-  EKS resources), built-in Kubernetes objects passed schema validation, all B6
-  PowerShell scripts parsed, and all three Terraform states validated without
-  AWS credentials or a remote backend.
+- At `91a95e6`, Docker Server 29.6.2, Helm 3.19.0, Terraform 1.13.3,
+  kubectl 1.36.1, kind 0.33.0, Node 22.23.2, npm 11.12.1, and Python 3.13.3
+  were verified locally. Docker's existing `rhetoriq` services were left running.
+- Python compilation and `events.export_schemas --check` passed with no
+  generated schema diff. The complete backend suite passed with 371 passes and
+  27 skips without PostgreSQL configured. A fresh, disposable pgvector/PostgreSQL
+  container passed all 16 required integration tests. With that container
+  configured, the complete backend suite passed with **386 passes, 12 skips,
+  and zero failures**. The remaining optional skips are one disposable browser
+  gate, one full B5 runtime gate, one real MiniLM test, and nine Redis tests;
+  none were changed or weakened.
+- `npm ci`, all 27 frontend tests across nine files, the production build, and
+  `npm audit --audit-level=high` passed; the audit found zero vulnerabilities.
+- Base Compose, B5, and B5 acceptance profiles rendered from
+  `.env.production.example`. Both Helm profiles linted and rendered: 61 kind
+  resources and 58 EKS resources. Kubeconform reported 52 valid/0 invalid/9
+  without schemas for kind, and 50 valid/0 invalid/8 without schemas for EKS;
+  the repository render-contract validator passed both profiles. All 19 B6
+  PowerShell scripts parsed. Terraform formatting, offline initialization, and
+  validation passed for bootstrap, foundation, and platform after correcting
+  formatting in `infra/terraform/eks-demo/platform/main.tf`. No AWS plan or
+  remote backend operation was run.
 - CI now contains infrastructure-static validation, Terraform formatting and
   validation, Linux/AMD64 production-image builds with immutable SHA-256
   identity checks, and the frontend high-severity dependency audit. The remote
@@ -52,10 +61,26 @@ ignored root `.env` were not printed or committed.
   changed afterward. Those earlier identities are obsolete and are not release
   digests.
 
+## Evidence limits and remaining gates
+
+The 12 backend skips above require separately opted-in browser, full B5 runtime,
+real MiniLM, or Redis environments. Kubeconform also skipped schema checks for
+9 kind and 8 EKS resources whose schemas were unavailable; the rendered
+resource contracts passed. Neither result is an EKS runtime qualification.
+
+The local test workstation denied removal of two isolated pytest scratch
+directories created for this run (`.tmp-rc-pytest-20260926-1` and
+`.tmp-rc-all-pytest-20260926-2`), including an ownership-recovery attempt. This
+is a local cleanup limitation, not a test failure. The disposable PostgreSQL
+container was removed, and the four pre-existing Docker services remained
+running. Remote CI has not been observed green. Private EKS qualification and
+the four release image builds/digests remain pending.
+
 ## Before initial private EKS provisioning
 
-1. Rerun the complete backend/PostgreSQL/schema/frontend/Compose/Helm/
-   Kubernetes-schema/Terraform regression suite at the candidate commit.
+1. Preserve the local regression evidence above for the tested source state;
+   rerun affected gates if source changes and the complete suite before the
+   definitive image rebuild.
 2. Build the backend, B5, Flink, and frontend Linux/AMD64 images from that
    commit and record provisional SHA-256 identities suitable for the first EKS
    deployment. They are not final release digests if later fixes change code.
