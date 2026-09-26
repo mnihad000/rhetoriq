@@ -186,6 +186,7 @@ Connector credentials are configured only for approved deployments. Reddit acces
 | [KAFKA.md](docs/KAFKA.md) | Implemented replayable event contracts and operations. |
 | [OPERATIONS.md](docs/OPERATIONS.md) | Startup, health, replay, recovery, projection administration, and troubleshooting. |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Public release, rollback, Kubernetes boundary, and AWS demonstration strategy. |
+| [RELEASE_READINESS.md](docs/RELEASE_READINESS.md) | Current candidate evidence and the ordered gates remaining before AWS. |
 | [PRE_B6_GUIDE.md](docs/PRE_B6_GUIDE.md) | Current workstation progress and readiness sequence before Kubernetes. |
 | [B6_OPERATIONS.md](docs/B6_OPERATIONS.md) | Implemented full-stack Helm/EKS runbook, current blockers, evidence gates, and teardown. |
 | [TESTING.md](docs/TESTING.md) | Routine checks and B3–B5 acceptance gates. |

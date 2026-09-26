@@ -72,15 +72,22 @@ Completed and verified locally:
   scripts;
 - exact connector-source commit and archive-checksum verification in the Flink
   image build;
-- 368 backend tests passed with 27 environment-dependent skips, 8 focused B6
-  contract tests passed, and 27 frontend tests plus the production build
-  passed;
+- 368 backend tests passed with 27 environment-dependent skips, 9 final B6
+  deployment-contract tests passed, and 27 frontend tests plus the production
+  build passed;
+- all 16 disposable PostgreSQL integration tests passed, the frontend
+  high-severity audit reported zero vulnerabilities, and focused post-hardening
+  tests passed after the database and Flink 2.3 compatibility fixes;
 - both Helm profiles linted and rendered (61 kind and 58 EKS resources), their
   built-in Kubernetes objects passed strict schema validation, all B6
   PowerShell scripts parsed, Compose rendered from the example environment,
   and all Terraform states validated without a backend or AWS credentials;
 - the final Flink runtime passed non-root UID 9999, Python/PyFlink import,
   required connector/schema JAR, and no-runtime-compiler checks.
+- the disposable B4 recorded-provider smoke published 20 documents and
+  received 20 unique processed documents with zero failures in 135.31 seconds;
+  the running job completed checkpoints. This is partial B4 runtime evidence,
+  not recovery or load qualification.
 
 Not performed:
 
@@ -88,7 +95,8 @@ Not performed:
   recovery drill, persistence drill, or evidence capture;
 - no AWS identity/provider call, Terraform account plan, apply, image push,
   DNS change, Secret upload, billable resource, or destroy;
-- no formal B3-B5, B5 10,000-document, or 100,000-documents/day qualification.
+- no complete formal B3-B5, B5 10,000-document, or
+  100,000-documents/day qualification.
 
 Last recorded local prerequisites:
 
@@ -98,11 +106,13 @@ Last recorded local prerequisites:
 | Docker/node memory | about 6.66 GiB / 6,987,968 KiB allocatable | Treat the full smoke as measured and stop on Pending/OOM. |
 | `vm.max_map_count` | `262144` | Raise deliberately to `1048576` before deployment. |
 | Workspace free disk | about 15.43 GiB | Free at least 20 GiB; 25 GiB is recommended. |
-| Host Helm | not on `PATH` | Install Helm 3.19.0 for runtime scripts. |
-| Host Terraform | not on `PATH` | Install Terraform 1.13.3 before AWS planning. |
+| Host Helm | 3.19.0 installed on `PATH` | Reverify before runtime scripts. |
+| Host Terraform | 1.13.3 installed on `PATH` | Reverify before AWS planning. |
+| AWS CLI | not on `PATH` | Install and verify AWS CLI v2 before provider identity or ECR/EKS operations. |
 
-The ignored root `.env` was not read, printed, or changed. Existing
-`compose.yml` and `docs/PRE_B6_GUIDE.md` changes were preserved.
+The ignored root `.env` was not read, printed, or changed. The canonical
+candidate identity, completed evidence, and pre-AWS gates are recorded in
+[AWS Release Readiness](RELEASE_READINESS.md).
 
 ## Local kind sequence
 

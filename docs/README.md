@@ -14,6 +14,7 @@ stack has produced acceptance evidence.
 | [Kafka](KAFKA.md) | Event schemas, topics, delivery guarantees, retention, DLQs, and replay. |
 | [Operations](OPERATIONS.md) | Local service startup, health, recovery, replay, B4/B5 administration, and troubleshooting. |
 | [Deployment](DEPLOYMENT.md) | Public deployment, release evidence, rollback, and the implemented-but-unexecuted AWS showcase boundary. |
+| [AWS release readiness](RELEASE_READINESS.md) | Candidate identity, completed local evidence, and the ordered gates remaining before AWS. |
 | [Pre-B6 guide](PRE_B6_GUIDE.md) | Workstation prerequisites, environment setup, current local progress, and the B6 readiness checklist. |
 | [B6 operations](B6_OPERATIONS.md) | Full Helm/EKS topology, verified implementation progress, guarded kind/AWS execution, evidence, and teardown. |
 | [Testing](TESTING.md) | Routine checks, disposable-stack acceptance, and quality gates. |

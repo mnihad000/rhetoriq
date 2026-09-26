@@ -181,7 +181,7 @@ Before merging documentation changes:
 
 - resolve every relative Markdown link and anchor;
 - search for references to removed or renamed files;
-- reject `<<<<<<<`, `=======`, and `>>>>>>>` conflict markers;
+- reject unresolved Git merge-conflict marker lines;
 - reject malformed replacement characters or known encoding artifacts;
 - confirm current, implemented-but-unqualified, deployed, and planned states
   are not conflated;

@@ -84,6 +84,8 @@ states accurately.
 
 A public launch is complete only after one deployment records all fields below.
 Do not mix evidence from different commits or environments.
+Local candidate evidence and the exact gates remaining before this launch are
+tracked in [AWS Release Readiness](RELEASE_READINESS.md).
 
 ### Release identity
 
@@ -131,6 +133,11 @@ or source documents.
 - [ ] Runtime event delivery and recovery evidence is attached.
 - [ ] Any enabled Flink or B5 capability has its corresponding acceptance
   evidence from [Testing](TESTING.md).
+
+The local 20-document Kafka/Flink recorded-provider smoke passed 20/20 with
+completed checkpoints on 2026-09-26. It is prerequisite evidence only and does
+not replace the deployed recovery proof, remaining formal B4 scenarios, B5
+qualification, or the public investigation checks above.
 
 ## Rollback
 

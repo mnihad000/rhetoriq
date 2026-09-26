@@ -1,7 +1,7 @@
 # Before B6: Setup, Technologies, and Runtime Acceptance
 
 Prepared: 2026-09-19. Last updated from this Windows development machine on
-2026-09-21.
+2026-09-26.
 
 ## Current local progress
 
@@ -14,7 +14,7 @@ Prepared: 2026-09-19. Last updated from this Windows development machine on
 - **New resource blocker:** Docker currently reports 6.664 GiB total memory, and the host has 13.8 GiB physical RAM. The host cannot allocate the 16 GiB B5 load-qualification budget while leaving memory for Windows. This machine is suitable for development and reduced local smoke tests, but not for the full B5 load qualification.
 - **Elasticsearch prerequisite check:** The Docker/WSL kernel currently reports `vm.max_map_count = 262144`; B5 Elasticsearch requires `1048576`. Do not change it for the current reduced B3/B6 preparation. Set and persistence-test it only in the temporary higher-memory environment used for the B5 runtime qualification.
 - **Qualification scope clarification:** The current B5 acceptance gate requires 10,000 distinct seeded documents. The separate [`100k stress test plan`](100k%20stress%20test%20plan.md) describes a future 100,000-documents-per-day capacity claim; it is not the current B5 sign-off corpus or a completed runtime result.
-- **Still required:** The increased Docker/WSL memory allocation for full qualification, the Elasticsearch kernel setting, and all runtime acceptance gates below.
+- **Still required:** The Elasticsearch kernel setting and a resource-feasible full-stack environment for the local B6 smoke; the remaining formal B3–B5 runtime-acceptance gates below remain open.
 
 ### 2026-09-21 — B3 Kafka control-plane smoke passed
 
@@ -24,9 +24,63 @@ Prepared: 2026-09-19. Last updated from this Windows development machine on
 - **Focused automated verification:** `backend/tests/test_b3_event_backbone.py` passed all 10 tests. The first run was blocked only by Windows denying pytest access to an existing shared temp/cache directory; rerunning with an isolated temporary base directory and cache disabled completed successfully. This was a local test-runner permission issue, not a product-test failure.
 - **Scope:** This is a successful Kafka/registry, durable-outbox, document-consumer, duplicate-guard, and worker-restart smoke result. It does not close B3: DLQ behavior, controlled replay, broker restart recovery, and the remaining consumer roles are still untested. Raw-document processing additionally requires the B4 Flink runtime.
 
+### 2026-09-26 — Release hardening and PostgreSQL qualification
+
+- **Tooling:** Helm 3.19.0 and Terraform 1.13.3 are installed and on `PATH`.
+  Docker, kubectl, and kind remain available. AWS CLI is not installed.
+- **Validation:** The recorded baseline is 368 backend passes with 27 optional
+  environment-dependent skips, 16/16 disposable PostgreSQL integration tests,
+  27 frontend tests plus the production build, zero high-severity npm audit
+  findings, reproducible event schemas, both Helm profiles, Kubernetes schema
+  validation, PowerShell parsing, Compose rendering, and all three Terraform
+  states validated without AWS access.
+- **Hardening:** Commits `6e8b99e` and `269440d` add missing CI infrastructure
+  and image gates, repair PostgreSQL conninfo/query handling, remediate frontend
+  dependencies, and make the Flink job compatible with the pinned 2.3 runtime.
+- **Boundary:** The complete suite and all four definitive image digests still
+  need to be reproduced at the final deployment commit. Remote CI has not yet
+  been observed green for that commit.
+
+### 2026-09-26 — B4 recorded-provider smoke passed
+
+- **Verified:** The isolated Kafka/Flink acceptance published 20 records and
+  received 20 unique processed records with zero failures in 135.31 seconds.
+  The JobManager and TaskManager remained healthy and completed checkpoints.
+- **Scope:** This closes the basic framed-delivery smoke only. Checkpoint
+  recovery under process failure, replay, duplicate/late/out-of-order behavior,
+  the paced-load run, retry/budget behavior, and the optional live-provider
+  canary remain formal B4 gates.
+- **Canonical record:** Current candidate evidence and the ordered remaining
+  work are maintained in [AWS Release Readiness](RELEASE_READINESS.md).
+
+### Remaining formal qualification work before claiming B3–B5 acceptance
+
+The B6 chart can be implemented and smoke-tested while these gates remain open,
+but neither a local Kubernetes run nor the short-lived EKS showcase closes them.
+
+- **B3 Kafka:** exercise permanent and retryable failures through every required
+  DLQ, controlled replay with preserved IDs/artifacts/completion counts, broker
+  and registry interruption while the outbox accumulates accepted work, and
+  recovery of the remaining role-specific consumers.
+- **B4 Flink:** basic framed raw-event delivery through the running Flink job
+  and recorded enrichment has passed for 20/20 documents. Still prove its
+  retry/budget behavior, ordered/duplicate/out-of-order/late-event handling,
+  checkpoint recovery under failure, projection/product freshness, and the
+  documented paced-load run. The separate live-provider canary requires
+  explicit credentials and positive budget/pricing limits.
+- **B5 retrieval:** prove the full specialized-store startup and TLS contract,
+  canonical persistence and browser/product queries, target failure and cache
+  fallthrough behavior, repair/rebuild/rollback, and the separate
+  10,000-document load qualification with integrity, lag, latency, memory/OOM,
+  and drain evidence.
+- **Evidence:** retain the reports, logs, offsets, DLQ counts, checkpoint IDs,
+  resource measurements, image/model identities, and sanitized screenshots
+  required by [Testing](TESTING.md) and [Operations](OPERATIONS.md). Mark a
+  milestone complete only from that evidence.
+
 This guide collects the software prerequisites, environment configuration, technology overview, architecture flow, and explanation of disposable B3–B5 acceptance before Kubernetes deployment.
 
-B6 is **local Kubernetes deployment**. The repository contains the B3 Kafka backbone, B4 Flink processing, and B5 specialized retrieval implementations, but their actual runtime acceptance remains pending. Implementation and unit-test results alone do not close those milestones.
+B6 is **local Kubernetes deployment**. The repository contains the B3 Kafka backbone, B4 Flink processing, and B5 specialized retrieval implementations, but their formal runtime acceptance remains incomplete. The recorded B3 and B4 smoke evidence does not close the remaining recovery, load, and degradation gates.
 
 The durable sources of truth are the [roadmap](ROADMAP.md),
 [operations runbook](OPERATIONS.md), and [testing and acceptance
@@ -47,8 +101,9 @@ The following inventory is a snapshot of commands available on the development m
 | kubectl | Installed; active context `kind-rhetoriq-b6` was verified on 2026-09-20. | Inspect and control Kubernetes workloads; recheck nodes and system pods before B6 deployment. |
 | kind | v0.33.0 installed; one-node `rhetoriq-b6` cluster verified Ready on 2026-09-20. | Local Kubernetes cluster tool selected for B6. |
 | minikube | Not found on PATH | Alternative to kind; choose one local cluster tool. |
-| Helm | Not found on PATH | Needed if B6 uses Helm charts; plain Kubernetes manifests do not require it. |
-| Terraform / AWS CLI | Not found on PATH | Later cloud infrastructure work; not required for local B6. |
+| Helm | v3.19.0 installed and on `PATH` | Required by the implemented B6 runtime scripts and chart. |
+| Terraform | v1.13.3 installed and on `PATH` | Required for the guarded EKS plans; no AWS-backed plan or apply has run. |
+| AWS CLI | Not found on `PATH` | Install and verify v2 before AWS identity checks, ECR pushes, or EKS operations. |
 
 ### Recommended immediate installation
 
@@ -75,26 +130,27 @@ kubectl config current-context
 
 ### Current machine blockers and exact next actions
 
-Docker, WSL 2, kind, and the `rhetoriq-b6` cluster are now working. Complete
-the remaining preparation in this order:
+Docker, WSL 2, kind, and the `rhetoriq-b6` cluster are now working. The Helm
+chart exists at `deploy/helm/rhetoriq`; complete the remaining preparation and
+runtime gates in this order:
 
 1. Reconfirm `docker version`, `docker info`, `kubectl config
    current-context`, `kubectl get nodes`, and `kubectl get pods -A` after a host
    or Docker restart.
-2. Verify the Elasticsearch `vm.max_map_count` setting inside Docker/WSL and
-   confirm it survives restart.
-3. Use this workstation only for reduced smoke tests. Its 6.664 GiB Docker
-   memory allocation and 13.8 GiB physical RAM cannot satisfy the 16 GiB B5
-   qualification budget.
-4. Run the full B5 load qualification in a temporary higher-memory environment
-   with the required eight CPUs and recorded resource evidence.
-5. Install Helm only if B6 uses a Helm chart. Plain manifests do not require it.
-6. Leave Terraform, AWS CLI, Argo CD, Prometheus, and Grafana for the later
-   cloud/GitOps/observability milestones.
-
-The repository currently has no Kubernetes manifests or Helm chart. Creating
-the B6 deployment artifacts is therefore required work after the runtime gates
-below; installing a cluster tool alone cannot deploy this project.
+2. Reverify Helm 3.19.0 and Terraform 1.13.3, then rerun the repository static
+   gate and both chart profiles at the final candidate commit.
+3. Raise and persistence-test `vm.max_map_count=1048576` before attempting the
+   full chart. Do not omit Elasticsearch to force a misleading success.
+4. Attempt the full single-replica kind smoke only with measured resource
+   evidence. Its 6.664 GiB Docker allocation and 13.8 GiB physical RAM cannot
+   satisfy the 16 GiB B5 qualification budget; if the complete chart cannot
+   run, preserve the evidence and defer the full runtime smoke to EKS.
+5. Complete the remaining formal B3, B4, and B5 gates listed above in a
+   higher-memory disposable environment; the B5 10,000-document qualification
+   is explicitly separate from the B6/EKS demo.
+6. Keep Terraform/AWS provisioning, public DNS, provider credentials, and any
+   billable action behind explicit approval. B7/B9 implementation artifacts
+   may exist, but no AWS deployment or teardown evidence has been recorded.
 
 ### Machine resources and Elasticsearch prerequisite
 
@@ -316,13 +372,13 @@ Elasticsearch and Neo4j are derived projections that can be rebuilt from retaine
 | Kubernetes | Container orchestration. | Planned B6 deployment, networking, probes, resources, and storage. |
 | kind / minikube | Local Kubernetes clusters. | Planned B6 cluster; choose one. |
 | kubectl | Kubernetes command-line client. | Inspect workloads, configuration, logs, and rollout state. |
-| Helm | Parameterized Kubernetes packaging. | Possible B6 chart format; optional with plain manifests. |
-| Terraform | Infrastructure as code. | Planned B7 cloud resources and ephemeral AWS environment. |
+| Helm | Parameterized Kubernetes packaging. | Implemented B6 chart with `kind` and `eks-demo` profiles. |
+| Terraform | Infrastructure as code. | Implemented but unexecuted three-state ephemeral EKS environment. |
 | Argo CD | Reconcile cluster deployments with Git. | Planned B7 GitOps deployment and rollback flow. |
 | Prometheus | Metrics collection and querying. | Planned B8 throughput, lag, latency, failure, and usage metrics. |
 | Grafana | Operational dashboards. | Planned B8 visualization of service health and performance. |
 | OpenTelemetry | Standard instrumentation and trace export. | Planned cross-service observability; research traces already use controlled storage. |
-| AWS EKS | Managed Kubernetes control plane. | Planned short-lived portfolio demonstration. |
+| AWS EKS | Managed Kubernetes control plane. | Implemented short-lived portfolio demonstration; not provisioned. |
 | Railway / Render | Application hosting platforms. | Railway is the documented public topology; Render is an alternative in the demo strategy. |
 
 The root npm packages `@neon/config` and `@neon/env` support Neon configuration/environment tooling. The Python backend uses psycopg to access PostgreSQL; those npm packages do not run the investigation pipeline.
@@ -460,13 +516,14 @@ This work does not deploy publicly or test against production. Its result is sav
 - [x] Use fresh local-only credentials, volumes, and database state; do not use the Neon URLs in `.env.local`. Completed 2026-09-21: the B3 smoke ran against the root Compose PostgreSQL service and its local `postgres-data` volume, using the root `.env` variables. No Neon URL was supplied to the Compose services.
 - [~] Build the root Compose images and verify pinned MiniLM loading. The root `docker compose build` completed successfully on 2026-09-21. Pinned MiniLM is built through the opt-in B5 overlay and remains deferred with the full B5 acceptance run because this host cannot meet its 16 GiB qualification budget.
 - [~] Complete B3 actual event delivery, replay, and recovery checks. The Kafka/Apicurio control plane, PostgreSQL-outbox delivery, document-consumer path, durable duplicate guard, and worker-restart catch-up passed on 2026-09-21 using synthetic local events. All primary/DLQ topics and schemas initialized; the raw event was schema-decoded from Kafka; a processed event completed once; its duplicate was skipped; and a published event was caught up after the consumer restart. DLQ behavior, controlled replay, broker restart recovery, and the remaining consumer paths remain.
-- [ ] Complete B4 actual Flink delivery, checkpoint, recovery, and load checks.
+- [~] Complete B4 actual Flink delivery, checkpoint, recovery, and load checks. The 20-document recorded-provider delivery smoke passed 20/20 with completed checkpoints on 2026-09-26. Failure recovery, duplicate/late/out-of-order behavior, paced load, retry/budget evidence, and the optional live-provider canary remain.
 - [ ] Complete B5 startup, persisted product/browser, failure, repair, rebuild, rollback, and load checks.
 - [ ] If the live enrichment canary is in scope, configure a valid Gemini key and all five positive `ENRICHMENT_*` budget/pricing settings; use Groq only if desired as the backup provider.
 - [ ] Export acceptance evidence and record gate sign-off.
 - [ ] Build and record immutable backend, frontend, Flink, and B5 image digests; make them available to kind's nodes or a local registry.
-- [ ] Implement B6 manifests or Helm charts: namespaces, ConfigMaps, Secrets, Services, persistent volumes/claims, initialization Jobs, Deployments/StatefulSets, resource requests/limits, startup/readiness/liveness probes, worker shutdown grace, ingress, scheduling, and rollout policy.
-- [ ] Deploy the seeded end-to-end topology to the local cluster and collect the same health, replay, persistence, search/path, reload, and recovery evidence.
+- [x] Implement B6 manifests/Helm chart: `deploy/helm/rhetoriq` now contains shared chart templates plus `kind` and `eks-demo` values profiles, with namespaces, configuration, services, storage, jobs, workloads, ingress, certificates, policies, and resource contracts. This is implementation evidence only; it has not yet passed a local kind runtime smoke.
+- [ ] Run the B6 kind preflight: verify Helm/chart rendering, node resources, image availability, `vm.max_map_count=1048576`, storage behavior, and actual NetworkPolicy enforcement.
+- [ ] Deploy the full seeded end-to-end topology to kind and collect the documented health, replay, persistence, search/path, reload, recovery, memory, and OOM evidence. Stop without disabling components if the host cannot fit it.
 
 The B6 handoff must preserve PostgreSQL data, Kafka logs, Flink checkpoints/savepoints, Elasticsearch data, Neo4j data, and certificate material. Redis remains disposable cache. Public CA trust can be a ConfigMap; private keys require Secrets or equivalent secure provisioning. Load or publish application images into the local cluster and record immutable image identities.
 
@@ -476,3 +533,19 @@ short-lived AWS showcase plus an affordable separate public demo; see
 [Deployment](DEPLOYMENT.md#ephemeral-aws-portfolio-demonstration).
 
 The public demo still needs the current Kafka/worker execution dependencies unless a lighter application topology is deliberately implemented. The earlier frontend/API/database-only deployment does not satisfy the current investigation execution contract.
+
+## 7. AWS Deployment Handoff
+
+Use [AWS Release Readiness](RELEASE_READINESS.md) for the canonical completed
+evidence and ordered remaining checklist. Before AWS provisioning, rerun the
+complete regression suite at the deployment commit, rebuild all four
+Linux/AMD64 images and record their SHA-256 identities, observe CI passing,
+finish the required B3–B5 qualification, and install AWS CLI v2.
+
+Then provide the approved AWS identity, region, CIDRs, owner/run/deadline tags,
+budget notification email, and optional DNS inputs. The exact guarded
+plan/apply, image push, Secret upload, Helm deployment, smoke/evidence, recovery,
+and reverse-order teardown commands live only in [B6 Operations](B6_OPERATIONS.md).
+Public URL, SSE, persistence, reload/redeploy, replay, health, rollback, and
+release-identity proof remain in [Deployment](DEPLOYMENT.md). Do not duplicate
+those commands here.

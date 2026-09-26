@@ -45,8 +45,8 @@ observability are not implemented.
 | A5 Public MVP | In progress | Public URLs, health, persisted investigation, redeploy/reload, replay, and CI evidence remain unrecorded. |
 | B1 PostgreSQL/pgvector | Implemented, opt-in | Migration, repository, backfill, and vector path exist; production enablement requires live backfill and comparison. |
 | B2 Agent-led sources | Complete | SearXNG, canonical fetch, Federal Register, policy, receipts, rate limits, and visible fallbacks. |
-| B3 Kafka contracts | Implemented | Contracts, registry, outbox, consumers, DLQs, replay, and health exist; actual delivery/recovery evidence remains. |
-| B4 Flink signals | Implemented | Flink topology, enrichment artifacts, event-time windows, projections, and product fallback exist; runtime recovery/load/live-canary gates remain. |
+| B3 Kafka contracts | Implemented, partial runtime smoke | Contracts, registry, outbox, consumers, DLQs, replay, and health exist. Local evidence covers topic/schema initialization, PostgreSQL outbox-to-Kafka delivery, document consumption, duplicate guarding, and worker-restart catch-up; DLQ, controlled replay, broker/registry interruption, and remaining consumer-role recovery evidence remain. |
+| B4 Flink signals | Implemented, partial runtime smoke | The recorded-provider path passed 20/20 real Kafka/Flink deliveries with completed checkpoints; failure recovery, duplicate/late/out-of-order behavior, paced load, retry/budget evidence, and the optional live canary remain. |
 | B5 Recoverable projections | Implemented | Immutable authority, ES/Neo4j/MiniLM projections, cache, product UI, drift/repair/rebuild/cutover tooling exist; actual-stack acceptance remains. |
 | B6 Local Kubernetes | Implemented, unqualified | Full-topology Helm profiles, deployment contracts, PKI, policies, storage, smoke/evidence Jobs, and guarded scripts exist; kind runtime evidence remains open. |
 | B7 Ephemeral EKS Terraform | Implemented, unqualified | Three-state Terraform, immutable ECR flow, IAM/network/storage controls, guarded plan/apply, deadline fallback, and verified teardown logic exist; no AWS apply or destroy evidence exists. GitOps is outside the portfolio-demo scope. |
@@ -61,10 +61,13 @@ deduplication, stable signal revisions, PostgreSQL projections, health gates,
 and a visible legacy fallback. Hosted inference runs outside Flink and replays
 reuse immutable artifacts.
 
-B4 is not qualified until real Kafka/Flink delivery, checkpoint recovery,
-duplicate and late-event behavior, failure injection, the paced load window,
-and the bounded provider canary have recorded passing evidence. Until then,
-`ENABLE_FLINK_TRENDING=false` remains the default.
+Basic real Kafka/Flink delivery is now recorded: the disposable
+recorded-provider smoke published 20 documents and received 20 unique processed
+documents with zero failures in 135.31 seconds, while checkpoints completed.
+B4 is not qualified until checkpoint recovery under failure, duplicate and
+late/out-of-order behavior, failure injection, the paced load window,
+retry/budget behavior, and the bounded provider canary have recorded passing
+evidence. Until then, `ENABLE_FLINK_TRENDING=false` remains the default.
 
 ## B5 delivered boundary
 
@@ -140,8 +143,11 @@ The repository now contains:
 Recorded non-runtime verification at the current working-tree state:
 
 - 368 backend tests passed and 27 environment-dependent tests skipped;
-- 8 focused B6 deployment-contract tests passed;
+- all 16 disposable PostgreSQL integration tests passed;
+- 18 post-hardening focused tests passed, followed by 9 final Flink/B6
+  deployment-contract tests after the runtime fixes;
 - 27 frontend tests and the production frontend build passed;
+- the high-severity frontend dependency audit reported zero vulnerabilities;
 - both Helm profiles linted and rendered: 61 kind resources and 58 EKS
   resources;
 - Kubernetes schema validation found no invalid built-in resources;
@@ -150,6 +156,11 @@ Recorded non-runtime verification at the current working-tree state:
   credentials or a remote backend;
 - the final Flink image built from checksum-verified connector source and
   passed non-root UID, runtime-import, required-JAR, and no-compiler checks.
+
+Runtime evidence recorded separately: the B4 recorded-provider smoke passed
+20/20 unique Kafka/Flink deliveries with zero failures and completed
+checkpoints. See [AWS Release Readiness](RELEASE_READINESS.md) for the current
+candidate identity and remaining gates.
 
 These checks establish implementation quality only. They are not kind, EKS,
 B3-B5, 10,000-document, or capacity acceptance evidence.
@@ -163,8 +174,8 @@ The last recorded workstation snapshot was:
 - `vm.max_map_count=262144`, below the required `1048576`;
 - about 15.43 GiB free on the workspace drive, below the 20 GiB hard preflight
   minimum and the recommended 25 GiB working margin;
-- Helm and Terraform absent from the host `PATH`; pinned containers are used
-  only for static validation.
+- Helm 3.19.0 and Terraform 1.13.3 installed on the host; AWS CLI v2 remains
+  absent.
 
 After correcting those prerequisites, the local gates are:
 
@@ -192,8 +203,9 @@ No AWS provisioning or billable action has occurred.
 
 - execute and retain plan/apply/destroy evidence for the implemented
   short-lived, cost-bounded AWS environment;
-- add the existing image, Helm, Kubernetes-schema, and Terraform validation
-  gates to CI;
+- observe the added image, Helm, Kubernetes-schema, Terraform format/validate,
+  and immutable-image identity gates passing in remote CI for the deployment
+  commit;
 - retain explicit plan review, secret boundaries, and immutable release
   identities;
 - evaluate GitOps only as a later production-platform decision; it is not a
