@@ -539,13 +539,19 @@ The public demo still needs the current Kafka/worker execution dependencies unle
 Use [AWS Release Readiness](RELEASE_READINESS.md) for the canonical completed
 evidence and ordered remaining checklist. Before AWS provisioning, rerun the
 complete regression suite at the deployment commit, rebuild all four
-Linux/AMD64 images and record their SHA-256 identities, observe CI passing,
-finish the required B3–B5 qualification, and install AWS CLI v2.
+Linux/AMD64 images with provisional SHA-256 identities, observe CI passing,
+complete the practical local B3/B4 gates, and install AWS CLI v2. Do not force
+the full B5 qualification onto this resource-constrained workstation.
 
 Then provide the approved AWS identity, region, CIDRs, owner/run/deadline tags,
 budget notification email, and optional DNS inputs. The exact guarded
 plan/apply, image push, Secret upload, Helm deployment, smoke/evidence, recovery,
 and reverse-order teardown commands live only in [B6 Operations](B6_OPERATIONS.md).
+Deploy the complete topology initially without public application ingress and
+use EKS for the remaining formal B3–B5 scenarios. Fix locally, publish new
+immutable digests, redeploy, and rerun affected gates until one final commit and
+four final digests pass the complete regression and CI. Enable restricted
+public HTTPS only after that private qualification loop is stable.
 Public URL, SSE, persistence, reload/redeploy, replay, health, rollback, and
 release-identity proof remain in [Deployment](DEPLOYMENT.md). Do not duplicate
 those commands here.

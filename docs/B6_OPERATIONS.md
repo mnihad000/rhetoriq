@@ -206,11 +206,18 @@ Docker memory increase or moving the full smoke to EKS.
 
 ## EKS sequence and stop points
 
+Use the EKS environment first as a private, time-bounded qualification
+environment. A passing local regression, CI run, and four provisional immutable
+images are required before provisioning, but the resource-heavy formal B3–B5
+scenarios may run on EKS. Public application ingress is a final proof step, not
+the initial deployment mode.
+
 Copy each `demo.tfvars.example` to an ignored `.tfvars` file and replace every
 placeholder. Required foundation inputs are the AWS operator principal, CIDRs,
 notification email, owner, commit, run ID, and an RFC3339 deadline no more than
-eight hours away. DNS/ALB stays disabled unless hosted-zone, subdomain, email,
-and CIDR inputs are all supplied.
+eight hours away. Keep DNS/ALB and public application ingress disabled for the
+initial qualification deployment, even when those inputs are available. Enable
+them only for the final reviewed public proof after the private gates pass.
 
 Use `infra/b6/eks/invoke-stage.ps1` twice per stage: first `-Action Plan`, review
 the saved plan, then `-Action Apply -ApproveAwsChanges`. The required order is:
@@ -235,8 +242,9 @@ application stage.
 
 After separate approvals:
 
-1. Push four immutable amd64 images with `push-images.ps1
-   -ApproveImagePush`.
+1. Push four provisional immutable amd64 images with `push-images.ps1
+   -ApproveImagePush`. Record their digests; they become obsolete if a fix
+   changes source.
 2. Upload the Kubernetes Secret with `new-secret.ps1
    -ApproveSecretUpload`; Terraform and Helm values never contain its data.
 3. Use `deploy-application.ps1 -Action Plan`, review it, then run the same
@@ -247,6 +255,33 @@ After separate approvals:
 5. Run the same recovery and evidence logic against the EKS context. A live
    provider canary is a different approval and is capped at 20 documents and
    $5; recorded enrichment is the default.
+
+### Private qualification and redeployment loop
+
+Run the remaining formal B3 DLQ/replay/interruption/recovery, B4 event-order/
+failure/checkpoint-recovery/load, and B5 store/degradation/repair/rebuild/
+rollback/10,000-document scenarios against the private EKS deployment using
+the acceptance contracts in [Testing](TESTING.md) and operational procedures in
+[Operations](OPERATIONS.md). The built-in EKS smoke is necessary but does not
+replace those scenarios.
+
+For every repository-owned failure:
+
+1. preserve the failing evidence and identify its commit, digests, and Helm
+   revision;
+2. fix and test locally, commit the change, and rerun the affected local gate;
+3. build and push new immutable image digests—never overwrite or reuse the old
+   release identity;
+4. create and review a new application plan, apply it, wait for the rollout,
+   and rerun the affected EKS gates;
+5. repeat until stable while preserving the eight-hour deadline and cost
+   boundary.
+
+Before public proof, freeze one final commit, rerun the complete regression and
+remote CI, rebuild all four definitive digests, deploy that exact identity, and
+rerun the final smoke/recovery/evidence set. Only then enable restricted HTTPS
+ingress through a separately reviewed plan. Evidence from provisional commits
+must not be presented as evidence for the final release.
 
 ## Video and evidence checklist
 

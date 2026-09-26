@@ -11,8 +11,9 @@ qualified or deployed.
 
 | Field | Recorded value |
 | --- | --- |
-| Current candidate commit | `269440d8d35e6b9ecac7b2ed337c1bac941fd38b` |
+| Application code baseline | `269440d8d35e6b9ecac7b2ed337c1bac941fd38b` |
 | Release-hardening commit | `6e8b99e91d7dd112fe00e990a040320633249a77` |
+| Final deployment commit | Pending final regression, fixes, and digest rebuild |
 | Helm chart | `rhetoriq` `0.1.0`, app version `b6` |
 | MiniLM model | `sentence-transformers/all-MiniLM-L6-v2` |
 | MiniLM revision | `c9745ed1d9f207416be6d2e6f8de32d1f16199bf` |
@@ -51,34 +52,47 @@ ignored root `.env` were not printed or committed.
   changed afterward. Those earlier identities are obsolete and are not release
   digests.
 
-## Remaining before AWS provisioning
+## Before initial private EKS provisioning
 
 1. Rerun the complete backend/PostgreSQL/schema/frontend/Compose/Helm/
    Kubernetes-schema/Terraform regression suite at the candidate commit.
 2. Build the backend, B5, Flink, and frontend Linux/AMD64 images from that
-   commit and record their definitive SHA-256 identities.
-3. Observe equivalent CI gates passing for the commit intended for deployment.
-4. Finish the formal B3 gates for DLQs, controlled replay, broker/registry
-   interruption, and recovery of every consumer role.
-5. Finish the B4 duplicate/late/out-of-order, failure-injection, checkpoint
-   recovery, paced-load, retry/budget, and optional bounded-provider gates.
-6. Run the B5 specialized-store, degradation, repair, rebuild, rollback,
-   browser/product, and separate 10,000-document qualification in a
-   resource-feasible environment.
-7. Either complete the full kind smoke with the required kernel, disk, and
-   memory prerequisites or retain the local resource boundary and run the
-   complete topology smoke on EKS. A reduced topology does not count.
-8. Install and verify AWS CLI v2, then supply the approved AWS identity, region,
+   commit and record provisional SHA-256 identities suitable for the first EKS
+   deployment. They are not final release digests if later fixes change code.
+3. Observe equivalent CI gates passing for that initial deployment commit.
+4. Install and verify AWS CLI v2, then supply the approved AWS identity, region,
    CIDRs, owner/run/deadline tags, budget notification email, and optional DNS
    inputs without committing credentials.
+5. Complete the practical local B3/B4 checks. Record the workstation's memory,
+   disk, and kernel boundary rather than weakening the topology or forcing the
+   B5 qualification onto this host.
+
+## Private EKS qualification and iteration
+
+1. Provision the guarded EKS environment with public application ingress
+   disabled, register the eight-hour teardown, push the provisional images,
+   upload the Secret, and deploy the complete topology.
+2. Run the remaining formal B3 DLQ/replay/interruption/recovery scenarios and
+   B4 duplicate/late/out-of-order, failure-injection, checkpoint-recovery,
+   paced-load, and retry/budget scenarios on EKS.
+3. Run the B5 specialized-store, degradation, repair, rebuild, rollback,
+   browser/product, and separate 10,000-document qualification on EKS. A basic
+   EKS smoke does not substitute for these named formal scenarios.
+4. For each defect, fix and test locally, create a new commit, build and push
+   new immutable digests, update the reviewed Helm/Terraform application plan,
+   redeploy, and rerun the affected gates. Never reuse evidence from an older
+   digest as evidence for the replacement.
+5. Once stable, rerun the complete regression suite and CI, rebuild the four
+   definitive images, and ensure the final commit, digests, chart revision,
+   migrations, and evidence all identify the same release.
+6. Only then enable restricted public HTTPS, perform the public investigation,
+   SSE, reload/redeploy, replay, health, persistence, and rollback proof, and
+   export sanitized evidence.
 
 ## AWS execution and closure
 
-After the prerequisites above, follow [B6 Operations](B6_OPERATIONS.md) rather
-than duplicating commands here: plan/review/apply the three Terraform states,
-register the deadline teardown, push digest-addressed images, upload the
-Kubernetes Secret, deploy the Helm release, and run smoke/evidence and recovery
-jobs. Complete the public investigation, SSE, reload/redeploy, replay, health,
-and persistence checks in [Deployment](DEPLOYMENT.md), export sanitized
-evidence, then destroy `platform -> foundation -> bootstrap`. Slice closure
-requires an empty residual AWS inventory.
+Follow [B6 Operations](B6_OPERATIONS.md) rather than duplicating commands here
+for every plan/apply, image push, Secret upload, redeployment, smoke/evidence
+run, and recovery drill. Complete the final public proof in
+[Deployment](DEPLOYMENT.md), then destroy `platform -> foundation -> bootstrap`.
+Slice closure requires an empty residual AWS inventory.

@@ -92,8 +92,11 @@ and bounded live canary pass. See [Testing](TESTING.md) and
 
 ## B6 local Kubernetes
 
-The B6 entry condition is accepted B3–B5 behavior under Compose. The current
-workstation and sequence are recorded in [Pre-B6](PRE_B6_GUIDE.md).
+The preferred B6 entry condition is accepted B3–B5 behavior under Compose.
+This workstation cannot satisfy the full B5 memory budget, so the approved
+alternative is a trustworthy local regression and provisional immutable-image
+baseline followed by private EKS qualification. The current workstation and
+sequence are recorded in [Pre-B6](PRE_B6_GUIDE.md).
 
 B6 implementation adds:
 
@@ -109,7 +112,10 @@ B6 implementation adds:
 Kubernetes must not be used to hide an unqualified underlying application
 topology. The full B5 load gate requires a higher-memory environment than the
 current workstation; reduced local smoke tests do not replace that evidence.
-See [B6 Operations](B6_OPERATIONS.md) for the exact blocked-by-default runtime
+Formal B3–B5 scenarios may run on the private EKS environment when they follow
+the same acceptance contracts and retain the required evidence; an ordinary
+EKS smoke alone does not close those gates. See
+[B6 Operations](B6_OPERATIONS.md) for the exact blocked-by-default runtime
 sequence. B6 remains unqualified until that evidence is retained.
 
 ### B6 implementation and verification snapshot
@@ -193,9 +199,12 @@ After correcting those prerequisites, the local gates are:
 The EKS gates are entirely unexecuted: provide the required operator/network/
 expiry/owner/run/notification and optional DNS inputs; review each saved plan;
 explicitly approve AWS changes, image pushes, and Secret upload; confirm the
-Budget subscription; execute the demo; export evidence; and destroy in
-`platform -> foundation -> bootstrap` order with an empty residual inventory.
-No AWS provisioning or billable action has occurred.
+Budget subscription; deploy privately; execute the remaining formal B3–B5
+scenarios; iterate with new commit/image identities for every fix; freeze and
+revalidate the final release; enable restricted public HTTPS for final proof;
+export evidence; and destroy in `platform -> foundation -> bootstrap` order
+with an empty residual inventory. No AWS provisioning or billable action has
+occurred.
 
 ## Later platform work
 

@@ -181,7 +181,8 @@ runtime has been accepted. Run the repository gate before any cluster change:
 
 At the last recorded check, the existing kind node was Ready, but
 `vm.max_map_count` was `262144` instead of `1048576`, the workspace drive had
-about 15.43 GiB free instead of the 20 GiB minimum, and host Helm was absent.
+about 15.43 GiB free instead of the 20 GiB minimum. Helm 3.19.0 and Terraform
+1.13.3 are now installed, while AWS CLI v2 remains absent.
 The local full-stack run must stop until those prerequisites are corrected. Its
 6.66 GiB Docker-memory allocation makes the smoke an experiment: Pending pods
 or OOM kills are evidence to retain, not permission to remove components.
@@ -189,10 +190,13 @@ or OOM kills are evidence to retain, not permission to remove components.
 ## Ephemeral AWS portfolio demonstration
 
 The repository now implements a short-lived AWS EKS environment for the
-production-style architecture. It has not been provisioned. A future execution
-is evidence of engineering integration only, not a permanent production
-service, formal B3-B5 qualification, B5 10,000-document qualification, or proof
-of continuous 100K-document operation.
+production-style architecture. It has not been provisioned. Use it initially
+as a private qualification environment, with public application ingress
+disabled. A basic EKS smoke is evidence of engineering integration only; it is
+not a permanent production service, formal B3-B5 qualification, B5
+10,000-document qualification, or proof of continuous 100K-document operation.
+Formal B3–B5 gates may be executed there only when their complete prescribed
+scenarios and evidence requirements are retained.
 
 The demonstration should use seeded or appropriately licensed data and record:
 
@@ -209,6 +213,14 @@ the supplied CIDRs, and apply the required project/environment/owner/run/
 commit/expiry tags. The implemented profile uses one on-demand x86
 `m7i.2xlarge`, two public subnets, no NAT Gateway, encrypted gp3 volumes,
 immutable ECR repositories, and no managed application databases.
+
+After the private deployment, run the remaining formal acceptance scenarios.
+Fix failures locally and redeploy only new immutable digests under a new commit
+identity. Once stable, rerun the complete regression and CI, rebuild the four
+definitive images, and deploy that exact release. Enable restricted public
+HTTPS only for the final investigation, SSE, persistence, reload/redeploy,
+replay, health, and rollback proof. Any code change after that point invalidates
+the affected release evidence until it is rerun.
 
 After recording evidence, use the guarded teardown from the same states. It
 exports evidence, requests a final Flink savepoint, stops consumers, destroys
