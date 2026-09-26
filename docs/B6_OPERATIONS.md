@@ -294,8 +294,9 @@ After separate approvals:
 1. Dispatch `Publish ECR Images` on `main` with the exact 40-character source
    SHA, the foundation `run_id`, and its region. For the initial deployment,
    use `7d1c4f2ab91bb5a557050b9c591ea621fd6c1652` if that is still the
-   selected source. Wait for all four Linux/AMD64 builds and ECR readbacks to
-   pass. Download the run's `ecr-images-*` artifact and run
+   selected source. The workflow verifies the source is reachable from `main`
+   before assuming the publisher role. Wait for all four Linux/AMD64 builds and
+   ECR readbacks to pass. Download the run's `ecr-images-*` artifact and run
    `verify-image-artifact.ps1 -ArtifactDir <downloaded-directory> -SourceSha
    <full-sha> -RunId <run-id>` from the repository root. The verifier checks
    foundation outputs, the four tags and ECR manifest digests, then writes
