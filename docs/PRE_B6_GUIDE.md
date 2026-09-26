@@ -26,20 +26,31 @@ Prepared: 2026-09-19. Last updated from this Windows development machine on
 
 ### 2026-09-26 — Release hardening and PostgreSQL qualification
 
-- **Tooling:** Helm 3.19.0 and Terraform 1.13.3 are installed and on `PATH`.
-  Docker, kubectl, and kind remain available. AWS CLI is not installed.
-- **Validation:** The recorded baseline is 368 backend passes with 27 optional
-  environment-dependent skips, 16/16 disposable PostgreSQL integration tests,
-  27 frontend tests plus the production build, zero high-severity npm audit
-  findings, reproducible event schemas, both Helm profiles, Kubernetes schema
-  validation, PowerShell parsing, Compose rendering, and all three Terraform
-  states validated without AWS access.
+- **Tooling:** Helm 3.19.0, Terraform 1.13.3, kubectl 1.36.1, and kind 0.33.0
+  were reverified directly. AWS CLI v2.37.4 is installed at
+  `C:\Program Files\Amazon\AWSCLIV2\aws.exe`; newly opened shells inherit its
+  system `PATH` entry.
+- **AWS identity boundary:** No standard local AWS profiles or `AWS_*`
+  environment credentials were found. `aws sts get-caller-identity` was not
+  called, no AWS API operation ran, and the operator identity remains
+  unverified.
+- **Validation:** The release-candidate regression exercised source `91a95e6`
+  and was recorded with the Terraform formatting fix in commit `4efcab2`. With
+  disposable PostgreSQL configured, the complete backend suite passed with 386
+  passes, 12 optional environment-dependent skips, and zero failures; all 16
+  PostgreSQL integration tests also passed separately. Python compilation,
+  reproducible event schemas, `npm ci`, 27 frontend tests, the production
+  build, zero high-severity audit findings, all three Compose profiles, both
+  Helm profiles, Kubernetes schema validation, all 19 PowerShell scripts, and
+  all three Terraform states passed without AWS access.
 - **Hardening:** Commits `6e8b99e` and `269440d` add missing CI infrastructure
   and image gates, repair PostgreSQL conninfo/query handling, remediate frontend
   dependencies, and make the Flink job compatible with the pinned 2.3 runtime.
-- **Boundary:** The complete suite and all four definitive image digests still
-  need to be reproduced at the final deployment commit. Remote CI has not yet
-  been observed green for that commit.
+- **Boundary:** The complete local regression is recorded. Remote CI has not
+  yet been observed green, and the four release images and SHA-256 digests have
+  not yet been built from the selected deployment commit. After EKS iteration,
+  the complete suite and definitive digests must be reproduced for the final
+  deployment identity.
 
 ### 2026-09-26 — B4 recorded-provider smoke passed
 
@@ -103,7 +114,7 @@ The following inventory is a snapshot of commands available on the development m
 | minikube | Not found on PATH | Alternative to kind; choose one local cluster tool. |
 | Helm | v3.19.0 installed and on `PATH` | Required by the implemented B6 runtime scripts and chart. |
 | Terraform | v1.13.3 installed and on `PATH` | Required for the guarded EKS plans; no AWS-backed plan or apply has run. |
-| AWS CLI | Not found on `PATH` | Install and verify v2 before AWS identity checks, ECR pushes, or EKS operations. |
+| AWS CLI | v2.37.4 installed; absolute executable verified | Open a new shell, configure an approved SSO profile or IAM credentials privately, and require `aws sts get-caller-identity` to pass before any ECR, EKS, or Terraform provider operation. |
 
 ### Recommended immediate installation
 
@@ -537,14 +548,21 @@ The public demo still needs the current Kafka/worker execution dependencies unle
 ## 7. AWS Deployment Handoff
 
 Use [AWS Release Readiness](RELEASE_READINESS.md) for the canonical completed
-evidence and ordered remaining checklist. Before AWS provisioning, rerun the
-complete regression suite at the deployment commit, rebuild all four
-Linux/AMD64 images with provisional SHA-256 identities, observe CI passing,
-complete the practical local B3/B4 gates, and install AWS CLI v2. Do not force
+evidence and ordered remaining checklist. The complete local regression is
+recorded against source `91a95e6` with evidence committed at `4efcab2`. If the
+selected deployment source changes, rerun every affected gate. Before AWS
+provisioning, build all four Linux/AMD64 images with provisional SHA-256
+identities, observe CI passing, complete the practical local B3/B4 gates, and
+verify AWS identity from a newly opened shell. AWS CLI v2 is installed, but no
+profile or credentials are configured and no AWS identity has been verified.
+Do not force
 the full B5 qualification onto this resource-constrained workstation.
 
-Then provide the approved AWS identity, region, CIDRs, owner/run/deadline tags,
-budget notification email, and optional DNS inputs. The exact guarded
+Then provide the approved AWS identity and underlying IAM role ARN, confirmed
+region, operator `/32` CIDR, globally unique state-bucket name,
+owner/run/commit/deadline tags, and confirmed Budget notification email.
+Initial private deployment does not require DNS inputs or application
+`allowed_cidrs`. The exact guarded
 plan/apply, image push, Secret upload, Helm deployment, smoke/evidence, recovery,
 and reverse-order teardown commands live only in [B6 Operations](B6_OPERATIONS.md).
 Deploy the complete topology initially without public application ingress and

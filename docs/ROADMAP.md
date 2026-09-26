@@ -146,20 +146,24 @@ The repository now contains:
   `9e4bd3c04f57e5c2189b5d5ddae521518c52cffa`, with archive checksum
   verification and the compatibility patch recorded in the runtime lock.
 
-Recorded non-runtime verification at the current working-tree state:
+Recorded release-candidate regression against source `91a95e6`, with its
+evidence and the Terraform formatting correction committed as `4efcab2`:
 
-- 368 backend tests passed and 27 environment-dependent tests skipped;
+- with disposable PostgreSQL configured, 386 backend tests passed, 12 optional
+  environment-dependent tests skipped, and zero tests failed;
 - all 16 disposable PostgreSQL integration tests passed;
-- 18 post-hardening focused tests passed, followed by 9 final Flink/B6
-  deployment-contract tests after the runtime fixes;
+- Python compilation and event-schema reproduction passed without a generated
+  diff;
 - 27 frontend tests and the production frontend build passed;
 - the high-severity frontend dependency audit reported zero vulnerabilities;
+- all three Compose profiles rendered from the example environment;
 - both Helm profiles linted and rendered: 61 kind resources and 58 EKS
   resources;
-- Kubernetes schema validation found no invalid built-in resources;
-- every B6 PowerShell script parsed, Compose rendered with the example
-  environment, and all three Terraform configurations validated without AWS
-  credentials or a remote backend;
+- Kubernetes schema validation reported 52 valid/0 invalid/9 unavailable kind
+  resources and 50 valid/0 invalid/8 unavailable EKS resources, while both
+  render-contract checks passed;
+- all 19 B6 PowerShell scripts parsed, and all three Terraform configurations
+  passed formatting and validation without AWS credentials or a remote backend;
 - the final Flink image built from checksum-verified connector source and
   passed non-root UID, runtime-import, required-JAR, and no-compiler checks.
 
@@ -180,8 +184,9 @@ The last recorded workstation snapshot was:
 - `vm.max_map_count=262144`, below the required `1048576`;
 - about 15.43 GiB free on the workspace drive, below the 20 GiB hard preflight
   minimum and the recommended 25 GiB working margin;
-- Helm 3.19.0 and Terraform 1.13.3 installed on the host; AWS CLI v2 remains
-  absent.
+- Helm 3.19.0, Terraform 1.13.3, kubectl 1.36.1, kind 0.33.0, and AWS CLI
+  v2.37.4 are installed. No standard local AWS profile or environment
+  credentials were found, so AWS identity remains unverified.
 
 After correcting those prerequisites, the local gates are:
 

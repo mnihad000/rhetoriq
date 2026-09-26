@@ -13,7 +13,8 @@ qualified or deployed.
 | --- | --- |
 | Application code baseline | `269440d8d35e6b9ecac7b2ed337c1bac941fd38b` |
 | Release-hardening commit | `6e8b99e91d7dd112fe00e990a040320633249a77` |
-| Local regression tested commit | `91a95e60a511c8e740f0d0436039ff39830076e7` (plus the Terraform formatting fix recorded in this document) |
+| Local regression tested source | `91a95e60a511c8e740f0d0436039ff39830076e7` |
+| Regression evidence and Terraform formatting commit | `4efcab20de05fb62d6ce83c7b3e2816afa2eb1e0` |
 | Final deployment commit | Pending EKS qualification, remote CI, and definitive digest rebuild |
 | Helm chart | `rhetoriq` `0.1.0`, app version `b6` |
 | MiniLM model | `sentence-transformers/all-MiniLM-L6-v2` |
@@ -27,7 +28,9 @@ committed.
 
 ## Evidence completed
 
-- At `91a95e6`, Docker Server 29.6.2, Helm 3.19.0, Terraform 1.13.3,
+- The release-candidate regression exercised source `91a95e6`; its evidence
+  and the formatting-only Terraform correction were committed as `4efcab2`.
+  Docker Server 29.6.2, Helm 3.19.0, Terraform 1.13.3,
   kubectl 1.36.1, kind 0.33.0, Node 22.23.2, npm 11.12.1, and Python 3.13.3
   were verified locally. Docker's existing `rhetoriq` services were left running.
 - Python compilation and `events.export_schemas --check` passed with no
@@ -60,6 +63,17 @@ committed.
 - Four production images have built locally during preparation, but source
   changed afterward. Those earlier identities are obsolete and are not release
   digests.
+- The AWS CLI v2 preflight completed on 2026-09-26. `winget` installed
+  `aws-cli/2.37.4 Python/3.14.6 Windows/11 exe/AMD64` at
+  `C:\Program Files\Amazon\AWSCLIV2\aws.exe`; the installer hash was checked,
+  no elevation prompt appeared, and no reboot was pending. The system `PATH`
+  update is available to newly opened shells. Terraform 1.13.3, kubectl 1.36.1
+  (Docker Desktop), Helm 3.19.0, and kind 0.33.0 were also reverified directly.
+- `aws configure list-profiles` returned no profiles. No standard local AWS
+  profile directory or process-, user-, or machine-level `AWS_*` environment
+  credentials were found, so `aws sts get-caller-identity` was deliberately
+  skipped. No AWS API call or resource mutation was made; AWS identity remains
+  unverified.
 
 ## Evidence limits and remaining gates
 
@@ -76,19 +90,34 @@ container was removed, and the four pre-existing Docker services remained
 running. Remote CI has not been observed green. Private EKS qualification and
 the four release image builds/digests remain pending.
 
+The AWS CLI preflight began with `.codex/config.toml` and
+`frontend/tsconfig.app.tsbuildinfo` modified. While it ran, concurrent sessions
+rewrote `infra/terraform/eks-demo/platform/main.tf` with formatting-only changes
+and this readiness document, and returned the TypeScript build-info file to an
+unmodified state. The preflight itself made no repository writes. Those
+concurrent edits require normal review and must not be attributed to, or used
+as evidence from, the AWS preflight.
+
 ## Before initial private EKS provisioning
 
-1. Preserve the local regression evidence above for the tested source state;
-   rerun affected gates if source changes and the complete suite before the
-   definitive image rebuild.
+1. Preserve the committed `4efcab2` regression evidence for the tested source
+   state. Rerun affected gates if executable, dependency, build, chart, script,
+   or Terraform source changes, and rerun the complete suite before the
+   definitive image rebuild after EKS iteration.
 2. Build the backend, B5, Flink, and frontend Linux/AMD64 images from that
    commit and record provisional SHA-256 identities suitable for the first EKS
    deployment. They are not final release digests if later fixes change code.
 3. Observe equivalent CI gates passing for that initial deployment commit.
-4. Install and verify AWS CLI v2, then supply the approved AWS identity, region,
-   CIDRs, owner/run/deadline tags, budget notification email, and optional DNS
-   inputs without committing credentials.
-5. Complete the practical local B3/B4 checks. Record the workstation's memory,
+4. Configure an approved AWS SSO profile or IAM credentials in a private
+   operator shell, then require `aws sts get-caller-identity` to succeed. Confirm
+   the region (`us-east-2` is the repository default) and resolve the underlying
+   IAM role ARN for `operator_principal_arn`; never use the returned STS
+   `assumed-role` session ARN.
+5. Supply a globally unique state-bucket name, `owner`, `run-id`, `commit`, an
+   RFC3339 `expires-at` no more than eight hours away, the operator's public
+   `/32` CIDR, and a Budget notification email whose AWS subscription will be
+   confirmed. Keep credentials and Secret values out of tracked files.
+6. Complete the practical local B3/B4 checks. Record the workstation's memory,
    disk, and kernel boundary rather than weakening the topology or forcing the
    B5 qualification onto this host.
 

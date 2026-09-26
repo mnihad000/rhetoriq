@@ -72,16 +72,20 @@ Completed and verified locally:
   scripts;
 - exact connector-source commit and archive-checksum verification in the Flink
   image build;
-- 368 backend tests passed with 27 environment-dependent skips, 9 final B6
-  deployment-contract tests passed, and 27 frontend tests plus the production
-  build passed;
-- all 16 disposable PostgreSQL integration tests passed, the frontend
-  high-severity audit reported zero vulnerabilities, and focused post-hardening
-  tests passed after the database and Flink 2.3 compatibility fixes;
+- the release-candidate regression exercised source `91a95e6` and was recorded
+  with the Terraform formatting fix in commit `4efcab2`;
+- with disposable PostgreSQL configured, 386 backend tests passed with 12
+  optional environment-dependent skips and zero failures; all 16 disposable
+  PostgreSQL integration tests also passed separately;
+- Python compilation and event-schema reproduction passed without a generated
+  diff; 27 frontend tests, the production build, and the frontend high-severity
+  audit passed with zero vulnerabilities;
 - both Helm profiles linted and rendered (61 kind and 58 EKS resources), their
-  built-in Kubernetes objects passed strict schema validation, all B6
-  PowerShell scripts parsed, Compose rendered from the example environment,
-  and all Terraform states validated without a backend or AWS credentials;
+  schema checks reported 52 valid/0 invalid/9 unavailable for kind and 50
+  valid/0 invalid/8 unavailable for EKS, and the render-contract checks passed;
+  all 19 B6 PowerShell scripts parsed, all three Compose profiles rendered from
+  the example environment, and all Terraform states passed formatting and
+  validation without a backend or AWS credentials;
 - the final Flink runtime passed non-root UID 9999, Python/PyFlink import,
   required connector/schema JAR, and no-runtime-compiler checks.
 - the disposable B4 recorded-provider smoke published 20 documents and
@@ -108,7 +112,7 @@ Last recorded local prerequisites:
 | Workspace free disk | about 15.43 GiB | Free at least 20 GiB; 25 GiB is recommended. |
 | Host Helm | 3.19.0 installed on `PATH` | Reverify before runtime scripts. |
 | Host Terraform | 1.13.3 installed on `PATH` | Reverify before AWS planning. |
-| AWS CLI | not on `PATH` | Install and verify AWS CLI v2 before provider identity or ECR/EKS operations. |
+| AWS CLI | v2.37.4 installed at `C:\Program Files\Amazon\AWSCLIV2\aws.exe` | Open a new shell and verify an approved AWS identity; no local profile or credentials were present at the recorded preflight. |
 
 The ignored root `.env` was not read, printed, or changed. The canonical
 candidate identity, completed evidence, and pre-AWS gates are recorded in
@@ -212,12 +216,39 @@ images are required before provisioning, but the resource-heavy formal B3–B5
 scenarios may run on EKS. Public application ingress is a final proof step, not
 the initial deployment mode.
 
+The 2026-09-26 preflight found no standard local AWS profiles or environment
+credentials. AWS CLI v2.37.4 is installed, but no identity has been verified.
+In a private operator shell, configure an approved SSO profile or IAM
+credentials and require `aws sts get-caller-identity` to succeed before any
+provider plan or mutation. For SSO, resolve the underlying role ARN, including
+the `aws-reserved/sso.amazonaws.com/<region>/` path where applicable; an
+`arn:aws:sts::...:assumed-role/...` session ARN is not a valid substitute for
+`operator_principal_arn`.
+
 Copy each `demo.tfvars.example` to an ignored `.tfvars` file and replace every
-placeholder. Required foundation inputs are the AWS operator principal, CIDRs,
-notification email, owner, commit, run ID, and an RFC3339 deadline no more than
-eight hours away. Keep DNS/ALB and public application ingress disabled for the
-initial qualification deployment, even when those inputs are available. Enable
-them only for the final reviewed public proof after the private gates pass.
+placeholder. The private deployment input checklist is:
+
+- confirm the AWS region; repository examples and defaults use `us-east-2`;
+- choose a globally unique bootstrap `state_bucket_name`, and use the resulting
+  bucket in the foundation and platform `backend.hcl` files and as platform
+  `state_bucket`;
+- supply `owner`, `run-id`, `commit`, and an RFC3339 `expires-at` no more than
+  eight hours after deployment starts;
+- supply the actual IAM role ARN as `operator_principal_arn` and the operator's
+  current public IP as a `/32` in `operator_cidrs`; optional `ci_cidrs` defaults
+  to an empty list;
+- supply the AWS Budget `notification_email` and confirm the subscription email
+  before the application stage; and
+- create the `rhetoriq-secrets` Secret in namespace `rhetoriq-demo` before the
+  Helm release. Required keys are `database-url`, `postgres-user`,
+  `postgres-password`, `postgres-db`, `elasticsearch-password`, `neo4j-auth`,
+  `neo4j-password`, `redis-password`, and `searxng-secret`; `gemini-api-key` and
+  `groq-api-key` are optional.
+
+Keep DNS/ALB and public application ingress disabled for the initial
+qualification deployment. `hosted_zone_id`, `subdomain`, and application
+`allowed_cidrs` are therefore not initially required. `operator_cidrs` remains
+required because it controls access to the EKS API endpoint.
 
 Use `infra/b6/eks/invoke-stage.ps1` twice per stage: first `-Action Plan`, review
 the saved plan, then `-Action Apply -ApproveAwsChanges`. The required order is:
@@ -255,6 +286,11 @@ After separate approvals:
 5. Run the same recovery and evidence logic against the EKS context. A live
    provider canary is a different approval and is capped at 20 documents and
    $5; recorded enrichment is the default.
+
+`push-images.ps1` writes the digest values consumed by the later wrappers.
+`deploy-application.ps1` injects `deploy_application=true` and all four image
+digests; `run-smoke.ps1` injects the smoke and evidence flags. Do not manually
+duplicate those generated values in the base tfvars.
 
 ### Private qualification and redeployment loop
 
