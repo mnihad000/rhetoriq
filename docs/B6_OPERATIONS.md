@@ -92,13 +92,14 @@ Completed and verified locally:
   received 20 unique processed documents with zero failures in 135.31 seconds;
   the running job completed checkpoints. This is partial B4 runtime evidence,
   not recovery or load qualification.
-- commit `823e305` is on `further_dev`, the GitHub default branch, and on the
-  historical `main`, with the guarded `Publish ECR Images` workflow,
+- commit `823e305` is in both the `further_dev` and historical `main` branch
+  histories, with the guarded `Publish ECR Images` workflow,
   foundation OIDC publisher role, explicit-source reachability check, and
   artifact verifier. The ECR release path (workflow branch guard,
   source-ancestry check, and publisher-role `ref` trust) was then migrated from
-  `main` to `further_dev`, and region validation plus all-zero placeholder
-  digest rejection were added to the workflow and verifier. Workflow lint,
+  `main` to `further_dev` at `02a0ed7`, and region validation plus all-zero
+  placeholder digest rejection were added to the workflow and verifier. The
+  completed environment evidence was recorded at `8c393f6`. Workflow lint,
   foundation Terraform validation, verifier tests, and `git diff --check`
   passed without AWS access. The branch migration is complete: on 2026-09-26
   the public GitHub API showed the protected `ecr-release` environment with a

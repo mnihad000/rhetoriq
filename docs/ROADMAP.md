@@ -178,7 +178,8 @@ manually approved ECR workflow, foundation OIDC publisher role,
 explicit-source reachability guard, and artifact verifier. `further_dev` is the
 GitHub default branch, the only permitted ECR release branch, and the
 source-ancestry boundary; the workflow guard, ancestry check, and publisher-role
-`ref` trust now target it. The branch migration is complete: the protected
+`ref` trust now target it as of `02a0ed7`, with the completed environment
+evidence recorded at `8c393f6`. The branch migration is complete: the protected
 `ecr-release` environment permits only `further_dev`, with a required reviewer
 and administrator bypass disabled.
 Workflow lint, Terraform validation, verifier tests, and `git diff --check`

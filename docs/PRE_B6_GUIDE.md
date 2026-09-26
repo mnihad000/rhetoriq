@@ -57,8 +57,9 @@ Prepared: 2026-09-19. Last updated from this Windows development machine on
   artifact verifier. `further_dev` is now the GitHub default branch, the only
   permitted ECR release branch, and the source-ancestry boundary for image
   publication; the workflow guard, ancestry check, and publisher-role `ref`
-  trust were migrated to it, and the workflow and verifier now reject invalid
-  regions and the all-zero placeholder digest. The branch migration is
+  trust were migrated to it at `02a0ed7`, and the workflow and verifier now
+  reject invalid regions and the all-zero placeholder digest. The completed
+  environment evidence was recorded at `8c393f6`. The branch migration is
   complete: the protected `ecr-release` environment permits only
   `further_dev`, with reviewer `mnihad000` and administrator bypass disabled,
   as verified through the public GitHub API. Workflow lint,

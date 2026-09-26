@@ -4,12 +4,64 @@ RhetoriQ is an evidence-first narrative investigation system. It detects public 
 
 The product deliberately distinguishes **first observed in the available dataset** from true origin and does not treat correlation as proof of coordination.
 
+## Architecture at a glance
+
+```mermaid
+flowchart TB
+    subgraph Edge[Restricted public edge — final proof only]
+        U([User]) --> B[Browser]
+        DNS[Route 53 DNS] --> ALB[HTTPS ALB / Ingress]
+        ACM[ACM certificate] -.- ALB
+        B -->|HTTPS pages / API / SSE| ALB
+        ALB -->|/| FE[React / Nginx]
+        ALB -->|/api| API[FastAPI]
+    end
+    subgraph Core[EKS application namespace]
+        API -->|accept request| PG[(PostgreSQL / pgvector)]
+        PG ==>|transactional outbox| OUT[Outbox publisher]
+        OUT ==>|versioned events| K[(Kafka KRaft)]
+        REG[Apicurio schemas] -.- K
+        K ==>|requested| IW[LangGraph investigation worker]
+        K ==>|raw / enriched| FL[Flink stream job]
+        FL ==>|processed / signals| DW[Document + signal workers]
+        DW -->|canonical writes| PG
+        IW -->|receipts + artifacts| PG
+        IW --> GATE{{Claim checks + publication gate}}
+        GATE -->|cited report or limitation| PG
+        K ==>|projection topics| PW[Projection workers]
+        PW --> ES[(Elasticsearch)]
+        PW --> NG[(Neo4j)]
+        PW --> V[(MiniLM vectors in pgvector)]
+        API -->|validated reads| ES
+        API -->|explained paths| NG
+        API -->|complete-response cache| RD[(Redis cache)]
+        API -->|durable history / workspace| PG
+    end
+    subgraph Sources[Approved acquisition]
+        SX[SearXNG] --> WEB[Public records + permitted pages]
+        IW -->|bounded tools| SX
+        IW -->|primary APIs / fetch| WEB
+    end
+    classDef actor fill:#eef2ff,stroke:#4f46e5,color:#1e1b4b
+    classDef service fill:#e0f2fe,stroke:#0284c7,color:#082f49
+    classDef durable fill:#dcfce7,stroke:#15803d,color:#14532d
+    classDef derived fill:#fef3c7,stroke:#b45309,color:#78350f
+    classDef gate fill:#fce7f3,stroke:#be185d,color:#831843
+    classDef trust fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+    class U,B actor
+    class FE,API,OUT,IW,FL,DW,PW,SX,WEB service
+    class PG,K durable
+    class ES,NG,V,RD derived
+    class GATE gate
+    class DNS,ALB,ACM,REG trust
+```
+
+Solid arrows show direct requests and writes; thick arrows show asynchronous events; dotted lines show trust relationships. See [the full architecture](docs/ARCHITECTURE.md) for runtime processing, deployment, recovery, the complete legend, and the lifecycle walkthrough.
+
 ## What the current repository implements
 
-The product, Kafka/Flink pipeline, and B5 projection code are implemented in
-the repository. Actual-stack qualification, public deployment evidence, and
-Kubernetes/cloud work are tracked separately; code presence is not presented as
-proof that those gates have passed.
+The repository includes the product, Kafka/Flink pipeline, B5 projections, B6
+Helm chart, guarded EKS Terraform states, and deployment scripts.
 
 - FastAPI endpoints for ingestion, trending topics, investigations, timelines, graphs, mutations, receipts, and reports.
 - GDELT DOC 2.0 ingestion for news discovery.
@@ -28,11 +80,12 @@ proof that those gates have passed.
   Neo4j, MiniLM/pgvector, and Redis projections behind acceptance-gated flags.
 - Production containers, committed PostgreSQL migrations, and CI checks for
   backend, frontend, schemas, documentation, and migration compatibility.
+- A shared Helm chart for `kind` and EKS, three isolated Terraform states,
+  GitHub OIDC publishing to immutable ECR images, and bounded smoke, evidence,
+  recovery, and teardown scripts.
 
-Kubernetes manifests, Terraform/GitOps, production observability, and the
-recurring-monitoring connector fleet remain roadmap work. See the
-[documentation index](docs/README.md) and [roadmap](docs/ROADMAP.md) for current
-status and acceptance boundaries.
+See the [documentation index](docs/README.md), [B6 operations](docs/B6_OPERATIONS.md),
+and [roadmap](docs/ROADMAP.md) for implementation and operating details.
 
 ## Research strategy
 
@@ -41,33 +94,12 @@ RhetoriQ is **agent-led and source-policy-first**, not crawler-first:
 1. A user question starts a bounded investigation; the LangGraph investigator selects live broad-web search, internal-corpus recall, canonical-page retrieval, or an approved primary-source API for each evidence gap.
 2. Search results and API records are discovery leads, not automatically evidence.
 3. RhetoriQ retrieves a canonical source page when permitted and needed to create an evidence record, then preserves receipts and limitations.
-4. RSS/Atom polling, public event streams, and other scheduled connectors provide continuous monitoring alongside on-demand investigations.
+4. The event pipeline processes accepted documents and signals; additional scheduled RSS/Atom and event-stream connectors are planned for recurring monitoring.
 
 A website, post, transcript, or official record is a source. An API, feed, or HTML fetch is the transport used to retrieve it.
 
 Current source status is documented in [DATA_SOURCES.md](docs/DATA_SOURCES.md).
 
-## Current data flow
-
-```mermaid
-flowchart LR
-    G[GDELT DOC 2.0 API] --> I[Ingestion services]
-    H[HN Algolia API] --> I
-    S[Search and browser tools] --> D[LangGraph investigator]
-    I --> O[Transactional outbox]
-    O --> K[(Kafka)]
-    D --> F[Canonical-page fetcher]
-    F --> O
-    K --> N[Normalized Document records]
-    N --> T[Trending and investigation pipelines]
-    T --> A[FastAPI]
-    A --> U[React frontend]
-```
-
-The implemented flow uses durable Kafka replay, PostgreSQL authority, Flink
-processing, and optional specialized search and graph projections built around
-the normalized document contract. Recurring monitoring connectors remain
-future work.
 
 ## Repository layout
 
@@ -81,6 +113,8 @@ rhetoriq/
 |   `-- tests/
 |-- frontend/         # React, TypeScript, and Vite application
 |-- docs/             # design and operating documentation
+|-- deploy/helm/      # kind and EKS application chart
+|-- infra/terraform/  # isolated AWS bootstrap, foundation, and platform states
 |-- SYSTEM_DESIGN.md
 `-- README.md
 ```
@@ -181,7 +215,7 @@ Connector credentials are configured only for approved deployments. Reddit acces
 |---|---|
 | [SYSTEM_DESIGN.md](SYSTEM_DESIGN.md) | Concise system principles and investigation lifecycle. |
 | [Documentation index](docs/README.md) | Entry point for all durable project documentation. |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Current topology, services, research workflow, processing, and storage boundaries. |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | End-to-end architecture, runtime events, deployment, trust, recovery, and lifecycle. |
 | [DATA_SOURCES.md](docs/DATA_SOURCES.md) | Source hierarchy, provider status, and compliance requirements. |
 | [KAFKA.md](docs/KAFKA.md) | Implemented replayable event contracts and operations. |
 | [OPERATIONS.md](docs/OPERATIONS.md) | Startup, health, replay, recovery, projection administration, and troubleshooting. |

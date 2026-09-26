@@ -17,6 +17,8 @@ qualified or deployed.
 | Regression evidence and Terraform formatting commit | `4efcab20de05fb62d6ce83c7b3e2816afa2eb1e0` |
 | Initial remote image source | `7d1c4f2ab91bb5a557050b9c591ea621fd6c1652` |
 | ECR delivery readiness commit (on `further_dev` and historical `main`) | `823e305e842b403d7562256fed6821aecf3014f8` |
+| ECR release migration and verifier hardening commit | `02a0ed72e44f1a0a4521d410215502f96fa17108` |
+| Completed migration evidence record | `8c393f66383c67ca658e7d5caf9e6c6b82789b28` |
 | GitHub default and ECR release branch | `further_dev` |
 | Final deployment commit | Pending EKS qualification, post-deployment remote CI, and definitive digest rebuild |
 | Helm chart | `rhetoriq` `0.1.0`, app version `b6` |
@@ -80,8 +82,11 @@ committed.
   credentials were found, so `aws sts get-caller-identity` was deliberately
   skipped. No AWS API call or resource mutation was made; AWS identity remains
   unverified.
-- The ECR delivery workflow and foundation OIDC publisher role were committed at
-  `823e305`, which is on both `further_dev` and the historical `main`.
+- The ECR delivery workflow and foundation OIDC publisher role were committed
+  at `823e305`, which is in both `further_dev` and the historical `main` branch
+  histories. The release-path migration and verifier hardening were committed
+  at `02a0ed7`; the completed GitHub environment evidence was recorded at
+  `8c393f6`.
   `further_dev` is now the GitHub default branch, the only permitted ECR
   release branch, and the source-ancestry boundary: the workflow branch guard,
   ancestry check, and publisher-role `ref` trust were migrated from `main` to
