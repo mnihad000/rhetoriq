@@ -89,10 +89,10 @@ class EventTimestampAssigner(TimestampAssigner):
 
 class ContentDeduplicator(KeyedProcessFunction):
     def open(self, runtime_context):
-        from pyflink.common import Duration, Types
+        from pyflink.common import Time, Types
         from pyflink.datastream.state import StateTtlConfig, ValueStateDescriptor
         descriptor = ValueStateDescriptor("b4-content-state-v1", Types.PICKLED_BYTE_ARRAY())
-        descriptor.enable_time_to_live(StateTtlConfig.new_builder(Duration.of_days(14))
+        descriptor.enable_time_to_live(StateTtlConfig.new_builder(Time.days(14))
                                        .set_update_type(StateTtlConfig.UpdateType.OnCreateAndWrite)
                                        .set_state_visibility(StateTtlConfig.StateVisibility.NeverReturnExpired).build())
         self.state = runtime_context.get_state(descriptor)
@@ -207,13 +207,15 @@ def main():
         registry.ensure_schema(topic)
     runtime_configuration = Configuration()
     runtime_configuration.set_string(
-        "state.checkpoints.dir",
+        "execution.checkpointing.dir",
         os.getenv("FLINK_CHECKPOINT_DIR", "file:///opt/flink/checkpoints"),
     )
     env = StreamExecutionEnvironment.get_execution_environment(runtime_configuration)
     env.set_parallelism(2)
     env.enable_checkpointing(60_000)
-    env.get_checkpoint_config().enable_externalized_checkpoints(ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION)
+    env.get_checkpoint_config().set_externalized_checkpoint_retention(
+        ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION
+    )
 
     def source(topic, group):
         kafka_source = (KafkaSource.builder().set_bootstrap_servers(brokers).set_topics(physical_topic(topic))

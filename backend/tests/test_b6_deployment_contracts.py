@@ -234,7 +234,15 @@ def test_flink_job_uses_the_pinned_flink_2_3_checkpoint_api():
     source = (REPOSITORY_ROOT / "backend/flink/job.py").read_text(encoding="utf-8")
 
     assert "ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION" in source
+    assert ".set_externalized_checkpoint_retention(" in source
     assert "runtime_configuration.set_string(" in source
-    assert '"state.checkpoints.dir"' in source
+    assert '"execution.checkpointing.dir"' in source
     assert ".set_checkpoint_storage(" not in source
+    assert ".enable_externalized_checkpoints(" not in source
     assert "ExternalizedCheckpointCleanup" not in source
+    assert "StateTtlConfig.new_builder(Time.days(14))" in source
+    assert "StateTtlConfig.new_builder(Duration.of_days(14))" not in source
+
+    compose = (REPOSITORY_ROOT / "compose.yml").read_text(encoding="utf-8")
+    assert "execution.checkpointing.dir: file:///opt/flink/checkpoints" in compose
+    assert "state.checkpoints.dir:" not in compose
