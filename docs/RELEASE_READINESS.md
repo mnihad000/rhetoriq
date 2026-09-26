@@ -115,6 +115,9 @@ as evidence from, the AWS preflight.
 2. Commit the ECR delivery workflow and foundation OIDC publisher role to the
    default branch. Configure the protected `ecr-release` GitHub environment;
    the role ARN is copied there from foundation output after foundation apply.
+   On 2026-09-26, GitHub confirmed the workflow on `main` and the environment
+   with reviewer `mnihad000`, a `main`-only branch policy, and administrator
+   bypass disabled. The role ARN remains pending foundation apply.
 3. Configure an approved AWS SSO profile or IAM credentials in a private
    operator shell, then require `aws sts get-caller-identity` to succeed. Confirm
    the region (`us-east-2` is the repository default) and resolve the underlying

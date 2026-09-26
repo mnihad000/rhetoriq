@@ -283,7 +283,8 @@ data "aws_iam_policy_document" "ecr_publisher_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:mnihad000/rhetoriq:environment:ecr-release"]
+      # GitHub reports this repository's immutable OIDC subject prefix with both IDs.
+      values = ["repo:mnihad000@181536152/rhetoriq@1275473509:environment:ecr-release"]
     }
     condition {
       test     = "StringEquals"

@@ -284,6 +284,10 @@ variable from `terraform -chdir=infra/terraform/eks-demo/foundation output -raw
 ecr_publisher_role_arn`. The value is a role ARN, not an AWS credential. The
 foundation role trusts only this repository, environment, workflow, and `main`
 ref, and can publish only to its four ECR repositories.
+GitHub currently reports this repository's OIDC subject prefix as
+`repo:mnihad000@181536152/rhetoriq@1275473509`; the trust policy uses its
+exact `:environment:ecr-release` subject. Recheck GitHub's OIDC configuration
+before a future publisher-role change.
 
 After separate approvals:
 
