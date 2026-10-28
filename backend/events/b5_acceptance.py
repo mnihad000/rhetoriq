@@ -217,7 +217,7 @@ def persist_acceptance_investigation(repository: Any, run_id: str, documents: li
 
 
 def validate_disposable_settings(
-    settings: Any, *, disposable_stack: bool, kubernetes_demo: bool = False
+    settings: Any, *, disposable_stack: bool
 ) -> list[str]:
     """Validate the explicit runtime boundary without exposing credentials."""
 
@@ -231,7 +231,7 @@ def validate_disposable_settings(
     else:
         errors.append("DATABASE_URL must be configured for the disposable postgres service")
     broker = str(getattr(settings, "KAFKA_BOOTSTRAP_SERVERS", ""))
-    allowed_brokers = {"kafka"} if kubernetes_demo else {"broker"}
+    allowed_brokers = {"broker"}
     if not broker or any(endpoint.split(":")[0].strip().lower() not in allowed_brokers for endpoint in broker.split(",")):
         errors.append("KAFKA_BOOTSTRAP_SERVERS must target the disposable broker service")
     for field, expected_host in (("ELASTICSEARCH_URL", "elasticsearch"), ("NEO4J_URL", "neo4j"), ("REDIS_URL", "redis")):
@@ -605,7 +605,7 @@ def _runtime_skip(plan: AcceptancePlan, reasons: list[str], *, status: str = "sk
 
 
 def run_acceptance(*, mode: str = "smoke", disposable_stack: bool = False,
-                   kubernetes_demo: bool = False, output: str | None = None,
+                   output: str | None = None,
                    drain_seconds: int | None = None, probe_seconds: int = 0) -> dict[str, Any]:
     """Run or explicitly skip the actual-stack probe and return a JSON report."""
 
@@ -621,7 +621,7 @@ def run_acceptance(*, mode: str = "smoke", disposable_stack: bool = False,
 
     settings = Settings(_env_file=None)
     config_errors = validate_disposable_settings(
-        settings, disposable_stack=disposable_stack, kubernetes_demo=kubernetes_demo
+        settings, disposable_stack=disposable_stack
     )
     if config_errors:
         result = _runtime_skip(plan, config_errors, status="blocked")
@@ -865,13 +865,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("smoke", "load"), default="smoke")
     parser.add_argument("--disposable-stack", action="store_true", required=True, help="Acknowledge a disposable broker/database/target stack")
-    parser.add_argument("--kubernetes-demo", action="store_true", help="Allow the isolated Kubernetes service names")
     parser.add_argument("--drain-seconds", type=int)
     parser.add_argument("--probe-seconds", type=int, default=0)
     parser.add_argument("--output")
     args = parser.parse_args()
     result = run_acceptance(mode=args.mode, disposable_stack=args.disposable_stack,
-                            kubernetes_demo=args.kubernetes_demo, output=args.output,
+                            output=args.output,
                             drain_seconds=args.drain_seconds, probe_seconds=args.probe_seconds)
     print(json.dumps(result, sort_keys=True))
     return 0 if result.get("status") == "skipped" or (result.get("status") == "passed" and (args.mode == "smoke" or result.get("qualified"))) else 1

@@ -1,231 +1,107 @@
 # RhetoriQ Deployment
 
-RhetoriQ’s accepted work is Kafka-backed, so a live deployment must provide the
-API/frontend, PostgreSQL, Kafka, Apicurio, topic initialization, the outbox
-publisher, role-scoped workers, and SearXNG. Deploying only an API, frontend,
-and database does not satisfy the current investigation execution contract.
-Browser rendering and B5 specialized retrieval remain opt-in.
+The `deployment` branch is the smaller permanent-deployment path. Kubernetes,
+Helm, EKS, Terraform, cluster PKI, ECR publishing, Kafka, Apicurio, and Flink
+are not required by this branch. Their historical implementations remain on
+`further_dev`.
 
-## Local production rehearsal
+## Intended topology
 
-Copy `.env.production.example` to an untracked environment file, replace every
-placeholder secret, and run:
+| Component | Responsibility |
+| --- | --- |
+| Vercel | Static React/Vite frontend and SPA routing |
+| Railway API | FastAPI admission, reads, and SSE |
+| Railway worker | Durable job execution and direct document processing |
+| Managed PostgreSQL | Canonical evidence, investigations, jobs, checkpoints, progress, search, relationships, and radar snapshots |
+| Scheduled Railway job | Bounded periodic radar refresh |
+
+The search provider remains open. SearXNG is the current local discovery
+provider; a managed provider may replace it after source-policy, cost, and
+retention review.
+
+## Current local rehearsal
+
+Create an ignored `.env.local` from the example, replace placeholders with
+fresh local-only values, and run from the repository root:
 
 ```powershell
-docker compose config --quiet
-docker compose up --build -d
-docker compose ps
+docker compose --env-file .env.production.example config --quiet
+Copy-Item .env.production.example .env.local
+# Replace placeholder secrets in .env.local before starting services.
+docker compose --env-file .env.local up --build -d
+docker compose --env-file .env.local ps
 ```
 
-Open `http://localhost:4173`, check `http://localhost:8000/health` and
-`http://localhost:8000/api/research/health`, then run a live investigation.
-PostgreSQL, Kafka, and Flink state use named volumes. Do not run `docker compose
-down -v` unless that state is intentionally disposable. Detailed recovery and
-B5 overlay commands are in [Operations](OPERATIONS.md).
+The base stack contains PostgreSQL/pgvector, SearXNG, API, one `worker`, and
+the frontend. The worker uses the PostgreSQL event journal as a durable queue,
+claims leases, renews ownership, processes fetched documents directly, and
+retries bounded failures. No Kafka broker, schema registry, Flink cluster,
+publisher, topic initializer, or role-scoped worker is needed.
 
-## Public deployment boundary
+The optional B5 overlay adds encrypted Elasticsearch, Neo4j, Redis, TLS
+bootstrap, and the pinned MiniLM image. It is not required for the base
+deployment and must be qualified separately before enabling retrieval.
 
-The documented public-demo topology uses public frontend and API services,
-private execution dependencies, and durable PostgreSQL:
+Check `GET /health`, `GET /api/research/health`, and a disposable investigation
+flow. Compose rendering is configuration evidence only; it does not prove
+that a permanent deployment is ready.
 
-| Component | Exposure | Responsibility |
-| --- | --- | --- |
-| Frontend | Public | Nginx-served React application using `PUBLIC_API_BASE_URL`. |
-| API | Public | FastAPI, migrations, durable reads, accepted writes, health, and SSE. |
-| PostgreSQL/pgvector | Private managed service | Canonical application state, checkpoints, corpus, outbox, and projection authority. |
-| Kafka and Apicurio | Private | Event delivery and compatible schema registry. |
-| Topic initializer | Private one-shot job | Topics, retention, schemas, and compatibility. |
-| Outbox and role workers | Private | Publish and consume accepted ingestion/investigation work. |
-| SearXNG | Private | Broad web discovery. |
-| Browser renderer | Not deployed initially | JavaScript-only pages remain a visible retrieval limitation. |
+## Environment and migration ownership
 
-Railway plus Neon is the currently documented provider combination, but any
-host is acceptable if it supplies equivalent private networking, durable
-services, health checks, and restart behavior. Do not create a second
-PostgreSQL service when Neon is authoritative.
+For local Vite development, set `VITE_API_BASE_URL`. The Nginx image uses
+`PUBLIC_API_BASE_URL` at container startup; Vercel uses build-time frontend
+configuration.
 
-Compose keeps its historical API-owned, advisory-locked forward migration
-behavior. Kubernetes instead gives exclusive apply ownership to a migration
-Job; API and worker startup is check-only and never changes schema. Preserve
-the managed database TLS option, normally `sslmode=require`, and keep the
-complete URL in platform secret configuration.
+Production should set `DEPLOYMENT_ENV=production`, `DEMO_MODE=false`, and an
+explicit `CORS_ALLOW_ORIGINS`. Keep database URLs, provider credentials, and
+service secrets in Railway or the managed database provider. Do not commit
+them. `JOB_*` settings control polling, lease duration, renewal, retry count,
+and retry backoff.
 
-Set public frontend/API origins explicitly:
+The API image applies committed migrations before startup. Give migration
+application one explicit owner and make API and worker startup verify-only in
+the platform release configuration. The migration runner has no destructive
+down-migration path.
 
-```text
-PUBLIC_API_BASE_URL=https://api.example.invalid
-CORS_ALLOW_ORIGINS=https://app.example.invalid
-DEPLOYMENT_ENV=production
-DEMO_MODE=false
-```
+## Completed on this branch
 
-`VITE_API_BASE_URL` is for local Vite development. Provider credentials,
-database URLs, SASL credentials, and service passwords must be platform secrets,
-not copied from a local `.env` file.
+- Removed Kubernetes, Helm, EKS Terraform, cluster PKI, ECR publishing, and
+  infrastructure-static CI artifacts.
+- Replaced the local multi-service Kafka/Flink topology with PostgreSQL,
+  SearXNG, API, one durable worker, and frontend.
+- Retained domain event envelopes and the transactional journal as durable
+  database records rather than network transport.
+- Kept the optional B5 stores isolated behind a separate Compose overlay.
 
-## Feature rollout
+## Remaining release work
 
-- Keep `ENABLE_POSTGRES_VECTOR_SEARCH=false` until migrations, resumable corpus
-  backfill, index creation, and result comparisons pass.
-- Keep `ENABLE_FLINK_TRENDING=false` until checkpoint, replay, recovery, and
-  signal gates pass. The legacy snapshot remains the explicit fallback.
-- Keep `ENABLE_B5_RETRIEVAL=false` until store initialization, projection
-  coverage, failure behavior, rebuild/rollback, and product acceptance pass.
-- Keep `BROWSER_RENDERING_ENABLED=false` unless an isolated renderer is
-  deliberately deployed and secured.
-- Keep automatic investigation off unless its separate policy and operating
-  gates are approved.
+- Finish and verify job leasing, retry, and stale-worker fencing across API and
+  worker restarts.
+- Complete public accounts, ownership, sharing, quotas, concurrency, and
+  spending controls before open public use.
+- Decide the initial search and model providers and measure their cost/latency.
+- Add Vercel/Railway configuration, scheduled radar execution, structured logs,
+  backups, restore testing, and queue/worker health dashboards.
+- Requalify completion, restart recovery, SSE reconnect, reload, authorization,
+  and cost limits on the smaller topology.
 
-Enabling a flag is not evidence that the dependency is healthy. Health and
-workspace responses must expose unavailable, pending, stale, and fallback
-states accurately.
+## Release checklist
 
-## Launch evidence
-
-A public launch is complete only after one deployment records all fields below.
-Do not mix evidence from different commits or environments.
-Local candidate evidence and the exact gates remaining before this launch are
-tracked in [AWS Release Readiness](RELEASE_READINESS.md).
-
-### Release identity
-
-| Field | Recorded value |
-| --- | --- |
-| Frontend URL | `<pending>` |
-| API URL | `<pending>` |
-| PostgreSQL project/branch | `<pending>` |
-| Deployed commit and image digests | `<pending>` |
-| Verification timestamp (UTC) | `<pending>` |
-| Verifier | `<pending>` |
-
-### Topology and health
-
-- [ ] Public ingress exposes only the intended frontend/API endpoints.
-- [ ] PostgreSQL is durable, private, TLS-enabled, and used by the migration
-  owner, API, workers, and checkpointer.
-- [ ] Kafka, registry, SearXNG, outbox publisher, and all required workers are
-  private and ready.
-- [ ] `GET /health` returns HTTP 200 and reports `demo_mode: false`.
-- [ ] `GET /api/research/health` reports numeric lag/DLQ counts and ready
-  execution dependencies.
-- [ ] Optional browser/B5 dependencies report their intentional disabled or
-  degraded state truthfully.
-
-Record only sanitized excerpts—never connection strings, tokens, event bodies,
-or source documents.
-
-### Investigation durability
-
-- [ ] Start a short public-source investigation from the deployed frontend.
-- [ ] Record the investigation ID, run ID, terminal status, and deployment
-  identity.
-- [ ] Observe SSE progress to a terminal state without manual database repair.
-- [ ] Reload the workspace and verify its report, receipts, event trail, and IDs.
-- [ ] Restart or redeploy the API and reload the same workspace.
-- [ ] Trigger recorded replay and preserve its comparison or terminal
-  limitation.
-
-### Release checks
-
-- [ ] CI is green for the deployed commit.
-- [ ] Backend, schema, compile, PostgreSQL migration, frontend test/build, and
-  Markdown checks pass with only documented optional skips.
-- [ ] Runtime event delivery and recovery evidence is attached.
-- [ ] Any enabled Flink or B5 capability has its corresponding acceptance
-  evidence from [Testing](TESTING.md).
-
-The local 20-document Kafka/Flink recorded-provider smoke passed 20/20 with
-completed checkpoints on 2026-09-26. It is prerequisite evidence only and does
-not replace the deployed recovery proof, remaining formal B4 scenarios, B5
-qualification, or the public investigation checks above.
+- [ ] A durable job is accepted without an HTTP request running research.
+- [ ] Worker restart and stale-worker fencing preserve one logical outcome.
+- [ ] Receipts, canonical identity, revisions, withdrawals, and eligibility survive.
+- [ ] Reports publish only after evidence checks or return `insufficient_evidence`.
+- [ ] SSE reconnect and browser reload recover persisted state.
+- [ ] Private workspaces cannot be read by another user.
+- [ ] Quotas and model spending limits are enforced.
+- [ ] Radar refresh preserves the last valid snapshot after failure.
+- [ ] Database backup, restore, migration, and rollback are exercised.
+- [ ] The deployed commit and measured runtime evidence are recorded.
 
 ## Rollback
 
-Before schema-changing releases, create and record a PostgreSQL backup or Neon
-branch. The migration runner has no destructive down-migration path. Application
-rollback may reuse a backward-compatible schema; incompatible database changes
-require a tested forward fix or an explicit restore decision.
-
-Record the last-known-good commit/images, backup identifier, rollback action,
-and post-rollback health plus workspace reload. B5 generation rollback is a
-separate atomic manifest operation described in [Operations](OPERATIONS.md); it
-does not replace application or database rollback.
-
-## Local Kubernetes (B6)
-
-B6 translates the accepted Compose topology into local Kubernetes workloads,
-Services, initialization Jobs, ConfigMaps, Secrets, persistent volumes, probes,
-resource limits, shutdown grace, ingress, and rollout policy. It must preserve:
-
-- PostgreSQL data, Kafka logs, Flink checkpoints/savepoints, Elasticsearch and
-  Neo4j data, plus certificate material;
-- dependency initialization order and service-specific trust;
-- explicit liveness versus dependency readiness;
-- stable worker identities, shutdown behavior, and replay semantics;
-- the same seeded search, path, reload, recovery, and degradation evidence.
-
-Redis remains disposable cache. Public CA material may use a ConfigMap; private
-keys require Secrets or equivalent secure provisioning. Build or load immutable
-application images into the local cluster rather than relying on a mutable
-`local` tag. The detailed workstation status and execution order remain in
-[Pre-B6](PRE_B6_GUIDE.md).
-The implemented chart, guarded execution sequence, evidence gates, and EKS
-teardown are documented in [B6 Operations](B6_OPERATIONS.md).
-
-Implementation and static verification are complete, but no Kubernetes B6
-runtime has been accepted. Run the repository gate before any cluster change:
-
-```powershell
-./infra/b6/validate.ps1
-```
-
-At the last recorded check, the existing kind node was Ready, but
-`vm.max_map_count` was `262144` instead of `1048576`, the workspace drive had
-about 15.43 GiB free instead of the 20 GiB minimum. Helm 3.19.0 and Terraform
-1.13.3 are now installed, while AWS CLI v2 remains absent.
-The local full-stack run must stop until those prerequisites are corrected. Its
-6.66 GiB Docker-memory allocation makes the smoke an experiment: Pending pods
-or OOM kills are evidence to retain, not permission to remove components.
-
-## Ephemeral AWS portfolio demonstration
-
-The repository now implements a short-lived AWS EKS environment for the
-production-style architecture. It has not been provisioned. Use it initially
-as a private qualification environment, with public application ingress
-disabled. A basic EKS smoke is evidence of engineering integration only; it is
-not a permanent production service, formal B3-B5 qualification, B5
-10,000-document qualification, or proof of continuous 100K-document operation.
-Formal B3–B5 gates may be executed there only when their complete prescribed
-scenarios and evidence requirements are retained.
-
-The demonstration should use seeded or appropriately licensed data and record:
-
-- immutable images, manifests/charts, ConfigMaps, externally supplied Secrets,
-  resource settings, probes, and the guarded deployment flow;
-- one end-to-end investigation plus Kafka/Flink, persistence, search, graph,
-  and observability evidence for the components actually deployed;
-- screenshots, deployment logs, measured workload results, and teardown proof.
-
-Before provisioning, review the three isolated Terraform states and saved
-plans, verify the intended AWS identity, register the eight-hour Windows
-teardown task, confirm the $25 Budget notification, restrict endpoint access to
-the supplied CIDRs, and apply the required project/environment/owner/run/
-commit/expiry tags. The implemented profile uses one on-demand x86
-`m7i.2xlarge`, two public subnets, no NAT Gateway, encrypted gp3 volumes,
-immutable ECR repositories, and no managed application databases.
-
-After the private deployment, run the remaining formal acceptance scenarios.
-Fix failures locally and redeploy only new immutable digests under a new commit
-identity. Once stable, rerun the complete regression and CI, rebuild the four
-definitive images, and deploy that exact release. Enable restricted public
-HTTPS only for the final investigation, SSE, persistence, reload/redeploy,
-replay, health, and rollback proof. Any code change after that point invalidates
-the affected release evidence until it is rerun.
-
-After recording evidence, use the guarded teardown from the same states. It
-exports evidence, requests a final Flink savepoint, stops consumers, destroys
-platform resources, deletes ECR image manifests, destroys foundation
-resources, audits AWS for residual resources, and destroys the bootstrap state
-bucket only after that inventory is empty. A Budget alert and `expires-at` tag
-are advisory; neither performs cleanup. The affordable public demo remains a
-separate deployment.
+Before schema changes, create a managed PostgreSQL backup or branch. Roll back
+application code only against a backward-compatible schema; use a tested
+forward fix or database restore for incompatible changes. Record the release
+identity, backup identifier, rollback action, and post-rollback workspace
+reload.

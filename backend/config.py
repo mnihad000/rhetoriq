@@ -68,8 +68,8 @@ class Settings(BaseSettings):
     # Investigation runtime
     DEPLOYMENT_ENV: str = "development"
     DATABASE_URL: str = ""
-    # Compose keeps the historical auto-apply behavior. Kubernetes sets
-    # verify on every long-running process and reserves apply for its Job.
+    # Compose keeps the historical auto-apply behavior. Hosts with a separate
+    # migration step can use verify on long-running API and worker processes.
     DATABASE_MIGRATION_MODE: str = "auto"
     INVESTIGATION_DB_PATH: str = "investigations.sqlite3"
     # SSE resources are bounded per API process; database reads are shared per run.
@@ -104,9 +104,7 @@ class Settings(BaseSettings):
     CLAIM_VERIFIER_SUPPORT_THRESHOLD: float = 0.58
     CLAIM_VERIFIER_AMBIGUOUS_LOW: float = 0.46
     CLAIM_VERIFIER_MAX_SPANS_PER_DOCUMENT: int = 3
-    # Retained as a deployment label for older configuration files. Execution
-    # is Kafka-only; no embedded or synchronous runtime is selected from this value.
-    RESEARCH_EXECUTION_MODE: str = "kafka"
+    RESEARCH_EXECUTION_MODE: str = "database"
     RESEARCH_CHECKPOINT_DB_PATH: str = "langgraph.sqlite3"
     RESEARCH_WORKER_CONCURRENCY: int = 2
     RESEARCH_LEASE_RENEW_SECONDS: int = 15
@@ -136,28 +134,11 @@ class Settings(BaseSettings):
     FEDERAL_REGISTER_PAGE_SIZE: int = 20
     FEDERAL_REGISTER_MAX_PAGES: int = 2
     FEDERAL_REGISTER_MIN_INTERVAL_SECONDS: float = 0.25
-    KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
-    KAFKA_SCHEMA_REGISTRY_URL: str = "http://localhost:8081/apis/ccompat/v7"
-    KAFKA_CLIENT_ID: str = "rhetoriq-api"
-    KAFKA_CONSUMER_GROUP_PREFIX: str = "rhetoriq"
-    KAFKA_TOPIC_PREFIX: str = ""
-    KAFKA_SECURITY_PROTOCOL: str = "PLAINTEXT"
-    KAFKA_SASL_MECHANISM: str = "PLAIN"
-    KAFKA_SASL_USERNAME: str = ""
-    KAFKA_SASL_PASSWORD: str = ""
-    KAFKA_RETRY_MAX_ATTEMPTS: int = 3
-    KAFKA_RETRY_BACKOFF_SECONDS: float = 0.5
-    KAFKA_REQUEST_TIMEOUT_SECONDS: float = 10.0
-    KAFKA_OUTBOX_BATCH_SIZE: int = 100
-    KAFKA_OUTBOX_POLL_SECONDS: float = 0.25
-    # Two transactional Flink branches become visible at checkpoint commit,
-    # with a bounded hosted enrichment step between them.
-    KAFKA_PROCESSED_WAIT_SECONDS: float = 180.0
-    KAFKA_WORKER_ROLE: str = "all"
-    ENABLE_FLINK_TRENDING: bool = False
-    FLINK_REST_URL: str = "http://localhost:8082"
-    FLINK_HEARTBEAT_MAX_AGE_SECONDS: int = 1800
-    FLINK_AUTO_INVESTIGATE: bool = False
+    JOB_POLL_SECONDS: float = 0.5
+    JOB_LEASE_SECONDS: int = 60
+    JOB_LEASE_RENEW_SECONDS: float = 15.0
+    JOB_MAX_ATTEMPTS: int = 3
+    JOB_RETRY_BACKOFF_SECONDS: float = 1.0
     BROWSER_SERVICE_URL: str = "http://127.0.0.1:8010"
     BROWSER_SERVICE_TOKEN: str = ""
     BROWSER_RENDERING_ENABLED: bool = False
@@ -214,14 +195,15 @@ class Settings(BaseSettings):
             raise ValueError("Federal Register pagination limits must be positive")
         if self.PROVIDER_RETRY_BACKOFF_SECONDS < 0 or self.PROVIDER_MAX_BACKOFF_SECONDS < 0:
             raise ValueError("provider backoff values cannot be negative")
-        if self.KAFKA_RETRY_MAX_ATTEMPTS < 1:
-            raise ValueError("KAFKA_RETRY_MAX_ATTEMPTS must be at least 1")
-        if self.KAFKA_OUTBOX_BATCH_SIZE < 1:
-            raise ValueError("KAFKA_OUTBOX_BATCH_SIZE must be at least 1")
-        if not 1 <= self.FLINK_HEARTBEAT_MAX_AGE_SECONDS <= 1800:
-            raise ValueError("FLINK_HEARTBEAT_MAX_AGE_SECONDS must be between 1 and 1800")
-        if self.KAFKA_PROCESSED_WAIT_SECONDS < 0:
-            raise ValueError("KAFKA_PROCESSED_WAIT_SECONDS cannot be negative")
+        if self.RESEARCH_EXECUTION_MODE != "database":
+            raise ValueError("RESEARCH_EXECUTION_MODE must be database; legacy transports are retired")
+        if self.JOB_LEASE_SECONDS < 1 or self.JOB_MAX_ATTEMPTS < 1:
+            raise ValueError("Job lease and maximum attempts must be positive")
+        for value in (self.JOB_POLL_SECONDS, self.JOB_LEASE_RENEW_SECONDS, self.JOB_RETRY_BACKOFF_SECONDS):
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError("Job polling, renewal, and retry intervals must be positive and finite")
+        if self.JOB_LEASE_RENEW_SECONDS >= self.JOB_LEASE_SECONDS:
+            raise ValueError("Job renewal interval must be shorter than the lease")
         for name in type(self).model_fields:
             if name.startswith("RESEARCH_STREAM_") and (
                 getattr(self, name) <= 0 or not math.isfinite(getattr(self, name))

@@ -13,7 +13,6 @@ ENV EMBEDDING_LOCAL_ONLY=true B5_MODEL_REVISION=${MINILM_REVISION} HF_HUB_OFFLIN
 RUN useradd --create-home --uid 10001 rhetoriq
 COPY --chown=rhetoriq:rhetoriq backend/ ./
 COPY --chown=rhetoriq:rhetoriq infra/b5/tls_init.py /opt/rhetoriq/tls_init.py
-COPY --chown=rhetoriq:rhetoriq infra/flink/recorded-provider.json /opt/rhetoriq/recorded-provider.json
 USER 10001:10001
 EXPOSE 8000
-CMD ["python", "-m", "events.b5_worker"]
+CMD ["python", "-m", "research_worker"]

@@ -1,5 +1,13 @@
 # RhetoriQ Handoff - B2/B3 Completion
 
+> Historical handoff. The deployment branch is simplifying the original
+> Kafka/Flink/B5 platform for a Vercel/Railway/PostgreSQL production target.
+> Kubernetes, EKS, Terraform, Helm, and ECR execution tooling has been removed
+> from this branch and remains only on the reference branch. See
+> [the current simplification plan](docs/DEPLOYMENT_SIMPLIFICATION.md),
+> [deployment status](docs/DEPLOYMENT.md), and [architecture](docs/ARCHITECTURE.md)
+> for current direction.
+
 ## Current status
 
 - **B2 is complete.** SearXNG broad discovery, canonical retrieval, Federal Register primary-source research, provenance receipts, provider policy, retries, pagination, deduplication, rate limiting, and explicit fallback diagnostics are implemented.
@@ -19,9 +27,8 @@
 - Frontend: 4 tests passed and the production build completed successfully.
 - Compose configuration renders successfully with required local secrets supplied.
 - Live Federal Register canary: two current primary-source records, valid receipts, one page, no warning.
-- The Docker/WSL prerequisite was subsequently cleared and a local kind cluster
-  was created. Current resource limits and remaining runtime gates are recorded
-  in [the Pre-B6 guide](docs/PRE_B6_GUIDE.md).
+- The historical Docker/WSL and kind notes are retained in the reference branch;
+  they are not part of the current deployment path.
 - `backend/test_redis_connection.py` no longer contains a credential and reads `REDIS_URL` only from the environment. The previously exposed external Redis credential must still be rotated at its provider; source-code removal cannot revoke it.
 
 ## A3 decisions and implementation
@@ -89,6 +96,6 @@
 - A5 remains **In Progress** until the public frontend/API URLs, health
   responses, a live SSE investigation, workspace reload, replay after redeploy,
   and CI evidence are recorded in the [deployment launch
-  checklist](docs/DEPLOYMENT.md#launch-evidence). No public URLs were available
+  checklist](docs/DEPLOYMENT.md#release-checklist-for-the-smaller-topology). No public URLs were available
   when this handoff was updated.
 - Rollback is an application release rollback followed by a forward database fix or Neon restore when required. The migration runner has no destructive down-migration path; take a Neon backup/branch before schema changes.

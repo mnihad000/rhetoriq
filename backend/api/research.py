@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+from datetime import datetime, timezone
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import Response
 
@@ -9,8 +10,8 @@ from demo_data import ALL_DOCUMENTS
 from models.research import ReplayResponse, ResearchTrailResponse
 from services.autonomous_research import get_research_manager, get_research_repository
 from services.event_store import EventStore
-from services.signal_repository import SignalRepository
-from services.flink_health import get_flink_health
+from services.database import connect
+from services.job_queue import JobQueue
 from services.research_stream import ResearchStreamResponse, parse_cursor
 
 router = APIRouter(prefix="/api")
@@ -21,34 +22,19 @@ def research_health() -> dict:
     settings = get_settings()
     components: dict[str, dict] = {}
     event_store = EventStore(settings.persistence_target)
-    components["outbox"] = event_store.health()
     try:
-        signal_health = SignalRepository(settings.persistence_target).health()
+        components["jobs"] = JobQueue(settings.persistence_target).health()
+        with connect(settings.persistence_target) as conn:
+            rows = conn.execute(
+                "SELECT worker_id, state, heartbeat_at FROM runtime_worker_health WHERE role='database'"
+            ).fetchall()
+        now = datetime.now(timezone.utc)
+        workers = [dict(row) for row in rows if row["state"] == "ready" and
+                   (now - datetime.fromisoformat(row["heartbeat_at"])).total_seconds() < settings.JOB_LEASE_SECONDS * 2]
+        components["worker"] = {"status": "ready" if workers else "unavailable", "mode": "database", "workers": workers}
     except Exception as exc:
-        signal_health = {"status": "unavailable", "detail": "Signal projection unavailable", "latest_evaluation": None}
-    components["signals"] = signal_health
-    components["enrichment"] = {
-        "status": signal_health.get("enrichment_status", "unavailable"),
-        "artifact_failure_count": signal_health.get("artifact_failure_count", 0),
-        "workers": signal_health.get("enrichment_workers", []),
-    }
-    components["flink"] = get_flink_health(
-        settings,
-        evaluation=signal_health.get("latest_evaluation"),
-    )
-    try:
-        from services.kafka_runtime import KafkaEventPublisher, SchemaRegistry, kafka_consumer_health
-        components["kafka"] = KafkaEventPublisher().health()
-        components["schema_registry"] = SchemaRegistry().health()
-        components["event_consumers"] = kafka_consumer_health(settings)
-        enrichment_group = next((group for group in components["event_consumers"].get("groups", []) if group.get("role") == "enrichment"), {})
-        components["enrichment"]["backlog"] = enrichment_group.get("lag")
-        components["enrichment"]["dlq_depth"] = components["event_consumers"].get("dlq_counts", {}).get("documents.enrichment-requested.dlq.v1")
-    except Exception as exc:
-        unavailable = {"status": "unavailable", "detail": str(exc)[:180]}
-        components["kafka"] = unavailable
-        components["schema_registry"] = unavailable
-        components["event_consumers"] = unavailable
+        components["jobs"] = {"status": "unavailable", "reason": type(exc).__name__}
+        components["worker"] = {"status": "unavailable", "mode": "database"}
     try:
         import langgraph
         components["langgraph"] = {"status": "ready"}
@@ -114,18 +100,6 @@ def research_health() -> dict:
     except Exception:
         pass
     components["models"] = {"status": "ready" if models else "fallback_only", "configured": models}
-    investigation_group = next(
-        (
-            group for group in components["event_consumers"].get("groups", [])
-            if group.get("role") == "investigations"
-        ),
-        None,
-    )
-    components["worker"] = {
-        "status": "ready" if investigation_group and investigation_group["state"] == "stable" else "unavailable",
-        "mode": "kafka",
-        "group": investigation_group,
-    }
     components["internal_retrieval"] = {
         "status": "ready",
         "normalized_document_count": len(ALL_DOCUMENTS),
@@ -133,7 +107,7 @@ def research_health() -> dict:
     }
     required = [
         "langgraph", "checkpointer", "worker", "internal_retrieval",
-        "outbox", "kafka", "schema_registry", "event_consumers",
+        "jobs",
     ]
     if settings.RESEARCH_RUNTIME in {"auto", "langgraph"} and not settings.DEMO_MODE:
         required.extend(["searxng", "federal_register"])
@@ -142,7 +116,7 @@ def research_health() -> dict:
     return {
         "status": "ready" if all(components[name]["status"] == "ready" for name in required) else "degraded",
         "runtime": settings.RESEARCH_RUNTIME,
-        "execution_mode": "kafka",
+        "execution_mode": "database",
         "components": components,
     }
 

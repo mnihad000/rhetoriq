@@ -21,20 +21,13 @@ def readiness_report(settings=None) -> dict[str, Any]:
         dependencies["postgresql"] = {"status": "unavailable", "reason": type(exc).__name__}
 
     try:
-        from services.kafka_runtime import KafkaEventPublisher
-        health = KafkaEventPublisher(settings=settings).health()
-        dependencies["kafka"] = {
+        from services.job_queue import JobQueue
+        health = JobQueue(settings.persistence_target).health()
+        dependencies["jobs"] = {
             "status": "ready" if health.get("status") == "ready" else "unavailable"
         }
     except Exception as exc:
-        dependencies["kafka"] = {"status": "unavailable", "reason": type(exc).__name__}
-
-    try:
-        from events.topics import check_topics
-        check_topics()
-        dependencies["topics_and_schemas"] = {"status": "ready"}
-    except Exception as exc:
-        dependencies["topics_and_schemas"] = {"status": "unavailable", "reason": type(exc).__name__}
+        dependencies["jobs"] = {"status": "unavailable", "reason": type(exc).__name__}
 
     if settings.ENABLE_B5_RETRIEVAL:
         try:

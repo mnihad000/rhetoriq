@@ -5,7 +5,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from api.health import readiness_report
-from events.b6_evidence import _sanitize
 from events.flink_savepoint import create_savepoint
 from migrations import runner
 
@@ -130,13 +129,6 @@ def test_readiness_failure_is_sanitized(monkeypatch):
         "reason": "RuntimeError",
     }
     assert "never-report-this" not in str(report)
-
-
-def test_evidence_sanitizer_removes_sensitive_and_error_fields():
-    sanitized = _sanitize(
-        {"status": "ready", "password": "hidden", "nested": [{"error": "hidden", "count": 2}]}
-    )
-    assert sanitized == {"status": "ready", "nested": [{"count": 2}]}
 
 
 def test_b5_check_requires_initialized_generation(monkeypatch):

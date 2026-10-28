@@ -1,7 +1,7 @@
 name: CI
 
 on:
-  # Restore push and pull_request triggers after the initial private deployment.
+  # Manual during runtime migration; enable branch automation before release.
   workflow_dispatch:
 
 jobs:
@@ -34,11 +34,9 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
       - run: python -m compileall -q .
-      - run: python -m events.export_schemas --check
       - run: pytest tests -m "not integration"
       - run: pytest tests/test_postgres_migration.py
       - run: pytest tests/test_research_stream_postgres.py
-      - run: pytest tests/test_b4_postgres.py
       - run: pytest tests/test_b5_postgres.py
 
   frontend:
@@ -70,18 +68,6 @@ jobs:
       - name: Validate disposable B5 acceptance topology
         run: docker compose --env-file .env.production.example -f compose.yml -f infra/b5/compose.b5.yml -f infra/b5/compose.acceptance.yml --profile b5 --profile acceptance config --quiet
 
-  infrastructure-static:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Validate Helm, Kubernetes resources, scripts, Compose, and Terraform
-        shell: pwsh
-        run: ./infra/b6/validate.ps1
-
   production-images:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -94,9 +80,6 @@ jobs:
             context: backend
           - name: b5
             file: infra/b5/Dockerfile
-            context: .
-          - name: flink
-            file: infra/flink/Dockerfile
             context: .
           - name: frontend
             file: frontend/Dockerfile
@@ -124,47 +107,3 @@ jobs:
           test "${image_id#sha256:}" != "$image_id"
           echo "${{ matrix.name }}=${image_id}"
 
-  flink-runtime:
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    env:
-      COMPOSE_PROJECT_NAME: rhetoriq_b4_ci
-      COMPOSE_FILE: compose.yml:infra/flink/compose.acceptance.yml
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build pinned Python 3.12 and connector candidate
-        run: docker compose --env-file .env.production.example build flink-jobmanager enrichment-worker
-      - name: Start disposable recorded-provider topology
-        run: >-
-          docker compose --env-file .env.production.example up -d
-          flink-jobmanager flink-taskmanager enrichment-worker document-worker
-          signal-worker projection-worker
-      - name: Verify real Kafka delivery through both Flink branches
-        run: >-
-          docker compose --env-file .env.production.example run --rm --no-deps
-          enrichment-worker python -m events.b4_acceptance --disposable-stack
-      - name: Probe delivery across TaskManager and JobManager failure
-        run: |
-          docker compose --env-file .env.production.example run --rm --no-deps enrichment-worker python -m events.b4_acceptance --disposable-stack --drain-seconds 360 > recovery.json &
-          probe=$!
-          sleep 75
-          docker compose --env-file .env.production.example kill -s SIGKILL flink-taskmanager
-          docker compose --env-file .env.production.example up -d flink-taskmanager
-          sleep 15
-          docker compose --env-file .env.production.example kill -s SIGKILL flink-jobmanager
-          docker compose --env-file .env.production.example up -d flink-jobmanager
-          wait "$probe"
-          cat recovery.json
-      - name: Capture runtime evidence
-        if: always()
-        run: docker compose --env-file .env.production.example logs --no-color > b4-runtime.log
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: b4-runtime-evidence
-          path: |
-            b4-runtime.log
-            recovery.json
-      - name: Stop disposable topology
-        if: always()
-        run: docker compose --env-file .env.production.example down

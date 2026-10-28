@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 import hashlib
+import copy
 import json
 import logging
 import sqlite3
@@ -46,6 +47,7 @@ from services.research_repository import ResearchRepository
 from services.research_tools import ResearchToolRegistry, ToolOutcome, candidate_id
 from services.source_profile_enricher import SourceProfileEnricher
 from services.url_policy import registrable_domain
+from services.job_queue import LeaseLostError, current_job
 
 logger = logging.getLogger(__name__)
 
@@ -339,7 +341,11 @@ class AutonomousResearchEngine:
         plan = self.repository.get_plan(summary.investigation_id)
         if plan is None:
             raise KeyError(f"Plan missing for {summary.investigation_id}")
-        config = {"configurable": {"thread_id": run_id}, "recursion_limit": 200}
+        job = current_job()
+        # Each lease generation writes an isolated checkpoint namespace. A
+        # paused stale worker cannot overwrite the takeover worker's checkpoint.
+        thread_id = f"{run_id}:lease:{job.lease_generation}" if job else run_id
+        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 200}
         initial: ResearchState = {
             "run_id": run_id,
             "investigation_id": summary.investigation_id,
@@ -367,6 +373,23 @@ class AutonomousResearchEngine:
     def _invoke_graph(self, saver: Any, config: dict, initial: ResearchState) -> None:
         graph = self._build_graph(saver)
         checkpoint = saver.get_tuple(config)
+        job = current_job()
+        if checkpoint is None and job is not None:
+            prior_ids = [f"{initial['run_id']}:lease:{generation}" for generation in range(job.lease_generation - 1, 0, -1)]
+            prior_ids.append(initial["run_id"])  # checkpoints from before migration
+            for thread_id in prior_ids:
+                previous = saver.get_tuple({"configurable": {"thread_id": thread_id}})
+                if previous is None:
+                    continue
+                checkpoint_config = saver.put(config, copy.deepcopy(previous.checkpoint),
+                                              copy.deepcopy(previous.metadata), previous.checkpoint["channel_versions"])
+                grouped: dict[str, list] = {}
+                for task_id, channel, value in previous.pending_writes or []:
+                    grouped.setdefault(task_id, []).append((channel, value))
+                for task_id, writes in grouped.items():
+                    saver.put_writes(checkpoint_config, writes, task_id)
+                checkpoint = saver.get_tuple(config)
+                break
         graph.invoke(None if checkpoint is not None else initial, config)
 
     def _build_graph(self, saver: Any):
@@ -648,8 +671,10 @@ class AutonomousResearchEngine:
                     investigation_id=state["investigation_id"],
                     run_id=state["run_id"],
                     action_id=action.action_id,
+                    event_id="evt_raw_" + hashlib.sha256(f"{action.action_id}:{document.id}".encode()).hexdigest()[:24],
                 )
-                self.audit.events.enqueue(RAW_DOCUMENTS_TOPIC, raw_event)
+                from services.event_handlers import EventHandlers
+                EventHandlers(self.audit.db_path).normalize_raw_document(raw_event)
                 staged_document_ids.append(document.id)
                 staged_event_ids.append(raw_event.event_id)
                 existing_document_ids.add(document.id)
@@ -659,31 +684,19 @@ class AutonomousResearchEngine:
                 receipt_ids.append(self.audit.save_receipt(
                     state["run_id"],
                     action.action_id,
-                    "event_ingestion",
+                    "direct_processing",
                     {
-                        "topic": RAW_DOCUMENTS_TOPIC,
+                        "method": "database_worker",
                         "event_ids": staged_event_ids,
                         "document_ids": staged_document_ids,
                         "correlation_id": state["investigation_id"],
                     },
                 ))
-                remaining_wall = max(0.0, budget.limits.wall_seconds - budget.usage.active_seconds
-                                     - (time.perf_counter() - started))
-                deadline = time.monotonic() + min(self.settings.KAFKA_PROCESSED_WAIT_SECONDS, remaining_wall)
-                persisted: dict[str, Document] = {}
-                while time.monotonic() < deadline:
-                    persisted = {item.id: item for item in self.audit.get_documents(state["run_id"])}
-                    if all(document_id in persisted for document_id in staged_document_ids):
-                        break
-                    time.sleep(0.1)
+                persisted = {item.id: item for item in self.audit.get_documents(state["run_id"])}
                 accepted_documents = [persisted[item] for item in staged_document_ids if item in persisted]
                 missing = [item for item in staged_document_ids if item not in persisted]
                 if missing:
-                    limitation = (
-                        "event_ingestion_timeout: Kafka did not materialize "
-                        f"{len(missing)} document(s) within the bounded wait."
-                    )
-                    outcome.warning = f"{outcome.warning}; {limitation}" if outcome.warning else limitation
+                    raise RuntimeError("Direct document processing did not persist the complete evidence packet")
                 for document in accepted_documents:
                     self.audit.append_event(
                         state["run_id"],
@@ -739,6 +752,8 @@ class AutonomousResearchEngine:
                 "warnings": warnings,
                 "force_research": False,
             }
+        except LeaseLostError:
+            raise
         except Exception as exc:
             duration = int((time.perf_counter() - started) * 1000)
             self.audit.finish_action(action.action_id, status="failed", duration_ms=duration, failure_category=type(exc).__name__, warning=str(exc)[:300])
@@ -1024,8 +1039,7 @@ class ResearchRunManager:
         self.repository = repository
         self.audit = audit
         self.settings = get_settings()
-        self.worker_id = f"kafka-investigations-{uuid4().hex[:8]}"
-        self.audit.heartbeat_worker(self.worker_id, "kafka")
+        self.worker_id = f"database-investigations-{uuid4().hex[:8]}"
 
     def start(self, investigation_id: str, *, force_refresh: bool = False) -> ResearchRunSummary:
         existing = self.audit.get_active_run(investigation_id)
@@ -1055,12 +1069,12 @@ class ResearchRunManager:
                 partition_key=investigation_id,
             )
 
+        configuration_error = self._model_configuration_error()
         run = self.audit.create_run(
             investigation_id,
             configured_limits(),
-            requested_event_factory=requested_event,
+            requested_event_factory=None if configuration_error else requested_event,
         )
-        configuration_error = self._model_configuration_error()
         if configuration_error:
             self.audit.finish_run(
                 run.run_id, status="configuration_missing", terminal_decision="configuration_missing",
@@ -1095,11 +1109,11 @@ class ResearchRunManager:
         return "Configure Gemini, Groq, or a reachable Ollama model before starting live autonomous research."
 
     def resume_incomplete(self) -> None:
-        # Kafka owns dispatch. Queued runs and their request events are durable.
+        # The separate database worker owns dispatch; API startup never runs jobs.
         return
 
     def execute_queued(self, run_id: str) -> None:
-        """Kafka consumer entrypoint, protected by the existing run lease."""
+        """Database worker entrypoint, protected by job fencing and a run lease."""
         self._execute_claimed(run_id)
 
     def replay(self, investigation_id: str, source_run_id: str) -> ResearchRunSummary:
@@ -1110,18 +1124,48 @@ class ResearchRunManager:
             raise RuntimeError("Only terminal research runs can be replayed.")
         if self.audit.get_active_run(investigation_id) is not None:
             raise RuntimeError("An active research run already exists for this investigation.")
-        source_workspace = self.repository.get_investigation_workspace(investigation_id)
-        source_artifact_hash = self._artifact_hash(source_workspace)
-        source_evaluation = self.audit.get_evaluation(source_run_id)
-        run = self.audit.create_run(investigation_id, source.limits, parent_run_id=source_run_id, mode="recorded")
+        plan = self.repository.get_plan(investigation_id)
+        if plan is None:
+            raise KeyError(investigation_id)
+
+        def requested_event(run_id: str) -> InvestigationRequestedEvent:
+            return InvestigationRequestedEvent.create(
+                InvestigationRequestedPayload(
+                    investigation_id=investigation_id, run_id=run_id,
+                    query_text=plan.query_text, requested_outputs=plan.requested_outputs,
+                    time_window=plan.time_window, source_classes=plan.target_source_types,
+                    authorization_context={"source": "recorded-replay"}, force_refresh=True,
+                ),
+                producer="rhetoriq-api", correlation_id=investigation_id,
+                partition_key=investigation_id,
+            )
+
+        # The worker prepares the recorded packet after claiming this atomic job.
+        return self.audit.create_run(
+            investigation_id, source.limits, parent_run_id=source_run_id,
+            mode="recorded", requested_event_factory=requested_event,
+        )
+
+    def _prepare_replay(self, run: ResearchRunSummary) -> None:
+        if run.mode != "recorded" or not run.parent_run_id:
+            return
+        source_run_id = run.parent_run_id
+        if self.audit.get_replay_comparison(run.run_id) is None:
+            evaluation = self.audit.get_evaluation(source_run_id)
+            self.audit.record_replay_comparison(source_run_id, run.run_id, {
+                "source_artifact_hash": self._artifact_hash(self.repository.get_investigation_workspace(run.investigation_id)),
+                "source_evaluation_decision": evaluation.final_decision if evaluation else None,
+                "status": "pending",
+            })
         for document in self.audit.get_documents(source_run_id):
             self.audit.save_document(run.run_id, document)
         for source_action in self.audit.list_actions(source_run_id):
+            key = f"replay:{source_action.idempotency_key or source_action.action_id}"
+            existing = self.audit.get_action_by_idempotency_key(run.run_id, key)
+            if existing is not None and existing.status == source_action.status:
+                continue
             action = self.audit.start_action(
-                run.run_id,
-                source_action.decision,
-                source_action.provider,
-                idempotency_key=f"replay:{source_action.idempotency_key or source_action.action_id}",
+                run.run_id, source_action.decision, source_action.provider, idempotency_key=key,
             )
             receipt_ids = [
                 self.audit.save_receipt(run.run_id, action.action_id, kind, payload)
@@ -1130,39 +1174,21 @@ class ResearchRunManager:
             self.audit.finish_action(
                 action.action_id, status=source_action.status,
                 result_count=source_action.result_count, document_ids=source_action.document_ids,
-                receipt_ids=receipt_ids, duration_ms=0, warning="Replayed from recorded evidence; network disabled.",
+                receipt_ids=receipt_ids, duration_ms=0,
+                warning="Replayed from recorded evidence; network disabled.",
             )
-        self.audit.record_replay_comparison(source_run_id, run.run_id, {
-            "source_artifact_hash": source_artifact_hash,
-            "source_evaluation_decision": source_evaluation.final_decision if source_evaluation else None,
-            "status": "pending",
-        })
-        plan = self.repository.get_plan(investigation_id)
-        if plan is None:
-            raise KeyError(investigation_id)
-        request_event = InvestigationRequestedEvent.create(
-            InvestigationRequestedPayload(
-                investigation_id=investigation_id,
-                run_id=run.run_id,
-                query_text=plan.query_text,
-                requested_outputs=plan.requested_outputs,
-                time_window=plan.time_window,
-                source_classes=plan.target_source_types,
-                authorization_context={"source": "recorded-replay"},
-                force_refresh=True,
-            ),
-            producer="rhetoriq-api",
-            correlation_id=investigation_id,
-            partition_key=investigation_id,
-        )
-        self.audit.events.enqueue("investigations.requested.v1", request_event)
-        return run
 
     def _execute_claimed(self, run_id: str) -> None:
         if not self.audit.claim_run(run_id, self.worker_id, self.settings.RESEARCH_LEASE_SECONDS):
+            run = self.audit.get_run(run_id)
+            if run is not None and run.status in {"queued", "running"}:
+                raise RuntimeError("Research run is still owned by another worker")
             return
         try:
-            with LeaseHeartbeat(self.audit, run_id, self.worker_id, "kafka"):
+            run = self.audit.get_run(run_id)
+            if run is not None:
+                self._prepare_replay(run)
+            with LeaseHeartbeat(self.audit, run_id, self.worker_id, "database"):
                 AutonomousResearchEngine(self.repository, self.audit).execute(run_id)
             run = self.audit.get_run(run_id)
             if run and run.parent_run_id:
@@ -1188,13 +1214,12 @@ class ResearchRunManager:
                     ),
                     "status": "completed",
                 })
+        except LeaseLostError:
+            raise
         except Exception as exc:
-            logger.exception("Autonomous research run failed: %s", run_id)
-            self.audit.finish_run(run_id, status="failed", terminal_decision="failed",
-                                  warnings=[str(exc)[:500]], event_type="run.failed",
-                                  payload={"error": str(exc)[:300]})
-        finally:
-            self.audit.heartbeat_worker(self.worker_id, "kafka")
+            logger.warning("Research job failed: %s (%s)", run_id, type(exc).__name__)
+            self.audit.update_run(run_id, status="queued", warnings=[f"Worker retry required: {type(exc).__name__}"])
+            raise
 
     @staticmethod
     def _artifact_hash(workspace: Any) -> str | None:

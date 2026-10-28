@@ -1,6 +1,6 @@
 # RhetoriQ: Production Deployment Simplification
 
-Status: Agreed architectural direction; detailed implementation planning pending.
+Status: Active on the `deployment` branch; first infrastructure-removal pass complete.
 Target branch: `deployment`.
 Deployment target: Vercel frontend, Railway API and worker, managed PostgreSQL.
 
@@ -13,8 +13,8 @@ radar.
 Preserve the evidence-first research experience while reducing infrastructure,
 operating cost, and recovery complexity.
 
-Preserve the existing broad architecture in its current branch or a reference
-tag before making changes. The user will create the `deployment` branch.
+The `deployment` branch has been created. The existing broad architecture is
+preserved on the `further_dev` reference branch and in Git history.
 
 ## Target Architecture
 
@@ -143,10 +143,11 @@ Keep implemented, tested, deployed, and measured claims distinct.
 
 ## Working Sequence
 
-1. User creates the `deployment` branch.
-2. Resolve the open decisions and prepare the implementation plan.
-3. Replace execution and document processing dependencies.
-4. Consolidate retrieval and remove obsolete infrastructure.
-5. Add public access controls and operating safeguards.
-6. Deploy and record acceptance evidence.
-7. Gather user feedback and iterate.
+1. Preserve the broad implementation on `further_dev` (complete).
+2. Retire Kubernetes/AWS deployment artifacts (complete on `deployment`).
+3. Resolve the open decisions and prepare the implementation plan.
+4. Replace execution and document processing dependencies.
+5. Consolidate retrieval and remove obsolete infrastructure.
+6. Add public access controls and operating safeguards.
+7. Deploy and record acceptance evidence.
+8. Gather user feedback and iterate.

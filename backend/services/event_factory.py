@@ -18,6 +18,7 @@ def raw_event_from_document(
     action_id: str | None = None,
     investigation_id: str | None = None,
     causation_id: str | None = None,
+    event_id: str | None = None,
 ) -> RawDocumentEvent:
     metadata = document.metadata or {}
     resolved_provider = provider or str(metadata.get("provider") or document.source_name)
@@ -76,4 +77,5 @@ def raw_event_from_document(
         causation_id=causation_id,
         partition_key=document.id,
         occurred_at=document.published_at or collected_at,
+        **({"event_id": event_id} if event_id else {}),
     )

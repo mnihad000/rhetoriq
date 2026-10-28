@@ -1,14 +1,10 @@
-"""Legacy command name for the Kafka-backed investigation worker.
+"""Command-line entrypoint for the database-backed investigation worker."""
 
-This module intentionally never scans the database for queued work. Production
-dispatch is exclusively driven by ``investigations.requested.v1``.
-"""
-
-from events.worker import KafkaEventWorker
+from events.worker import DatabaseEventWorker
 
 
 def main() -> None:
-    KafkaEventWorker(role="investigations").run_forever()
+    DatabaseEventWorker().run_forever()
 
 
 if __name__ == "__main__":

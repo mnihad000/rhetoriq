@@ -85,7 +85,7 @@ class ResearchRepository:
                     requested_event_factory(run_id),
                     connection=conn,
                 )
-        self.append_event(run_id, "run.queued", {"investigation_id": investigation_id, "mode": mode})
+            self.append_event(run_id, "run.queued", {"investigation_id": investigation_id, "mode": mode}, connection=conn)
         return self.get_run(run_id)  # type: ignore[return-value]
 
     def get_run(self, run_id: str, *, connection=None) -> ResearchRunSummary | None:
@@ -137,7 +137,7 @@ class ResearchRepository:
                 UPDATE research_runs
                 SET status = 'running', worker_id = ?, lease_until = ?,
                     started_at = COALESCE(started_at, ?), updated_at = ?
-                WHERE run_id = ? AND (
+                WHERE run_id = ? AND status IN ('queued', 'running') AND (
                     status = 'queued' OR
                     (status = 'running' AND (lease_until IS NULL OR lease_until < ?)) OR
                     worker_id = ?

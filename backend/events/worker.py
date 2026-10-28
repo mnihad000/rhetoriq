@@ -1,34 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-import hashlib
 import json
 import logging
-import random
-import re
-import time
 import signal
 import socket
 import threading
 from typing import Any
 
 from config import get_settings
-from models.events import (
-    DeadLetterEvent,
-    DeadLetterPayload,
-    PRIMARY_TOPICS,
-    dlq_topic,
-    validate_event,
-)
+from models.events import validate_event
 from services.event_handlers import EventHandlers
 from services.event_store import EventStore
-from services.kafka_runtime import KafkaEventPublisher, SchemaRegistry, kafka_client_config, physical_topic
-from services.kafka_runtime import SchemaRegistryError
-
+from services.job_queue import JobQueue, LeaseLostError
 
 logger = logging.getLogger(__name__)
-_SECRET_PATTERN = re.compile(r"(?i)(password|secret|token|authorization|api[_-]?key)\s*[=:]\s*[^\s,;]+")
-_BEARER_PATTERN = re.compile(r"(?i)\bBearer\s+[^\s,;\"']+")
+
+# Logical role/topic metadata retained for operational tooling and compatibility
+# tests. Dispatch itself is database-backed and imports no transport client.
 TOPICS_BY_ROLE = {
     "b5-elasticsearch": ("corpus.projections.v1",),
     "b5-neo4j": ("corpus.projections.v1", "investigation.projections.v1"),
@@ -38,7 +26,6 @@ TOPICS_BY_ROLE = {
     "investigations": ("investigations.requested.v1",),
     "projections": ("investigations.stage-events.v1", "investigations.completed.v1",
                     "pipeline.evaluated.v1", "documents.late.v1"),
-    # The Flink job exclusively owns raw/enriched stream processing.
     "all": ("documents.processed.v1", "signals.detected.v1", "investigations.requested.v1",
             "investigations.stage-events.v1", "investigations.completed.v1",
             "pipeline.evaluated.v1", "documents.late.v1"),
@@ -46,20 +33,28 @@ TOPICS_BY_ROLE = {
 
 
 def _redact(message: str) -> str:
-    return _SECRET_PATTERN.sub(r"\1=<redacted>", _BEARER_PATTERN.sub("Bearer <redacted>", message))[:500]
+    import re
+    value = re.sub(r"(?i)\bBearer\s+[^\s,;\"']+", "Bearer <redacted>", message)
+    return re.sub(r"(?i)(password|secret|token|authorization|api[_-]?key)\s*[=:]\s*[^\s,;]+",
+                  r"\1=<redacted>", value)[:500]
 
 
 def _is_permanent(error: Exception) -> bool:
+    # Avoid importing the removed Kafka runtime merely to identify its legacy
+    # schema exception. The stable class name remains compatible for callers.
+    if type(error).__name__ == "SchemaRegistryError":
+        return True
     try:
         from jsonschema import ValidationError as JsonSchemaValidationError
         from pydantic import ValidationError as PydanticValidationError
-        permanent_types = (SchemaRegistryError, JsonSchemaValidationError, PydanticValidationError, ValueError)
+        return isinstance(error, (JsonSchemaValidationError, PydanticValidationError, ValueError))
     except ImportError:  # pragma: no cover
-        permanent_types = (SchemaRegistryError, ValueError)
-    return isinstance(error, permanent_types)
+        return isinstance(error, ValueError)
 
 
 class EventProcessor:
+    """Transport-independent event application and idempotency ledger."""
+
     def __init__(self, store: EventStore, handlers: EventHandlers) -> None:
         self.store = store
         self.handlers = handlers
@@ -67,7 +62,7 @@ class EventProcessor:
     def process(
         self,
         topic: str,
-        decoded: dict[str, Any],
+        decoded: dict[str, Any] | str,
         *,
         partition: int | None = None,
         offset: int | None = None,
@@ -96,140 +91,102 @@ class EventProcessor:
         return True
 
 
-class KafkaEventWorker:
-    def __init__(self, role: str | None = None) -> None:
-        settings = get_settings()
-        self.settings = settings
-        self.role = role or settings.KAFKA_WORKER_ROLE
+class DatabaseEventWorker:
+    """Lease and execute durable event jobs from ``event_outbox``."""
+
+    def __init__(self, role: str | None = None, *, queue=None, store=None, handlers=None) -> None:
+        self.settings = get_settings()
+        target = self.settings.persistence_target
+        self.queue = queue or JobQueue(target)
+        self.store = store or EventStore(target)
+        self.processor = EventProcessor(store=self.store, handlers=handlers or EventHandlers(target))
+        self.role = role or "database"
         self.worker_id = f"{self.role}-{socket.gethostname()}"
         self._stop = threading.Event()
-        self.registry = SchemaRegistry()
-        self.publisher = KafkaEventPublisher(self.registry)
-        self.store = EventStore(settings.persistence_target)
-        self.processor = EventProcessor(self.store, EventHandlers(settings.persistence_target))
+
+    def run_once(self) -> bool:
+        lease_seconds = float(getattr(self.settings, "JOB_LEASE_SECONDS", 60.0))
+        job = self.queue.claim(self.worker_id, lease_seconds)
+        if job is None:
+            return False
+        lost = threading.Event()
+        heartbeat_stop = threading.Event()
+        renew_seconds = max(0.1, float(getattr(self.settings, "JOB_LEASE_RENEW_SECONDS", 15.0)))
+
+        def renew_loop() -> None:
+            while not heartbeat_stop.wait(renew_seconds):
+                if not self.queue.renew(job, lease_seconds):
+                    lost.set()
+                    return
+                try:
+                    self.store.heartbeat(self.worker_id, "database")
+                except Exception:
+                    logger.exception("database worker heartbeat failed")
+
+        heartbeat = threading.Thread(target=renew_loop, name=f"lease-{job.event_id}", daemon=True)
+        heartbeat.start()
         try:
-            from confluent_kafka import Consumer
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("Kafka support requires confluent-kafka") from exc
-        config = kafka_client_config(settings)
-        role = role or settings.KAFKA_WORKER_ROLE
-        if role not in TOPICS_BY_ROLE:
-            raise ValueError(f"Unknown KAFKA_WORKER_ROLE: {role}")
-        config.update({
-            "group.id": f"{settings.KAFKA_CONSUMER_GROUP_PREFIX}-{role}-worker-v1",
-            "enable.auto.commit": False,
-            "isolation.level": "read_committed",
-            "auto.offset.reset": "earliest",
-            "max.poll.interval.ms": 900000,
-        })
-        self.consumer = Consumer(config)
-        self.consumer.subscribe([physical_topic(topic) for topic in TOPICS_BY_ROLE[role]])
+            with self.queue.fenced(job):
+                self.processor.process(job.topic, job.event_json)
+        except LeaseLostError:
+            logger.warning("lease lost while processing job %s", job.event_id)
+            return False
+        except Exception as exc:
+            if job.attempts >= int(getattr(self.settings, "JOB_MAX_ATTEMPTS", 3)):
+                self._finish_investigation_failure(job, exc)
+            self.queue.fail(
+                job, _redact(str(exc)),
+                int(getattr(self.settings, "JOB_MAX_ATTEMPTS", 3)),
+                float(getattr(self.settings, "JOB_RETRY_BACKOFF_SECONDS", 1.0)),
+            )
+            return False
+        finally:
+            heartbeat_stop.set()
+            heartbeat.join(timeout=min(renew_seconds, 1.0))
+        if lost.is_set():
+            return False
+        return self.queue.complete(job)
+
+    def _finish_investigation_failure(self, job, error: Exception) -> None:
+        if job.topic != "investigations.requested.v1":
+            return
+        try:
+            payload = json.loads(job.event_json).get("payload", {})
+            run_id = payload.get("run_id")
+            repository = getattr(self.processor.handlers, "research", None)
+            if not run_id or repository is None:
+                return
+            with self.queue.fenced(job):
+                repository.finish_run(
+                    run_id, status="failed", terminal_decision="failed",
+                    warnings=[_redact(str(error))], event_type="run.failed",
+                    payload={"status": "failed", "error": _redact(str(error))},
+                )
+        except LeaseLostError:
+            logger.warning("lease lost before terminal failure for job %s", job.event_id)
+        except Exception:
+            logger.exception("could not record terminal investigation failure for %s", job.event_id)
 
     def run_forever(self) -> None:
         if threading.current_thread() is threading.main_thread():
             for signum in (signal.SIGINT, signal.SIGTERM):
                 signal.signal(signum, lambda *_: self._stop.set())
+        poll_seconds = max(0.05, float(getattr(self.settings, "JOB_POLL_SECONDS", 0.5)))
         try:
-            self._run_loop()
+            while not self._stop.is_set():
+                self.store.heartbeat(self.worker_id, "database")
+                self.run_once()
+                self._stop.wait(poll_seconds)
         finally:
-            self.store.heartbeat(self.worker_id, self.role, "stopped")
-            self.consumer.close()
+            self.store.heartbeat(self.worker_id, "database", "stopped")
             close = getattr(self.processor.handlers, "close", None)
             if close:
                 close()
 
-    def _run_loop(self) -> None:
-        next_heartbeat_at = 0.0
-        while not self._stop.is_set():
-            now = time.monotonic()
-            if now >= next_heartbeat_at:
-                self.store.heartbeat(self.worker_id, self.role)
-                heartbeat = getattr(self.processor.handlers, "heartbeat", None)
-                if heartbeat:
-                    heartbeat()
-                next_heartbeat_at = now + 15.0
-            message = self.consumer.poll(1.0)
-            if message is None:
-                continue
-            if message.error():
-                logger.error("Kafka consumer error: %s", message.error())
-                continue
-            topic = message.topic()
-            logical = topic[len(self.settings.KAFKA_TOPIC_PREFIX):] if self.settings.KAFKA_TOPIC_PREFIX else topic
-            last_error: Exception | None = None
-            decoded: dict[str, Any] | None = None
-            attempts = 0
-            for attempt in range(1, self.settings.KAFKA_RETRY_MAX_ATTEMPTS + 1):
-                attempts = attempt
-                try:
-                    decoded = self.registry.decode(logical, message.value())
-                    self.processor.process(
-                        logical,
-                        decoded,
-                        partition=message.partition(),
-                        offset=message.offset(),
-                    )
-                    self.consumer.commit(message=message, asynchronous=False)
-                    last_error = None
-                    break
-                except Exception as exc:
-                    last_error = exc
-                    if _is_permanent(exc):
-                        break
-                    if attempt < self.settings.KAFKA_RETRY_MAX_ATTEMPTS:
-                        delay = self.settings.KAFKA_RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
-                        if self._stop.wait(delay * random.uniform(0.75, 1.25)):
-                            return
-            if last_error is not None:
-                self._dead_letter(message, logical, decoded, last_error, attempt_count=attempts)
-                self.consumer.commit(message=message, asynchronous=False)
-
-    def _dead_letter(
-        self,
-        message,
-        topic: str,
-        decoded: dict[str, Any] | None,
-        error: Exception,
-        *,
-        attempt_count: int,
-    ) -> None:
-        raw = message.value() or b""
-        original_event_id = decoded.get("event_id") if decoded else None
-        correlation_id = decoded.get("correlation_id") if decoded else f"dlq-{topic}-{message.partition()}-{message.offset()}"
-        safe_payload = None
-        if decoded:
-            safe_payload = {
-                key: value for key, value in decoded.items()
-                if key not in {"payload"}
-            }
-        event = DeadLetterEvent.create(
-            DeadLetterPayload(
-                original_topic=topic,
-                original_partition=message.partition(),
-                original_offset=message.offset(),
-                original_key=message.key().decode("utf-8", errors="replace") if message.key() else None,
-                original_event_id=original_event_id,
-                payload_sha256=hashlib.sha256(raw).hexdigest(),
-                safe_payload=safe_payload,
-                consumer=f"{self.settings.KAFKA_CONSUMER_GROUP_PREFIX}-{self.role}-worker-v1",
-                failure_class=type(error).__name__,
-                failure_code="permanent_failure" if _is_permanent(error) else "retry_exhausted",
-                error_message=_redact(str(error)),
-                attempt_count=attempt_count,
-                failed_at=datetime.now(timezone.utc),
-            ),
-            producer="event-worker",
-            correlation_id=correlation_id,
-            causation_id=original_event_id,
-            partition_key=message.key().decode("utf-8", errors="replace") if message.key() else correlation_id,
-        )
-        # If this publish fails, the caller does not commit the source offset.
-        self.publisher.publish(dlq_topic(topic), event)
-
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    KafkaEventWorker().run_forever()
+    DatabaseEventWorker().run_forever()
 
 
 if __name__ == "__main__":

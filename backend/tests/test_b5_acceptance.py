@@ -65,8 +65,9 @@ def test_investigation_workspace_attaches_seeded_documents_and_timeline():
     assert [item["document_id"] for item in workspace["timeline"]["timeline_events"]] == [item.id for item in documents]
 
 
-def test_disposable_gate_rejects_non_postgres_or_external_broker():
-    settings = SimpleNamespace(DATABASE_URL="postgresql://u:p@localhost:5432/rq", KAFKA_BOOTSTRAP_SERVERS="localhost:9092", EMBEDDING_LOCAL_ONLY=True, ENABLE_B5_RETRIEVAL=True)
+@pytest.mark.parametrize("broker", ["localhost:9092", "kafka:9092"])
+def test_disposable_gate_rejects_non_postgres_or_external_broker(broker):
+    settings = SimpleNamespace(DATABASE_URL="postgresql://u:p@localhost:5432/rq", KAFKA_BOOTSTRAP_SERVERS=broker, EMBEDDING_LOCAL_ONLY=True, ENABLE_B5_RETRIEVAL=True)
     errors = validate_disposable_settings(settings, disposable_stack=True)
     assert "DATABASE_URL must target the disposable postgres service" in errors
     assert "KAFKA_BOOTSTRAP_SERVERS must target the disposable broker service" in errors

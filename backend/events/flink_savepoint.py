@@ -1,4 +1,4 @@
-"""Request and verify a bounded Flink savepoint for controlled B6 shutdown."""
+"""Request and verify a bounded Flink savepoint for controlled shutdown."""
 
 from __future__ import annotations
 
