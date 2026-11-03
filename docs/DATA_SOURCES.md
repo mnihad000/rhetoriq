@@ -109,7 +109,12 @@ Implementation: `backend/services/federal_register.py`
 
 Federal Register is approved as the B2 first-party public-record API. The client preserves document number, query and page context, canonical HTML/PDF links, agencies, citation/docket metadata, publication and collection timestamps, retrieval diagnostics, and limitations. It applies bounded retries, pagination, deduplication, and provider rate limiting. API metadata and abstracts are citable as primary-source records, while the receipt warns that FederalRegister.gov is an informational rendition and links legal reliance to the official GovInfo PDF.
 
-Retention is limited to the processed-document default of 30 days in Kafka and the project’s public-record corpus policy in PostgreSQL. A provider-specific requirement may shorten this period but cannot extend it. The policy decision is `allow`, based on first-party public-record access without authentication; credentials, authorization headers, and unrelated response data are never stored in receipts or events.
+Retention is limited to the processed-document default of 30 days in the
+PostgreSQL journal and the project’s public-record corpus policy. A provider-
+specific requirement may shorten this period but cannot extend it. The policy
+decision is `allow`, based on first-party public-record access without
+authentication; credentials, authorization headers, and unrelated response
+data are never stored in receipts or events.
 
 ### RSS and Atom
 
@@ -201,7 +206,9 @@ Every proposed connector must document:
 6. Add fixture-based tests for malformed records, duplicates, pagination, timestamps, and provider errors.
 7. Define retention, deletion, and revalidation behavior.
 8. Add health metrics and update this status table.
-9. If Kafka is enabled, emit the versioned raw-document event described in [KAFKA.md](KAFKA.md).
+9. Persist the normalized document and acquisition receipt through the current
+   database job boundary. Transport-specific envelopes are optional journal
+   records, not a connector contract.
 
 ## External references
 

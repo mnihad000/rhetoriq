@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import time
 
 import pytest
 
+from events.worker import DatabaseEventWorker
+from models.events import PipelineEvaluationEvent, PipelineEvaluationPayload, PIPELINE_EVALUATED_TOPIC
 from services.database import connect
+from services.event_store import EventStore
 from services.job_queue import JobQueue, LeaseLostError
 
 
@@ -80,3 +84,134 @@ def test_pending_jobs_survive_queue_restart(tmp_path):
     second = JobQueue(target)
     job = second.claim("worker-after-restart", 30)
     assert job is not None
+
+
+def test_legacy_published_rows_are_requeued_once(tmp_path):
+    target = str(tmp_path / "legacy.sqlite3")
+    queue = JobQueue(target)
+    with connect(target) as conn:
+        conn.execute(
+            "INSERT INTO event_outbox(event_id, topic, event_json, created_at, status, published_at) VALUES (?, ?, ?, ?, 'published', ?)",
+            ("legacy-1", PIPELINE_EVALUATED_TOPIC, _pipeline_event("legacy-1"), "2026-01-01 00:00:00.000", "2026-01-01 00:01:00.000"),
+        )
+    # Reinitialization is the migration boundary; running it twice must not
+    # create a second delivery or undo a completed job.
+    JobQueue(target)
+    with connect(target) as conn:
+        row = conn.execute("SELECT status, published_at FROM event_outbox WHERE event_id = ?", ("legacy-1",)).fetchone()
+        assert (row[0], row[1]) == ("pending", None)
+    job = queue.claim("worker-legacy", 30)
+    assert job is not None
+    assert queue.complete(job) is True
+    JobQueue(target)
+    with connect(target) as conn:
+        assert conn.execute("SELECT status FROM event_outbox WHERE event_id = ?", ("legacy-1",)).fetchone()[0] == "completed"
+
+
+@pytest.mark.parametrize("status", ["pending", "published"])
+def test_legacy_publication_attempts_do_not_exhaust_processing_budget(tmp_path, status):
+    target = str(tmp_path / "legacy-budget.sqlite3")
+    store = EventStore(target)  # original schema before the queue upgrade
+    event = PipelineEvaluationEvent.model_validate_json(_pipeline_event("legacy-budget"))
+    store.enqueue(PIPELINE_EVALUATED_TOPIC, event)
+    with connect(target) as conn:
+        conn.execute("UPDATE event_outbox SET status=?, attempts=25, next_attempt_at='2099-01-01', last_error='old publisher failure'",
+                     (status,))
+    queue = JobQueue(target)
+    claimed = queue.claim("new-worker", 60, max_attempts=3)
+    assert claimed is not None and claimed.attempts == 1 and not claimed.finalize_only
+    assert queue.fail(claimed, "processing retry", max_attempts=3, backoff_seconds=0)
+    JobQueue(target)
+    with connect(target) as conn:
+        row = conn.execute("SELECT attempts, legacy_publish_attempts FROM event_outbox WHERE event_id=?", (event.event_id,)).fetchone()
+    assert (row[0], row[1]) == (1, 25)
+
+
+class _RecordingHandlers:
+    def __init__(self, *, fail: bool = False):
+        self.fail = fail
+        self.events = []
+
+    def handler_for(self, _topic):
+        return "test-consumer-v1", self.handle
+
+    def handle(self, event):
+        self.events.append(event.event_id)
+        if self.fail:
+            raise RuntimeError("handler failure")
+
+
+def _pipeline_event(event_id: str = "pipeline-1") -> str:
+    event = PipelineEvaluationEvent.create(
+        PipelineEvaluationPayload(
+            evaluated_at=datetime.now(timezone.utc), status="healthy"
+        ),
+        producer="test",
+        correlation_id="corr-1",
+        partition_key="pipeline",
+        event_id=event_id,
+    )
+    return event.model_dump_json()
+
+
+def test_database_worker_run_once_records_ledger_and_completes_job(tmp_path):
+    target = str(tmp_path / "worker.sqlite3")
+    queue = JobQueue(target)
+    store = EventStore(target)
+    event_json = _pipeline_event()
+    with connect(target) as conn:
+        conn.execute(
+            "INSERT INTO event_outbox(event_id, topic, event_json, created_at) VALUES (?, ?, ?, ?)",
+            ("pipeline-1", PIPELINE_EVALUATED_TOPIC, event_json, "2026-01-01 00:00:00.000"),
+        )
+    handlers = _RecordingHandlers()
+    worker = DatabaseEventWorker(queue=queue, store=store, handlers=handlers)
+    assert worker.run_once() is True
+    assert handlers.events == ["pipeline-1"]
+    with connect(target) as conn:
+        assert conn.execute("SELECT status FROM event_outbox WHERE event_id = ?", ("pipeline-1",)).fetchone()[0] == "completed"
+        assert conn.execute("SELECT status FROM consumed_events WHERE event_id = ?", ("pipeline-1",)).fetchone()[0] == "completed"
+
+
+def test_worker_does_not_execute_after_retry_budget_is_exhausted(tmp_path, monkeypatch):
+    target = str(tmp_path / "retry.sqlite3")
+    queue = JobQueue(target)
+    store = EventStore(target)
+    with connect(target) as conn:
+        conn.execute(
+            "INSERT INTO event_outbox(event_id, topic, event_json, created_at) VALUES (?, ?, ?, ?)",
+            ("pipeline-1", PIPELINE_EVALUATED_TOPIC, _pipeline_event(), "2026-01-01 00:00:00.000"),
+        )
+    handlers = _RecordingHandlers(fail=True)
+    worker = DatabaseEventWorker(queue=queue, store=store, handlers=handlers)
+    monkeypatch.setattr(worker.settings, "JOB_MAX_ATTEMPTS", 2)
+    monkeypatch.setattr(worker.settings, "JOB_RETRY_BACKOFF_SECONDS", 0)
+    assert worker.run_once() is False
+    assert worker.run_once() is False
+    assert worker.run_once() is False
+    assert handlers.events == ["pipeline-1", "pipeline-1"]
+    with connect(target) as conn:
+        row = conn.execute("SELECT status, attempts FROM event_outbox WHERE event_id = ?", ("pipeline-1",)).fetchone()
+        assert (row[0], row[1]) == ("failed", 2)
+
+
+def test_expired_claim_at_retry_limit_is_finalized_without_handler_execution(tmp_path, monkeypatch):
+    target = str(tmp_path / "expired.sqlite3")
+    queue = JobQueue(target)
+    store = EventStore(target)
+    with connect(target) as conn:
+        conn.execute(
+            "INSERT INTO event_outbox(event_id, topic, event_json, created_at) VALUES (?, ?, ?, ?)",
+            ("pipeline-1", PIPELINE_EVALUATED_TOPIC, _pipeline_event(), "2026-01-01 00:00:00.000"),
+        )
+    for _ in range(2):
+        claimed = queue.claim("crashed-worker", 30, max_attempts=2)
+        assert claimed is not None and not claimed.finalize_only
+        with connect(target) as conn:
+            conn.execute("UPDATE event_outbox SET lease_until = '2000-01-01' WHERE event_id = ?", (claimed.event_id,))
+    handlers = _RecordingHandlers()
+    worker = DatabaseEventWorker(queue=queue, store=store, handlers=handlers)
+    monkeypatch.setattr(worker.settings, "JOB_MAX_ATTEMPTS", 2)
+    assert worker.run_once() is False
+    assert handlers.events == []
+    assert queue.health()["failed"] == 1

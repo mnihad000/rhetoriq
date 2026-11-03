@@ -5,8 +5,8 @@ Sources:
   GDELT  — news articles, national/local/blog classification, no key required
   HN     — forum layer (Hacker News), no key required
 
-Both results are staged through the Kafka outbox. The processed-document
-consumer is the only production writer to the live/canonical stores.
+Both results are accepted as durable database jobs. The database worker
+normalizes and persists their canonical records.
 """
 
 from datetime import datetime, timezone

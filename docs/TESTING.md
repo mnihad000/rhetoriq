@@ -33,7 +33,7 @@ production database or the ordinary development database.
 
 ```powershell
 cd backend
-..\.venv\Scripts\python.exe -m pytest tests/test_postgres_migration.py tests/test_b5_postgres.py -q
+..\.venv\Scripts\python.exe -m pytest tests/test_postgres_migration.py tests/test_job_queue_postgres.py tests/test_b5_postgres.py -q
 ```
 
 Validate the base and optional B5 Compose graphs without loading developer
@@ -51,7 +51,8 @@ build, services start, encrypted connections work, or jobs are processed.
 
 Use a fresh disposable database and verify:
 
-1. An API request commits its accepted job and domain plan atomically.
+1. After planning, an API request commits its accepted research run and dispatch
+   job atomically.
 2. A worker claims one pending job, renews its lease, and records completion.
 3. A crash or lease expiry makes unfinished work claimable again.
 4. Retryable failures use bounded attempts and backoff; permanent failures stay
@@ -62,6 +63,13 @@ Use a fresh disposable database and verify:
 7. Duplicate delivery produces one logical document, report, and terminal
    outcome.
 8. Checkpoint recovery, SSE reconnect, and browser reload preserve progress.
+
+`test_database_research.py` exercises the real graph on isolated SQLite jobs,
+including recorded replay without source calls, checkpoint recovery after an
+injected interruption, and recovery after a committed result but lost job ack.
+`test_job_queue_postgres.py` covers PostgreSQL claims, stale-write fencing, graph
+execution, and replay in a fresh disposable database per test. Its configured
+test account must have permission to create and drop those test databases.
 
 ## Research and product acceptance
 

@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 import httpx
 
-from flink.contracts import canonical_json
+from services.identity import canonical_json
 from services.b5_graph import build_document_graph, build_investigation_graph
 
 

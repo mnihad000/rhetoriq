@@ -40,16 +40,16 @@ def _validate_fence(connection, target: str) -> None:
     if is_postgres_database(target):
         row = connection.execute(
             """
-            SELECT status, lease_owner, lease_generation, lease_until
+            SELECT 1
             FROM event_outbox
-            WHERE event_id = ?
+            WHERE event_id = ? AND status = 'running' AND lease_owner = ?
+              AND lease_generation = ? AND lease_until IS NOT NULL
+              AND lease_until::timestamp AT TIME ZONE 'UTC' > clock_timestamp()
             FOR UPDATE
             """,
-            (job.event_id,),
+            (job.event_id, job.lease_owner, job.lease_generation),
         ).fetchone()
-        valid = bool(row) and row["status"] == "running" and row["lease_owner"] == job.lease_owner
-        valid = valid and int(row["lease_generation"]) == int(job.lease_generation)
-        valid = valid and row["lease_until"] is not None and row["lease_until"] > _postgres_now(connection)
+        valid = row is not None
     else:
         row = connection.execute(
             """
@@ -64,13 +64,6 @@ def _validate_fence(connection, target: str) -> None:
         valid = row is not None
     if not valid:
         raise LeaseLostError(f"Lease lost for job {job.event_id}")
-
-
-def _postgres_now(connection):
-    row = connection.execute(
-        "SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.MS') AS now"
-    ).fetchone()
-    return row["now"] if hasattr(row, "keys") else row[0]
 
 
 def is_postgres_database(target: str) -> bool:
@@ -121,8 +114,16 @@ class PostgresConnection:
             self.close()
 
     def commit(self) -> None:
-        _validate_fence(self, self._database_url)
-        self._connection.commit()
+        try:
+            _validate_fence(self, self._database_url)
+            self._connection.commit()
+        except Exception:
+            # Lease validation happens immediately before commit.  If the
+            # owner has gone stale, explicitly roll back as sqlite/psycopg
+            # otherwise leave the transaction (including DDL) recoverable by
+            # close in implementation-dependent ways.
+            self._connection.rollback()
+            raise
 
     def rollback(self) -> None:
         self._connection.rollback()
@@ -138,7 +139,9 @@ class PostgresConnection:
         return self._connection.execute(postgres_query(query), parameters or ())
 
     def executemany(self, query: str, parameters):
-        return self._connection.executemany(postgres_query(query), parameters)
+        cursor = self._connection.cursor()
+        cursor.executemany(postgres_query(query), parameters)
+        return cursor
 
     def cursor(self):
         return self._connection.cursor()
@@ -171,6 +174,16 @@ class _FencedSQLiteConnection:
             self.close()
 
     def execute(self, query: str, parameters: tuple | list | None = None):
+        # Python's sqlite driver does not implicitly start a transaction for
+        # DDL.  Begin one explicitly for mutating statements so commit-time
+        # lease fencing can roll back schema and artifact writes as well as
+        # ordinary DML.
+        statement = query.lstrip().upper()
+        if not self._connection.in_transaction and re.match(
+            r"(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP|VACUUM|REINDEX|WITH)\b",
+            statement,
+        ):
+            self._connection.execute("BEGIN")
         return self._connection.execute(query, parameters or ())
 
     def executemany(self, query: str, parameters):
@@ -190,8 +203,14 @@ class _FencedSQLiteConnection:
         return result
 
     def commit(self) -> None:
-        _validate_fence(self, self._target)
-        self._connection.commit()
+        try:
+            _validate_fence(self, self._target)
+            self._connection.commit()
+        except Exception:
+            # sqlite DDL is transactional, but a failed validation must not
+            # rely on connection.close() to discard it consistently.
+            self._connection.rollback()
+            raise
 
     def rollback(self) -> None:
         self._connection.rollback()

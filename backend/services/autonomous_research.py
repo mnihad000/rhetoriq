@@ -7,7 +7,6 @@ import copy
 import json
 import logging
 import sqlite3
-import threading
 import time
 from typing import Any, Literal, TypedDict
 from urllib.parse import urlparse
@@ -345,7 +344,7 @@ class AutonomousResearchEngine:
         # Each lease generation writes an isolated checkpoint namespace. A
         # paused stale worker cannot overwrite the takeover worker's checkpoint.
         thread_id = f"{run_id}:lease:{job.lease_generation}" if job else run_id
-        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 200}
+        config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}, "recursion_limit": 200}
         initial: ResearchState = {
             "run_id": run_id,
             "investigation_id": summary.investigation_id,
@@ -792,7 +791,9 @@ class AutonomousResearchEngine:
             eligible_documents.append(document)
         documents = eligible_documents
         retriever = PrecollectedRetriever(self.repository,documents)
-        runner = InvestigationRunner(repository=self.repository, retriever=retriever, require_live_models=False)
+        run = self.audit.get_run(state["run_id"])
+        runner = InvestigationRunner(repository=self.repository, retriever=retriever, require_live_models=False,
+                                     recorded=bool(run and run.mode == "recorded"))
         runner.run(state["investigation_id"], plan, force_refresh=True)
         workspace = self.repository.get_investigation_workspace(state["investigation_id"])
         if workspace is None or workspace.report is None:
@@ -1114,6 +1115,10 @@ class ResearchRunManager:
 
     def execute_queued(self, run_id: str) -> None:
         """Database worker entrypoint, protected by job fencing and a run lease."""
+        job = current_job()
+        if (job is None or job.topic != "investigations.requested.v1" or
+                json.loads(job.event_json).get("payload", {}).get("run_id") != run_id):
+            raise LeaseLostError("Research execution requires its leased database job")
         self._execute_claimed(run_id)
 
     def replay(self, investigation_id: str, source_run_id: str) -> ResearchRunSummary:
@@ -1188,8 +1193,9 @@ class ResearchRunManager:
             run = self.audit.get_run(run_id)
             if run is not None:
                 self._prepare_replay(run)
-            with LeaseHeartbeat(self.audit, run_id, self.worker_id, "database"):
-                AutonomousResearchEngine(self.repository, self.audit).execute(run_id)
+            # The database worker renews the authoritative job lease. A second
+            # independent research heartbeat would create competing ownership clocks.
+            AutonomousResearchEngine(self.repository, self.audit).execute(run_id)
             run = self.audit.get_run(run_id)
             if run and run.parent_run_id:
                 source_actions = [item.decision.model_dump(mode="json") for item in self.audit.list_actions(run.parent_run_id)]
@@ -1218,7 +1224,9 @@ class ResearchRunManager:
             raise
         except Exception as exc:
             logger.warning("Research job failed: %s (%s)", run_id, type(exc).__name__)
-            self.audit.update_run(run_id, status="queued", warnings=[f"Worker retry required: {type(exc).__name__}"])
+            run = self.audit.get_run(run_id)
+            if run is not None and run.status in {"queued", "running"}:
+                self.audit.update_run(run_id, status="queued", warnings=[f"Worker retry required: {type(exc).__name__}"])
             raise
 
     @staticmethod
@@ -1229,30 +1237,6 @@ class ResearchRunManager:
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-class LeaseHeartbeat:
-    def __init__(self, audit: ResearchRepository, run_id: str, worker_id: str, mode: str = "worker") -> None:
-        self.audit = audit
-        self.run_id = run_id
-        self.worker_id = worker_id
-        self.mode = mode
-        self.settings = get_settings()
-        self.stopped = threading.Event()
-        self.thread = threading.Thread(target=self._renew, name=f"lease-{run_id[-8:]}", daemon=True)
-
-    def __enter__(self) -> "LeaseHeartbeat":
-        self.audit.heartbeat_worker(self.worker_id, self.mode, self.run_id)
-        self.thread.start()
-        return self
-
-    def __exit__(self, *_args: Any) -> None:
-        self.stopped.set()
-        self.thread.join(timeout=2)
-        self.audit.heartbeat_worker(self.worker_id, self.mode)
-
-    def _renew(self) -> None:
-        while not self.stopped.wait(self.settings.RESEARCH_LEASE_RENEW_SECONDS):
-            self.audit.renew_lease(self.run_id, self.worker_id, self.settings.RESEARCH_LEASE_SECONDS)
-            self.audit.heartbeat_worker(self.worker_id, self.mode, self.run_id)
 
 
 _repository = InvestigationRepository(get_settings().persistence_target)

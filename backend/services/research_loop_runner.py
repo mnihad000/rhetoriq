@@ -48,10 +48,17 @@ class InvestigationRunner:
         retriever: RetrieverAgent,
         *,
         require_live_models: bool = True,
+        recorded: bool = False,
     ) -> None:
         self._repository = repository
         self._retriever = retriever
         self._settings = get_settings()
+        self._recorded = recorded
+        if recorded:
+            self._settings = self._settings.model_copy(update={
+                "CLAIM_VERIFIER_LOCAL_ONLY": True,
+                "CLAIM_VERIFIER_ALLOW_HOSTED_JUDGE": False,
+            })
         self._require_live_models = require_live_models
 
     def run(self, investigation_id: str, plan: InvestigationPlan, *, force_refresh: bool = False) -> InvestigationWorkspace:
@@ -202,7 +209,11 @@ class InvestigationRunner:
         self._repository.save_receipts_result(receipts)
         verification = None
         if self._settings.CLAIM_VERIFIER_ENABLED:
-            verification = ClaimEvidenceVerifier(settings=self._settings).verify(
+            embeddings = None
+            if self._recorded:
+                from services.embedding_service import EmbeddingService
+                embeddings = EmbeddingService(local_only=True, cache=False)
+            verification = ClaimEvidenceVerifier(settings=self._settings, embeddings=embeddings).verify(
                 investigation_id,
                 run_plan,
                 prior_documents,

@@ -1,4 +1,4 @@
-"""Pure confidence inputs shared by the legacy ranker and Flink runtime."""
+"""Pure confidence inputs for narrative ranking and recorded analysis."""
 from collections.abc import Mapping
 
 

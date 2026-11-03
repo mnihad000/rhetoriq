@@ -1,1 +1,1 @@
-"""Kafka event backbone entrypoints and handlers."""
+"""Durable database-job entrypoints and domain-event handlers."""

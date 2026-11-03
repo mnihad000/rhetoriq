@@ -30,7 +30,7 @@ const streamTopic: LiveTrendingTopic = {
   persistence_runs: 2,
   provider_mix: {},
   supporting_document_ids: ["doc-1"],
-  pipeline_source: "flink",
+  pipeline_source: "database",
   signal_revision: 2,
   emerging_observed_count: 5,
   emerging_baseline_count: 2,

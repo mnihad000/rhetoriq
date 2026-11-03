@@ -192,7 +192,7 @@ def test_runner_returns_configuration_missing_without_live_model(tmp_path, monke
     assert workspace.research_loop.final_decision == "configuration_missing"
 
 
-def test_run_endpoint_queues_workspace_through_kafka_outbox(tmp_path, monkeypatch):
+def test_run_endpoint_queues_workspace_through_database_job(tmp_path, monkeypatch):
     repo = InvestigationRepository(str(tmp_path / "investigations.sqlite3"))
     monkeypatch.setattr(narratives_api, "_investigation_repo", repo)
     settings = get_settings()

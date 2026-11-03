@@ -10,7 +10,8 @@ RhetoriQ is an evidence-first narrative investigation system. It identifies publ
 4. **Transport is not source.** A publisher, public record, or social post is the source; an API, feed, search result, or page fetch is how it is acquired.
 5. **Decomposed investigation.** Retrieval, timeline building, graph analysis, source-diversity analysis, and report synthesis are separate stages.
 6. **Inspectable outputs.** Intermediate artifacts, limitations, provider coverage, and unresolved gaps remain visible.
-7. **Durable processing.** Kafka events, transactional outbox delivery, Flink checkpoints, and idempotent consumers let layers recover independently.
+7. **Durable processing.** PostgreSQL jobs, leases, checkpoints, and idempotent
+   actions let the API and worker recover independently without a broker.
 
 ## System flow
 
@@ -32,11 +33,11 @@ flowchart TB
     end
     subgraph Processing
       F --> G[Trend and investigation pipelines]
-      G --> H[Kafka and Flink processing]
+      G --> H[Leased PostgreSQL jobs and direct processing]
     end
     subgraph InvestigationData[Investigation data]
       G --> I[(SQLite development stores)]
-      H --> J[(PostgreSQL, search index, graph store, Redis)]
+      H --> J[(PostgreSQL canonical state)]
     end
     subgraph Product
       I --> K[Investigation services]

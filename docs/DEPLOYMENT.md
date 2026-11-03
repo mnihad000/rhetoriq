@@ -26,7 +26,7 @@ fresh local-only values, and run from the repository root:
 
 ```powershell
 docker compose --env-file .env.production.example config --quiet
-Copy-Item .env.production.example .env.local
+if (-not (Test-Path .env.local)) { Copy-Item .env.production.example .env.local }
 # Replace placeholder secrets in .env.local before starting services.
 docker compose --env-file .env.local up --build -d
 docker compose --env-file .env.local ps
@@ -45,6 +45,22 @@ deployment and must be qualified separately before enabling retrieval.
 Check `GET /health`, `GET /api/research/health`, and a disposable investigation
 flow. Compose rendering is configuration evidence only; it does not prove
 that a permanent deployment is ready.
+
+## Legacy cutover boundary
+
+Before pointing a deployment at the new worker, stop every legacy broker,
+stream, publisher, and projection consumer. Take a managed PostgreSQL backup
+and inspect `event_outbox` rows in `pending`, `running`, `failed`, and legacy
+`published` states. Confirm the active investigation and enrichment jobs that
+must finish or be replayed; do not blindly downgrade migrations or delete old
+job rows.
+
+Migration `011_database_jobs.sql` preserves the SQL migration history and
+requeues historical published outbox rows into the database-job path. Replay
+is safe only when the consumed-event ledger and downstream writes remain
+idempotent. Record the backup, migration, worker cutover time, queue counts,
+and any requeued job IDs in the release record. Keep the legacy workers
+stopped until the new worker has been accepted against that snapshot.
 
 ## Environment and migration ownership
 
@@ -72,11 +88,15 @@ down-migration path.
 - Retained domain event envelopes and the transactional journal as durable
   database records rather than network transport.
 - Kept the optional B5 stores isolated behind a separate Compose overlay.
+- Implemented database-job leasing, direct document processing, retry state,
+  and generation-fenced commits; live qualification remains open.
 
 ## Remaining release work
 
-- Finish and verify job leasing, retry, and stale-worker fencing across API and
-  worker restarts.
+- Qualify job leasing, retry, and stale-worker fencing across API and worker
+  restarts against a disposable PostgreSQL environment.
+- Replace or explicitly defer SearXNG, Redis, and remaining B5 projections based
+  on measured need; the optional overlay is not a base deployment dependency.
 - Complete public accounts, ownership, sharing, quotas, concurrency, and
   spending controls before open public use.
 - Decide the initial search and model providers and measure their cost/latency.

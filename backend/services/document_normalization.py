@@ -212,7 +212,7 @@ def normalize_raw_event(event: RawDocumentEvent) -> EnrichmentRequestedEvent:
     event_id = "enrichreq_" + _stable_hash({"raw_event_id": event.event_id, "input_hash": input_hash})[:24]
     return EnrichmentRequestedEvent.create(
         payload,
-        producer="flink-normalizer",
+        producer="document-normalizer",
         correlation_id=event.correlation_id,
         causation_id=event.event_id,
         partition_key=document.id,

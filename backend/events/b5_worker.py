@@ -1,4 +1,4 @@
-"""Independent, at-least-once projection workers with target revision guards."""
+"""Optional projection handlers used by the database worker and repair tools."""
 from __future__ import annotations
 
 import logging
@@ -6,7 +6,6 @@ import socket
 import time
 
 from config import get_settings
-from events.worker import EventProcessor, KafkaEventWorker
 from models.document import Document
 from models.events import CORPUS_PROJECTIONS_TOPIC, INVESTIGATION_PROJECTIONS_TOPIC, ProjectionPayload
 from services.b5_repository import ProjectionRepository, MINILM_IDENTITY, MINILM_REVISION
@@ -125,23 +124,3 @@ class ProjectionHandlers:
         self.repository.heartbeat(self.worker_id,self.target,"stopped")
         if self.adapter is not None and hasattr(self.adapter,"close"):
             self.adapter.close()
-
-
-def main():
-    logging.basicConfig(level=logging.INFO)
-    settings = get_settings()
-    handlers = ProjectionHandlers(settings=settings)
-    adapter = handlers._adapter()
-    if adapter:
-        adapter.initialize(handlers.repository.manifest()["generation"])
-    else:
-        from services.embedding_service import get_embedding_service
-        handlers.embedding_service = get_embedding_service()
-        handlers.embedding_service.load_model()
-    worker = KafkaEventWorker(role=f"b5-{settings.B5_WORKER_TARGET}")
-    worker.processor = EventProcessor(EventStore(settings.persistence_target),handlers)
-    worker.run_forever()
-
-
-if __name__ == "__main__":
-    main()

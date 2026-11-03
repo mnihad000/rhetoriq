@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from demo_data import DEMO_DOCUMENTS
-from flink.contracts import stable_id
+from services.identity import stable_id
 from services.b5_graph import build_document_graph, build_investigation_graph, provenance_paths
 
 
@@ -69,7 +69,7 @@ def test_investigation_claim_ids_are_scoped_and_inferred_paths_are_opt_in():
 
 
 def test_recorded_links_resolve_in_scope_and_cycles_yield_simple_observed_paths():
-    from events.b5_acceptance import build_seed_documents
+    from tests.projection_fixtures import build_seed_documents
     documents = build_seed_documents("run", 3)
     snapshots = [_document_snapshot(document, domain_id=document.id) for document in documents]
     investigation = {"snapshot_id": "investigation", "kind": "investigation", "domain_id": "inv",

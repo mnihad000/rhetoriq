@@ -21,8 +21,8 @@ router = APIRouter(prefix="/api")
 def research_health() -> dict:
     settings = get_settings()
     components: dict[str, dict] = {}
-    event_store = EventStore(settings.persistence_target)
     try:
+        EventStore(settings.persistence_target)
         components["jobs"] = JobQueue(settings.persistence_target).health()
         with connect(settings.persistence_target) as conn:
             rows = conn.execute(

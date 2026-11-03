@@ -149,13 +149,17 @@ def test_precollected_graph_run_reaches_audited_terminal_state(tmp_path, monkeyp
     monkeypatch.setattr(ResearchToolRegistry, "execute", forbid_network)
     manager = ResearchRunManager(repository, audit)
     replay = manager.replay("inv_graph", run.run_id)
-    manager.execute_queued(replay.run_id)
+    from events.worker import DatabaseEventWorker
+    from services.event_handlers import EventHandlers
+    from services.job_queue import JobQueue
+    monkeypatch.setattr("services.autonomous_research.get_research_manager", lambda: manager)
+    worker = DatabaseEventWorker(queue=JobQueue(db_path), store=audit.events, handlers=EventHandlers(db_path))
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         replay = audit.get_run(replay.run_id)
         if replay and replay.status not in {"queued", "running"}:
             break
-        time.sleep(0.05)
+        worker.run_once()
 
     assert replay is not None
     assert replay.status in {"completed", "insufficient_evidence"}

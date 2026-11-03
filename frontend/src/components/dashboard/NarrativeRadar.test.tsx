@@ -8,7 +8,7 @@ const fallbackFeed: LiveTrendingFeed = {
   state: "stale",
   source: "legacy",
   fallback_active: true,
-  warning: "Flink is unavailable; showing the last valid snapshot.",
+  warning: "Radar refresh is unavailable; showing the last valid snapshot.",
   topics: [{
     id: "legacy-1",
     title: "Legacy topic",
@@ -36,7 +36,7 @@ describe("NarrativeRadar fallback", () => {
   it("keeps the last valid card visible with a clear fallback warning", () => {
     render(<MemoryRouter><NarrativeRadar feed={fallbackFeed} errorMessage={null} /></MemoryRouter>);
 
-    expect(screen.getAllByText("Flink is unavailable; showing the last valid snapshot.")).toHaveLength(2);
+    expect(screen.getAllByText("Radar refresh is unavailable; showing the last valid snapshot.")).toHaveLength(2);
     expect(screen.getByRole("heading", { name: "Legacy topic" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Investigate" })).toBeInTheDocument();
   });

@@ -1,4 +1,4 @@
-"""Readiness probe for ordinary, outbox, and enrichment workers."""
+"""Readiness probe for the durable database worker."""
 
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ from services.database import connect
 
 def main() -> None:
     settings = get_settings()
-    role = os.getenv("WORKER_PROBE_ROLE", settings.KAFKA_WORKER_ROLE)
+    role = os.getenv("WORKER_PROBE_ROLE", "database")
     worker_id = os.getenv("WORKER_PROBE_ID") or f"{role}-{socket.gethostname()}"
-    table = "enrichment_worker_health" if role == "enrichment" else "runtime_worker_health"
+    table = "runtime_worker_health"
     with connect(settings.persistence_target) as db:
         row = db.execute(
             f"SELECT state, heartbeat_at FROM {table} WHERE worker_id=?", (worker_id,)

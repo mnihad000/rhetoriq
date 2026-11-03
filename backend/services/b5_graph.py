@@ -13,7 +13,7 @@ import re
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
-from flink.contracts import canonical_json, semantic_hash, stable_id, utc
+from services.identity import canonical_json, semantic_hash, stable_id, utc
 from models.document import Document
 from models.events import EnrichmentReceipt
 from services.mutation_detection import MutationDetector

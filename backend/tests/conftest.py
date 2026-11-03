@@ -18,7 +18,6 @@ os.environ["DEPLOYMENT_ENV"] = "development"
 _test_state = Path(tempfile.mkdtemp(prefix="rhetoriq-tests-"))
 os.environ["INVESTIGATION_DB_PATH"] = str(_test_state / "investigations.sqlite3")
 os.environ["RESEARCH_CHECKPOINT_DB_PATH"] = str(_test_state / "checkpoints.sqlite3")
-os.environ["KAFKA_PROCESSED_WAIT_SECONDS"] = "0"
 os.environ["REDIS_URL"] = ""
 for _key in ("GEMINI_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY"):
     os.environ[_key] = ""

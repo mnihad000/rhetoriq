@@ -73,7 +73,7 @@ export default function NarrativeCard({ topic }: NarrativeCardProps) {
         </div>
       </dl>
 
-      {topic.pipeline_source === "flink" ? (
+      {typeof topic.emerging_observed_count === "number" || typeof topic.sustained_observed_count === "number" ? (
         <div className="mt-5 grid grid-cols-2 gap-3 rounded-[1rem] bg-[rgba(124,144,172,0.08)] p-4 text-sm">
           <Metric label="Emerging · 6h" observed={topic.emerging_observed_count} baseline={topic.emerging_baseline_count} spike={topic.emerging_spike} />
           <Metric label="Sustained · 24h" observed={topic.sustained_observed_count} baseline={topic.sustained_baseline_count} spike={topic.sustained_spike} />

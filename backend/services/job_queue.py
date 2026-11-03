@@ -29,6 +29,10 @@ class Job:
     lease_generation: int
     lease_until: str | None
     attempts: int
+    # True means the row was already exhausted when claimed.  It is leased
+    # only so the worker can record a terminal investigation state before the
+    # queue row is failed; no event handler may run in this mode.
+    finalize_only: bool = False
 
 
 _CURRENT_JOB: ContextVar[Job | None] = ContextVar("current_job", default=None)
@@ -83,7 +87,8 @@ class JobQueue:
                     status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
                     next_attempt_at TEXT, last_error TEXT, created_at TEXT NOT NULL,
                     published_at TEXT, lease_owner TEXT, lease_generation INTEGER NOT NULL DEFAULT 0,
-                    lease_until TEXT, finished_at TEXT
+                    lease_until TEXT, finished_at TEXT,
+                    legacy_publish_attempts INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -95,10 +100,16 @@ class JobQueue:
                 "lease_generation": "INTEGER NOT NULL DEFAULT 0",
                 "lease_until": "TEXT",
                 "finished_at": "TEXT",
+                "legacy_publish_attempts": "INTEGER NOT NULL DEFAULT 0",
             }
             for column, definition in additions.items():
                 if column not in columns:
                     conn.execute(f"ALTER TABLE event_outbox ADD COLUMN {column} {definition}")
+            if "legacy_publish_attempts" not in columns:
+                conn.execute(
+                    "UPDATE event_outbox SET legacy_publish_attempts=attempts, attempts=0, "
+                    "next_attempt_at=NULL, last_error=NULL WHERE status='pending' AND lease_generation=0"
+                )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_event_outbox_jobs "
                 "ON event_outbox(status, next_attempt_at, lease_until, created_at)"
@@ -107,12 +118,13 @@ class JobQueue:
             # new deployment.  This is idempotent and completed jobs are not
             # touched on subsequent starts.
             conn.execute(
-                "UPDATE event_outbox SET status = 'pending', published_at = NULL "
+                "UPDATE event_outbox SET status = 'pending', published_at = NULL, "
+                "legacy_publish_attempts=attempts, attempts=0, next_attempt_at=NULL, last_error=NULL "
                 "WHERE status = 'published'"
             )
 
     @staticmethod
-    def _job_from_row(row: Any) -> Job:
+    def _job_from_row(row: Any, *, finalize_only: bool = False) -> Job:
         return Job(
             event_id=_row_value(row, "event_id", 0),
             topic=_row_value(row, "topic", 1),
@@ -121,45 +133,50 @@ class JobQueue:
             lease_generation=int(_row_value(row, "lease_generation", 4)),
             lease_until=_row_value(row, "lease_until", 5),
             attempts=int(_row_value(row, "attempts", 6)),
+            finalize_only=finalize_only,
         )
 
-    def claim(self, worker_id: str, lease_seconds: float) -> Job | None:
+    def claim(self, worker_id: str, lease_seconds: float, max_attempts: int | None = None) -> Job | None:
         lease_seconds = max(0.1, float(lease_seconds))
+        max_attempts = None if max_attempts is None else max(1, int(max_attempts))
         if is_postgres_database(self.target):
-            return self._claim_postgres(worker_id, lease_seconds)
+            return self._claim_postgres(worker_id, lease_seconds, max_attempts)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            attempt_clause = "" if max_attempts is None else " AND attempts <= ?"
+            attempt_params = () if max_attempts is None else (max_attempts,)
             row = conn.execute(
-                """
+                f"""
                 SELECT event_id, topic, event_json, lease_owner, lease_generation,
                        lease_until, attempts
                 FROM event_outbox
-                WHERE (status = 'pending' AND
-                       (next_attempt_at IS NULL OR julianday(next_attempt_at) <= julianday('now')))
-                   OR (status = 'running' AND lease_until IS NOT NULL
-                       AND julianday(lease_until) <= julianday('now'))
+                WHERE ((status = 'pending' AND
+                        (next_attempt_at IS NULL OR julianday(next_attempt_at) <= julianday('now')))
+                    OR (status = 'running' AND lease_until IS NOT NULL
+                        AND julianday(lease_until) <= julianday('now')))
+                  {attempt_clause}
                 ORDER BY created_at
                 LIMIT 1
-                """
-            ).fetchone()
+                """, attempt_params).fetchone()
             if row is None:
                 return None
             event_id = _row_value(row, "event_id", 0)
+            increment_attempts = max_attempts is None or int(_row_value(row, "attempts", 6)) < max_attempts
             cursor = conn.execute(
-                """
+                f"""
                 UPDATE event_outbox
                 SET status = 'running', lease_owner = ?,
                     lease_generation = lease_generation + 1,
                     lease_until = strftime('%Y-%m-%d %H:%M:%f', 'now', '+' || ? || ' seconds'),
-                    attempts = attempts + 1, finished_at = NULL
+                    attempts = attempts {'+ 1' if increment_attempts else ''}, finished_at = NULL
                 WHERE event_id = ? AND (
                     (status = 'pending' AND
                      (next_attempt_at IS NULL OR julianday(next_attempt_at) <= julianday('now')))
                     OR (status = 'running' AND lease_until IS NOT NULL
                         AND julianday(lease_until) <= julianday('now'))
-                )
+                ) {attempt_clause}
                 """,
-                (worker_id, lease_seconds, event_id),
+                (worker_id, lease_seconds, event_id, *attempt_params),
             )
             if cursor.rowcount != 1:
                 return None
@@ -171,39 +188,47 @@ class JobQueue:
                 """,
                 (event_id,),
             ).fetchone()
-            return self._job_from_row(claimed)
+            return self._job_from_row(claimed, finalize_only=not increment_attempts)
 
-    def _claim_postgres(self, worker_id: str, lease_seconds: float) -> Job | None:
+    def _claim_postgres(self, worker_id: str, lease_seconds: float, max_attempts: int | None) -> Job | None:
         with self._connect() as conn:
+            attempt_clause = "" if max_attempts is None else " AND attempts <= ?"
+            attempt_params = () if max_attempts is None else (max_attempts,)
             row = conn.execute(
-                """
-                WITH candidate AS (
-                    SELECT event_id
-                    FROM event_outbox
-                    WHERE (status = 'pending' AND
-                           (next_attempt_at IS NULL OR next_attempt_at::timestamptz <= clock_timestamp()))
-                       OR (status = 'running' AND lease_until IS NOT NULL
-                           AND lease_until::timestamptz <= clock_timestamp())
-                    ORDER BY created_at
-                    FOR UPDATE SKIP LOCKED
-                    LIMIT 1
-                )
-                UPDATE event_outbox AS jobs
+                f"""
+                SELECT event_id, topic, event_json, lease_owner, lease_generation,
+                       lease_until, attempts
+                FROM event_outbox
+                WHERE ((status = 'pending' AND
+                        (next_attempt_at IS NULL OR next_attempt_at::timestamptz <= clock_timestamp()))
+                    OR (status = 'running' AND lease_until IS NOT NULL
+                        AND lease_until::timestamp AT TIME ZONE 'UTC' <= clock_timestamp()))
+                  {attempt_clause}
+                ORDER BY created_at
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+                """, attempt_params).fetchone()
+            if row is None:
+                return None
+            increment_attempts = max_attempts is None or int(_row_value(row, "attempts", 6)) < max_attempts
+            event_id = _row_value(row, "event_id", 0)
+            claimed = conn.execute(
+                f"""
+                UPDATE event_outbox
                 SET status = 'running', lease_owner = ?,
-                    lease_generation = jobs.lease_generation + 1,
+                    lease_generation = lease_generation + 1,
                     lease_until = to_char(
                         (clock_timestamp() + (? * INTERVAL '1 second')) AT TIME ZONE 'UTC',
                         'YYYY-MM-DD HH24:MI:SS.MS'
                     ),
-                    attempts = jobs.attempts + 1, finished_at = NULL
-                FROM candidate
-                WHERE jobs.event_id = candidate.event_id
-                RETURNING jobs.event_id, jobs.topic, jobs.event_json, jobs.lease_owner,
-                          jobs.lease_generation, jobs.lease_until, jobs.attempts
+                    attempts = attempts {'+ 1' if increment_attempts else ''}, finished_at = NULL
+                WHERE event_id = ?
+                RETURNING event_id, topic, event_json, lease_owner,
+                          lease_generation, lease_until, attempts
                 """,
-                (worker_id, lease_seconds),
+                (worker_id, lease_seconds, event_id),
             ).fetchone()
-            return self._job_from_row(row) if row else None
+            return self._job_from_row(claimed, finalize_only=not increment_attempts)
 
     def renew(self, job: Job, lease_seconds: float) -> bool:
         lease_seconds = max(0.1, float(lease_seconds))
@@ -218,7 +243,7 @@ class JobQueue:
                     )
                     WHERE event_id = ? AND status = 'running' AND lease_owner = ?
                       AND lease_generation = ?
-                      AND lease_until::timestamptz > clock_timestamp()
+                      AND lease_until::timestamp AT TIME ZONE 'UTC' > clock_timestamp()
                     """,
                     (lease_seconds, job.event_id, job.lease_owner, job.lease_generation),
                 )
@@ -244,7 +269,7 @@ class JobQueue:
                         to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.MS'),
                         lease_until = NULL, last_error = NULL
                     WHERE event_id = ? AND status = 'running' AND lease_owner = ?
-                      AND lease_generation = ? AND lease_until::timestamptz > clock_timestamp()
+                      AND lease_generation = ? AND lease_until::timestamp AT TIME ZONE 'UTC' > clock_timestamp()
                     """,
                     (job.event_id, job.lease_owner, job.lease_generation),
                 )
@@ -272,13 +297,13 @@ class JobQueue:
                     SET status = CASE WHEN attempts >= ? THEN 'failed' ELSE 'pending' END,
                         next_attempt_at = CASE WHEN attempts >= ? THEN NULL ELSE
                             to_char((clock_timestamp() + (? * INTERVAL '1 second')) AT TIME ZONE 'UTC',
-                                    'YYYY-MM-DD HH24:MI:SS.MS') END,
+                                    'YYYY-MM-DD HH24:MI:SS.MS') || '+00:00' END,
                         last_error = ?, lease_until = NULL,
                         finished_at = CASE WHEN attempts >= ? THEN
                             to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.MS')
                             ELSE NULL END
                     WHERE event_id = ? AND status = 'running' AND lease_owner = ?
-                      AND lease_generation = ? AND lease_until::timestamptz > clock_timestamp()
+                      AND lease_generation = ? AND lease_until::timestamp AT TIME ZONE 'UTC' > clock_timestamp()
                     """,
                     (max_attempts, max_attempts, backoff_seconds, safe_error, max_attempts,
                      job.event_id, job.lease_owner, job.lease_generation),

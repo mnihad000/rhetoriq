@@ -1,7 +1,7 @@
 # RhetoriQ Handoff - B2/B3 Completion
 
 > Historical handoff. The deployment branch is simplifying the original
-> Kafka/Flink/B5 platform for a Vercel/Railway/PostgreSQL production target.
+> broker/stream/B5 platform for a Vercel/Railway/PostgreSQL production target.
 > Kubernetes, EKS, Terraform, Helm, and ECR execution tooling has been removed
 > from this branch and remains only on the reference branch. See
 > [the current simplification plan](docs/DEPLOYMENT_SIMPLIFICATION.md),
@@ -11,12 +11,11 @@
 ## Current status
 
 - **B2 is complete.** SearXNG broad discovery, canonical retrieval, Federal Register primary-source research, provenance receipts, provider policy, retries, pagination, deduplication, rate limiting, and explicit fallback diagnostics are implemented.
-- **B3 is implemented with an immediate Kafka cutover.** The original six-topic
-  backbone has expanded to 12 primary topics with matching DLQs for B4/B5;
-  committed JSON Schemas, Apicurio compatibility, KRaft Compose, transactional
-  outbox, consumer ledgers, retries/DLQs, replay, Kafka-only investigation
-  dispatch, health/lag metrics, ordered stage events, and stable completion
-  events are present. There is no synchronous production fallback.
+- **The deployment branch now uses a PostgreSQL job queue.** Accepted work is
+  leased by one durable worker, direct document processing records canonical
+  state, and generation fencing prevents stale workers from committing. Domain
+  event envelopes remain useful journal records; they are not a requirement for
+  network transport. This implementation is not yet live-qualified.
 - **A1, A2, A3, and A4 remain complete by product decision.** A5 public launch evidence is still pending. B1 pgvector remains opt-in until a live investigation corpus is backfilled and compared before production enablement.
 - Do not re-open A3 unless requested. The project owner explicitly accepted the remaining 30-case curated-real-source corpus as future quality work, not a blocker.
 - The working tree was already dirty before A3. Preserve unrelated changes and do not reset/revert them.

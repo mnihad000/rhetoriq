@@ -113,16 +113,16 @@ def test_manifest_cas_and_rollback_validation(tmp_path):
     assert repo.manifest()["generation"]=="live"
 
 
-def test_processed_transaction_failure_has_no_partial_lineage(tmp_path,monkeypatch):
+def test_processed_transaction_failure_has_no_partial_canonical_or_research_write(tmp_path,monkeypatch):
     target=str(tmp_path/"state.db")
     handlers=EventHandlers(target)
     repo=ProjectionRepository(target)
-    event=ProcessedDocumentEvent.create(ProcessedDocumentPayload(document=doc(),processing=ProcessingReceipt(normalizer_version="b4-v1",raw_event_id="raw-1")),
+    event=ProcessedDocumentEvent.create(ProcessedDocumentPayload(document=doc(),run_id="run-transaction-test",processing=ProcessingReceipt(normalizer_version="b4-v1",raw_event_id="raw-1")),
                                        producer="test",correlation_id="test",partition_key="doc-1",event_id="processed-1")
-    monkeypatch.setattr("services.signal_repository.SignalRepository.project_processed",lambda *a,**k:(_ for _ in ()).throw(RuntimeError("crash")))
+    monkeypatch.setattr("services.research_repository.ResearchRepository.save_document",lambda *a,**k:(_ for _ in ()).throw(RuntimeError("crash")))
     with pytest.raises(RuntimeError):
         handlers.persist_processed_document(event)
     assert repo.current("document","doc-1") is None
     assert repo.events.pending()==[]
     with connect(target) as db:
-        assert db.execute("SELECT COUNT(*) AS n FROM processed_document_lineage").fetchone()["n"]==0
+        assert db.execute("SELECT COUNT(*) AS n FROM research_documents").fetchone()["n"]==0

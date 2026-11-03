@@ -11,9 +11,9 @@ origin and does not treat correlation as proof of coordination.
 ## Current architecture
 
 The `deployment` branch is the smaller research platform for a permanent
-Vercel/Railway deployment. The current runtime uses a PostgreSQL-backed job
-queue and one durable worker; the broad Kafka/Flink implementation remains on
-`further_dev` for historical reference.
+Vercel/Railway deployment. The current code path uses a PostgreSQL-backed job
+queue and one durable worker. The older broker/stream implementation is kept
+only in the reference branch and Git history.
 
 ```mermaid
 flowchart LR
@@ -32,7 +32,8 @@ flowchart LR
 
 The intended smaller deployment keeps the API, a durable Railway worker, and
 managed PostgreSQL. Direct document processing happens inside the worker;
-optional B5 stores remain isolated behind a separate overlay.
+optional B5 stores remain isolated behind a separate overlay. This path is
+implemented but has not yet been live-qualified on Vercel or Railway.
 
 ## What is implemented now
 

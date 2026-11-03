@@ -1,7 +1,7 @@
 """Offline repair/rebuild invariants; these are not live-store evidence."""
 from copy import deepcopy
 
-from events.b5_acceptance import build_seed_documents
+from tests.projection_fixtures import build_seed_documents
 from events.b5_ops import rebuild, reconcile
 from services.b5_graph import build_document_graph, build_investigation_graph
 from services.b5_repository import ProjectionRepository

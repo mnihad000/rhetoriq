@@ -21,7 +21,7 @@ def payload_hash(value: bytes | str | dict[str, Any] | EventEnvelope) -> str:
         semantic_hash = (payload.get("semantic_output_hash") if isinstance(payload, dict)
                          else getattr(payload, "semantic_output_hash", None))
         if semantic_hash:
-            # Flink replays preserve semantics while publication time changes.
+            # Recorded replays preserve semantics while publication time changes.
             raw = json.dumps(value.model_dump(mode="json", exclude={"produced_at"}),
                              sort_keys=True, separators=(",", ":")).encode("utf-8")
         else:
@@ -183,6 +183,17 @@ class EventStore:
                 """,
                 (_now().isoformat(), scoped_consumer, event_id),
             )
+
+    def consumption_completed(self, consumer_name: str, event: EventEnvelope) -> bool:
+        """Reconcile a crash after a durable handler result but before job ack."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_sha256, status FROM consumed_events WHERE consumer_name=? AND event_id=?",
+                (consumer_name, event.event_id),
+            ).fetchone()
+        if row is not None and row["payload_sha256"] != payload_hash(event):
+            raise ValueError("An event_id was redelivered with a different payload")
+        return bool(row and row["status"] == "completed")
 
     def fail_consumption(
         self,

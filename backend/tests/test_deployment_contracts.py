@@ -5,7 +5,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from api.health import readiness_report
-from events.flink_savepoint import create_savepoint
 from migrations import runner
 
 
@@ -76,6 +75,7 @@ def test_verify_mode_dispatches_without_apply(monkeypatch):
 def test_readiness_requires_internal_dependencies_only(monkeypatch):
     settings = SimpleNamespace(
         DATABASE_URL="postgresql://deployment.invalid/rhetoriq",
+        persistence_target="postgresql://deployment.invalid/rhetoriq",
         ENABLE_B5_RETRIEVAL=True,
         REDIS_URL="rediss://redis:6379/0",
         REDIS_PASSWORD="unused-test-value",
@@ -84,8 +84,8 @@ def test_readiness_requires_internal_dependencies_only(monkeypatch):
         B5_CACHE_MAX_BYTES=262144,
     )
 
-    class _Publisher:
-        def __init__(self, **_kwargs):
+    class _Queue:
+        def __init__(self, *_args, **_kwargs):
             pass
 
         def health(self):
@@ -98,28 +98,26 @@ def test_readiness_requires_internal_dependencies_only(monkeypatch):
             pass
 
     monkeypatch.setattr("migrations.runner.verify_migrations", lambda _url: None)
-    monkeypatch.setattr("services.kafka_runtime.KafkaEventPublisher", _Publisher)
-    monkeypatch.setattr("events.topics.check_topics", lambda: None)
+    monkeypatch.setattr("services.job_queue.JobQueue", _Queue)
     monkeypatch.setattr("events.b5_init.check", lambda: None)
     monkeypatch.setattr("services.b5_cache.B5Cache", _Cache)
 
     report = readiness_report(settings)
 
     assert report["status"] == "ready"
-    assert set(report["dependencies"]) == {"postgresql", "kafka", "topics_and_schemas", "b5"}
+    assert set(report["dependencies"]) == {"postgresql", "jobs", "b5"}
 
 
 def test_readiness_failure_is_sanitized(monkeypatch):
-    settings = SimpleNamespace(DATABASE_URL="bad", ENABLE_B5_RETRIEVAL=False)
+    settings = SimpleNamespace(DATABASE_URL="bad", persistence_target="bad", ENABLE_B5_RETRIEVAL=False)
     monkeypatch.setattr(
         "migrations.runner.verify_migrations",
         lambda _url: (_ for _ in ()).throw(RuntimeError("password=never-report-this")),
     )
     monkeypatch.setattr(
-        "services.kafka_runtime.KafkaEventPublisher",
-        lambda **_kwargs: SimpleNamespace(health=lambda: {"status": "ready"}),
+        "services.job_queue.JobQueue",
+        lambda *_args, **_kwargs: SimpleNamespace(health=lambda: {"status": "ready"}),
     )
-    monkeypatch.setattr("events.topics.check_topics", lambda: None)
 
     report = readiness_report(settings)
 
@@ -168,73 +166,3 @@ def test_b5_check_requires_initialized_generation(monkeypatch):
     b5_init.check()
 
     assert checked == [("elasticsearch", "live"), ("neo4j", "live")]
-
-
-def test_flink_savepoint_requires_completed_location(monkeypatch):
-    responses = iter(
-        [
-            SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"jobs": [{"jid": "job-1", "state": "RUNNING"}]}),
-            SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"request-id": "request-1"}),
-            SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"status": {"id": "IN_PROGRESS"}}),
-            SimpleNamespace(
-                raise_for_status=lambda: None,
-                json=lambda: {"status": {"id": "COMPLETED"}, "operation": {"location": "file:///savepoints/sp-1"}},
-            ),
-        ]
-    )
-
-    class _Client:
-        def __init__(self, **_kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return None
-
-        def get(self, _url):
-            return next(responses)
-
-        def post(self, _url, **_kwargs):
-            return next(responses)
-
-    monkeypatch.setattr("events.flink_savepoint.httpx.Client", _Client)
-    monkeypatch.setattr("events.flink_savepoint.time.sleep", lambda _seconds: None)
-
-    assert create_savepoint("http://flink", "file:///savepoints") == "file:///savepoints/sp-1"
-
-
-def test_flink_connector_source_pin_matches_runtime_evidence():
-    runtime_lock = json.loads(
-        (REPOSITORY_ROOT / "infra/b5/runtime-lock.json").read_text(encoding="utf-8")
-    )
-    dockerfile = (REPOSITORY_ROOT / "infra/flink/Dockerfile").read_text(encoding="utf-8")
-    compatibility = (
-        REPOSITORY_ROOT / "infra/flink/connector-compatibility.txt"
-    ).read_text(encoding="utf-8")
-
-    commit = runtime_lock["flink_kafka_connector_source_commit"]
-    checksum = runtime_lock["flink_kafka_connector_source_sha256"]
-    assert f"ARG KAFKA_CONNECTOR_SOURCE_COMMIT={commit}" in dockerfile
-    assert f"ARG KAFKA_CONNECTOR_SOURCE_SHA256={checksum}" in dockerfile
-    assert commit in compatibility
-    assert checksum in compatibility
-
-
-def test_flink_job_uses_the_pinned_flink_2_3_checkpoint_api():
-    source = (REPOSITORY_ROOT / "backend/flink/job.py").read_text(encoding="utf-8")
-
-    assert "ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION" in source
-    assert ".set_externalized_checkpoint_retention(" in source
-    assert "runtime_configuration.set_string(" in source
-    assert '"execution.checkpointing.dir"' in source
-    assert ".set_checkpoint_storage(" not in source
-    assert ".enable_externalized_checkpoints(" not in source
-    assert "ExternalizedCheckpointCleanup" not in source
-    assert "StateTtlConfig.new_builder(Time.days(14))" in source
-    assert "StateTtlConfig.new_builder(Duration.of_days(14))" not in source
-
-    compose = (REPOSITORY_ROOT / "compose.yml").read_text(encoding="utf-8")
-    assert "execution.checkpointing.dir: file:///opt/flink/checkpoints" in compose
-    assert "state.checkpoints.dir:" not in compose

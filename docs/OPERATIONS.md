@@ -31,6 +31,13 @@ A running process or heartbeat does not prove useful work completed. Inspect
 queue age, attempts, failures, lease ownership, receipt state, and terminal
 investigation status.
 
+For a legacy cutover, stop all old publisher/consumer/stream workers first,
+take a PostgreSQL backup, and inspect pending, running, failed, and historical
+published outbox rows plus active enrichment jobs. Preserve the append-only
+SQL migration history. Migration 011 can requeue historical published rows;
+replay depends on the consumed-event ledger and idempotent writes. Never
+downgrade migrations or delete queue rows as a shortcut for recovery.
+
 ## Inspection and recovery
 
 ```powershell

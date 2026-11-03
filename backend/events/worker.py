@@ -11,45 +11,12 @@ from config import get_settings
 from models.events import validate_event
 from services.event_handlers import EventHandlers
 from services.event_store import EventStore
-from services.job_queue import JobQueue, LeaseLostError
+from services.job_queue import JobQueue, LeaseLostError, _safe_error
 
 logger = logging.getLogger(__name__)
 
-# Logical role/topic metadata retained for operational tooling and compatibility
-# tests. Dispatch itself is database-backed and imports no transport client.
-TOPICS_BY_ROLE = {
-    "b5-elasticsearch": ("corpus.projections.v1",),
-    "b5-neo4j": ("corpus.projections.v1", "investigation.projections.v1"),
-    "b5-minilm": ("corpus.projections.v1",),
-    "documents": ("documents.processed.v1",),
-    "signals": ("signals.detected.v1",),
-    "investigations": ("investigations.requested.v1",),
-    "projections": ("investigations.stage-events.v1", "investigations.completed.v1",
-                    "pipeline.evaluated.v1", "documents.late.v1"),
-    "all": ("documents.processed.v1", "signals.detected.v1", "investigations.requested.v1",
-            "investigations.stage-events.v1", "investigations.completed.v1",
-            "pipeline.evaluated.v1", "documents.late.v1"),
-}
-
-
 def _redact(message: str) -> str:
-    import re
-    value = re.sub(r"(?i)\bBearer\s+[^\s,;\"']+", "Bearer <redacted>", message)
-    return re.sub(r"(?i)(password|secret|token|authorization|api[_-]?key)\s*[=:]\s*[^\s,;]+",
-                  r"\1=<redacted>", value)[:500]
-
-
-def _is_permanent(error: Exception) -> bool:
-    # Avoid importing the removed Kafka runtime merely to identify its legacy
-    # schema exception. The stable class name remains compatible for callers.
-    if type(error).__name__ == "SchemaRegistryError":
-        return True
-    try:
-        from jsonschema import ValidationError as JsonSchemaValidationError
-        from pydantic import ValidationError as PydanticValidationError
-        return isinstance(error, (JsonSchemaValidationError, PydanticValidationError, ValueError))
-    except ImportError:  # pragma: no cover
-        return isinstance(error, ValueError)
+    return _safe_error(message)
 
 
 class EventProcessor:
@@ -106,7 +73,8 @@ class DatabaseEventWorker:
 
     def run_once(self) -> bool:
         lease_seconds = float(getattr(self.settings, "JOB_LEASE_SECONDS", 60.0))
-        job = self.queue.claim(self.worker_id, lease_seconds)
+        max_attempts = max(1, int(getattr(self.settings, "JOB_MAX_ATTEMPTS", 3)))
+        job = self.queue.claim(self.worker_id, lease_seconds, max_attempts=max_attempts)
         if job is None:
             return False
         lost = threading.Event()
@@ -126,6 +94,22 @@ class DatabaseEventWorker:
         heartbeat = threading.Thread(target=renew_loop, name=f"lease-{job.event_id}", daemon=True)
         heartbeat.start()
         try:
+            if job.finalize_only:
+                event = validate_event(job.topic, job.event_json)
+                consumer_name, _handler = self.processor.handlers.handler_for(job.topic)
+                with self.queue.fenced(job):
+                    completed = self.store.consumption_completed(consumer_name, event)
+                if completed:
+                    return self.queue.complete(job)
+                # An expired/crashed claim at the retry limit is leased for
+                # this small reconciliation step.  Never dispatch its event
+                # handler again; terminal run state is fenced before the job
+                # row is marked failed.
+                if not self._finish_investigation_failure(job, RuntimeError("job retry limit exhausted")):
+                    logger.error("could not fence terminal failure for exhausted job %s", job.event_id)
+                    return False
+                self.queue.fail(job, "job retry limit exhausted", max_attempts, 0)
+                return False
             with self.queue.fenced(job):
                 self.processor.process(job.topic, job.event_json)
         except LeaseLostError:
@@ -133,10 +117,12 @@ class DatabaseEventWorker:
             return False
         except Exception as exc:
             if job.attempts >= int(getattr(self.settings, "JOB_MAX_ATTEMPTS", 3)):
-                self._finish_investigation_failure(job, exc)
+                if not self._finish_investigation_failure(job, exc):
+                    logger.error("could not fence terminal failure for exhausted job %s", job.event_id)
+                    return False
             self.queue.fail(
                 job, _redact(str(exc)),
-                int(getattr(self.settings, "JOB_MAX_ATTEMPTS", 3)),
+                max_attempts,
                 float(getattr(self.settings, "JOB_RETRY_BACKOFF_SECONDS", 1.0)),
             )
             return False
@@ -147,25 +133,33 @@ class DatabaseEventWorker:
             return False
         return self.queue.complete(job)
 
-    def _finish_investigation_failure(self, job, error: Exception) -> None:
+    def _finish_investigation_failure(self, job, error: Exception) -> bool:
         if job.topic != "investigations.requested.v1":
-            return
+            return True
         try:
             payload = json.loads(job.event_json).get("payload", {})
             run_id = payload.get("run_id")
             repository = getattr(self.processor.handlers, "research", None)
             if not run_id or repository is None:
-                return
+                # A malformed investigation job has no run to fence.  It can
+                # still be failed safely as a queue record.
+                return True
             with self.queue.fenced(job):
+                run = repository.get_run(run_id)
+                if run is not None and run.status not in {"queued", "running"}:
+                    return True
                 repository.finish_run(
                     run_id, status="failed", terminal_decision="failed",
                     warnings=[_redact(str(error))], event_type="run.failed",
                     payload={"status": "failed", "error": _redact(str(error))},
                 )
+            return True
         except LeaseLostError:
             logger.warning("lease lost before terminal failure for job %s", job.event_id)
+            return False
         except Exception:
             logger.exception("could not record terminal investigation failure for %s", job.event_id)
+            return False
 
     def run_forever(self) -> None:
         if threading.current_thread() is threading.main_thread():

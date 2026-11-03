@@ -1,6 +1,7 @@
 # RhetoriQ: Production Deployment Simplification
 
-Status: Active on the `deployment` branch; first infrastructure-removal pass complete.
+Status: Active on the `deployment` branch; the base runtime simplification is
+implemented in code but not live-qualified.
 Target branch: `deployment`.
 Deployment target: Vercel frontend, Railway API and worker, managed PostgreSQL.
 
@@ -144,10 +145,11 @@ Keep implemented, tested, deployed, and measured claims distinct.
 ## Working Sequence
 
 1. Preserve the broad implementation on `further_dev` (complete).
-2. Retire Kubernetes/AWS deployment artifacts (complete on `deployment`).
-3. Resolve the open decisions and prepare the implementation plan.
-4. Replace execution and document processing dependencies.
-5. Consolidate retrieval and remove obsolete infrastructure.
-6. Add public access controls and operating safeguards.
-7. Deploy and record acceptance evidence.
-8. Gather user feedback and iterate.
+2. Retire Kubernetes/AWS and broker/stream deployment artifacts (complete on
+   `deployment`).
+3. Qualify database-job execution, direct processing, retries, and fencing.
+4. Consolidate retrieval and decide whether Redis or other B5 projections are
+   justified.
+5. Add public access controls and operating safeguards.
+6. Deploy and record acceptance evidence.
+7. Gather user feedback and iterate.

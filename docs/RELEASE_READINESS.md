@@ -9,8 +9,9 @@ deployment is complete.
 - The branch is `deployment`.
 - Kubernetes, Helm, EKS Terraform, cluster PKI, and ECR publishing artifacts
   were removed here and remain on `further_dev`.
-- The current runtime still requires Kafka, Apicurio, Flink, SearXNG, the
-  outbox publisher, and role-scoped workers.
+- The current code path uses a PostgreSQL-backed job queue, direct worker
+  processing, and SearXNG for local search. Optional B5 stores remain an
+  unqualified overlay.
 - No Vercel or Railway deployment has been qualified from this branch.
 
 ## Historical evidence
@@ -20,26 +21,18 @@ as proof of the smaller deployment. They remain useful regression context:
 
 - Backend, frontend, Compose, schema, and offline infrastructure checks were
   recorded in the previous release candidate.
-- A recorded-provider Kafka/Flink smoke delivered 20 of 20 documents with
-  completed checkpoints.
+- Earlier broker/stream smoke results are historical and are not evidence for
+  the smaller deployment.
 
 These facts do not prove a Vercel/Railway deployment, PostgreSQL queue, public
 authorization, or the replacement search path.
 
 ## Branch verification
 
-The working tree on `deployment` passed the following checks after infrastructure
-removal and retirement of the Kubernetes acceptance option:
-
-- Offline backend suite: 370 passed, 10 skipped, and 18 integration tests deselected.
-- Focused deployment and B5 acceptance tests: 18 passed.
-- Base, B5, and disposable B5 acceptance Compose profiles rendered.
-- Event-schema reproduction and CI YAML parsing passed.
-- All 39 local Markdown file links resolved.
-
-The offline suite used a fresh isolated temporary directory because the existing
-Windows pytest temporary-directory location was inaccessible. No live deployment
-or real-service integration qualification was performed for this pass.
+Do not copy historical test counts into a new release record. The next release
+record must name the exact commit, commands, environment, and results after the
+database-job migration settles. No live deployment or real-service integration
+qualification has been performed for this transition.
 
 ## Required gates for this branch
 

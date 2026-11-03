@@ -1,6 +1,6 @@
 """Use actual durable snapshots to check stopped-worker withdrawals."""
 from config import Settings
-from events.b5_acceptance import build_seed_documents,persist_acceptance_investigation
+from tests.projection_fixtures import build_seed_documents,persist_acceptance_investigation
 from services.b5_repository import ProjectionRepository
 from services.b5_search import SearchService
 from services.b5_cache import B5Cache

@@ -114,8 +114,8 @@ class ResearchRepository:
         return self._row_to_run(row) if row else None
 
     def list_resumable_runs(self) -> list[ResearchRunSummary]:
-        now = _now().isoformat()
         with self._connect() as conn:
+            now = self._database_now(conn).isoformat()
             rows = conn.execute(
                 """
                 SELECT * FROM research_runs
@@ -128,9 +128,13 @@ class ResearchRepository:
         return [self._row_to_run(row) for row in rows]
 
     def claim_run(self, run_id: str, worker_id: str, lease_seconds: int) -> bool:
-        now = _now()
-        lease_until = (now + timedelta(seconds=lease_seconds)).isoformat()
+        from services.job_queue import current_job
+        job = current_job()
+        owns_job = bool(job and job.topic == "investigations.requested.v1" and
+                        json.loads(job.event_json).get("payload", {}).get("run_id") == run_id)
         with self._connect() as conn:
+            now = self._database_now(conn)
+            lease_until = (now + timedelta(seconds=lease_seconds)).isoformat()
             conn.execute("BEGIN IMMEDIATE")
             cursor = conn.execute(
                 """
@@ -140,25 +144,32 @@ class ResearchRepository:
                 WHERE run_id = ? AND status IN ('queued', 'running') AND (
                     status = 'queued' OR
                     (status = 'running' AND (lease_until IS NULL OR lease_until < ?)) OR
-                    worker_id = ?
+                    worker_id = ? OR ? = 1
                 )
                 """,
-                (worker_id, lease_until, now.isoformat(), now.isoformat(), run_id, now.isoformat(), worker_id),
+                (worker_id, lease_until, now.isoformat(), now.isoformat(), run_id, now.isoformat(), worker_id, int(owns_job)),
             )
         if cursor.rowcount:
             self.append_event(run_id, "run.started", {"worker_id": worker_id})
         return bool(cursor.rowcount)
 
-    def renew_lease(self, run_id: str, worker_id: str, lease_seconds: int) -> None:
-        now = _now()
+    def _database_now(self, conn) -> datetime:
+        query = ("SELECT CURRENT_TIMESTAMP AS now" if is_postgres_database(self.db_path) else
+                 "SELECT strftime('%Y-%m-%dT%H:%M:%f+00:00','now') AS now")
+        value = conn.execute(query).fetchone()["now"]
+        return (datetime.fromisoformat(value) if isinstance(value, str) else value).astimezone(timezone.utc)
+
+    def renew_lease(self, run_id: str, worker_id: str, lease_seconds: int) -> bool:
         with self._connect() as conn:
-            conn.execute(
+            now = self._database_now(conn)
+            cursor = conn.execute(
                 """
                 UPDATE research_runs SET lease_until = ?, updated_at = ?
-                WHERE run_id = ? AND worker_id = ? AND status = 'running'
+                WHERE run_id = ? AND worker_id = ? AND status = 'running' AND lease_until > ?
                 """,
-                ((now + timedelta(seconds=lease_seconds)).isoformat(), now.isoformat(), run_id, worker_id),
+                ((now + timedelta(seconds=lease_seconds)).isoformat(), now.isoformat(), run_id, worker_id, now.isoformat()),
             )
+        return cursor.rowcount == 1
 
     def heartbeat_worker(self, worker_id: str, mode: str, active_run_id: str | None = None) -> None:
         with self._connect() as conn:
